@@ -27,7 +27,7 @@ UA = (
 )
 
 PIN_LINK_RE = re.compile(r"/pin/(\d+)/?")
-USER_BOARDS_RE = re.compile(r"^https?://(?:www|br)\\.pinterest\\.com/([^/]+)/?$", re.I)
+USER_BOARDS_RE = re.compile(r"^https?://(?:www|br)\.pinterest\.com/([^/]+)/?$", re.I)
 
 
 # ---------- Tipos ----------
