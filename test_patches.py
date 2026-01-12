@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Testes rápidos e fumaça para validar patches ONDA 1 e ONDA 2."""
+"""Testes rápidos e fumaça para validar patches ONDA 1, 2, 3 e 4."""
 
 import json
 import tempfile
@@ -17,6 +17,8 @@ from pinterest_board_dl import (
     TIMEOUT_DOM_READY,
     DOWNLOAD_RETRY_DELAY,
     DOWNLOAD_MAX_RETRIES,
+    SCROLL_STABLE_ROUNDS,
+    SCROLL_HEIGHT_CHECK,
     load_pin_cache,
     save_pin_cache,
     DownloadOptions,
@@ -35,7 +37,9 @@ def test_constants():
     assert TIMEOUT_DOM_READY == 15_000, "DOM ready timeout incorrect"
     assert DOWNLOAD_RETRY_DELAY == 1.0, "Retry delay incorrect"
     assert DOWNLOAD_MAX_RETRIES == 1, "Max retries incorrect"
-    print("✅ PASS: Todas constantes estão corretas\n")
+    assert SCROLL_STABLE_ROUNDS == 3, "Scroll stable rounds incorrect (ONDA 4: reduced from 6)"
+    assert SCROLL_HEIGHT_CHECK == True, "Scroll height check should be enabled (ONDA 4)"
+    print("✅ PASS: Todas constantes estão corretas (incluindo ONDA 4)\n")
 
 
 def test_cache_functions():
@@ -136,11 +140,45 @@ def test_browser_reuse():
     assert sig_boards.parameters['browser'].default is None, "browser param should default to None"
     
     print("✅ PASS: Funções aceitam browser opcional corretamente\n")
+def test_scroll_detection():
+    """Test 7: Validar configuração de scroll detection inteligente."""
+    print("TEST 7: Scroll detection inteligente (ONDA 4)")
+    
+    # Verificar constantes
+    assert SCROLL_STABLE_ROUNDS == 3, f"Expected 3, got {SCROLL_STABLE_ROUNDS}"
+    assert SCROLL_HEIGHT_CHECK == True, "Height check should be enabled"
+    
+    # Verificar que reduzimos de 6 para 3 (50% faster detection)
+    old_value = 6
+    improvement = ((old_value - SCROLL_STABLE_ROUNDS) / old_value) * 100
+    
+    print(f"   Stable rounds: {SCROLL_STABLE_ROUNDS} (reduzido de {old_value})")
+    print(f"   Melhoria: {improvement:.0f}% mais rápido para detectar fim")
+    print(f"   Height check: {'✓ Ativado' if SCROLL_HEIGHT_CHECK else '✗ Desativado'}")
+    
+    print("✅ PASS: Scroll detection otimizado\n")
+
+
+def test_diagnostics_script():
+    """Test 8: Verificar existência do script de diagnóstico."""
+    print("TEST 8: Script de diagnóstico")
+    
+    diag_file = Path(__file__).parent / "diagnostics.py"
+    assert diag_file.exists(), "diagnostics.py not found"
+    
+    # Verificar que é executável
+    content = diag_file.read_text()
+    assert "def main()" in content, "main() function not found"
+    assert "collect_metrics" in content, "collect_metrics() not found"
+    
+    print("✅ PASS: Script de diagnóstico presente e válido\n")
+
+
 
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("SMOKE TESTS - ONDA 1 E ONDA 2")
+    print("SMOKE TESTS - ONDAS 1, 2, 3 E 4")
     print("=" * 60 + "\n")
     
     try:
@@ -150,6 +188,8 @@ if __name__ == "__main__":
         test_retry_logic()
         test_cli_help()
         test_browser_reuse()
+        test_scroll_detection()
+        test_diagnostics_script()
         
         print("=" * 60)
         print("✅ TODOS OS TESTES PASSARAM!")

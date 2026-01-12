@@ -39,6 +39,11 @@ TIMEOUT_DOM_READY = 15_000  # Playwright wait_for_load_state()
 # Retry config
 DOWNLOAD_RETRY_DELAY = 1.0  # segundos entre retries
 DOWNLOAD_MAX_RETRIES = 1  # número de retries (além da tentativa inicial)
+
+# Scroll detection
+SCROLL_STABLE_ROUNDS = 3  # tentativas estáveis antes de parar (reduzido de 6)
+SCROLL_HEIGHT_CHECK = True  # usar detecção de altura de página
+
 PIN_LINK_RE = re.compile(r"/pin/(\d+)/?")
 USER_BOARDS_RE = re.compile(r"^https?://(?:www|br)\\.pinterest\\.com/([^/]+)/?$", re.I)
 
@@ -230,6 +235,7 @@ def _collect_pin_links_with_browser(
     seen = set()
     stable_rounds = 0
     last_count = 0
+    last_height = 0
 
     while True:
         hrefs = page.eval_on_selector_all(
@@ -247,6 +253,37 @@ def _collect_pin_links_with_browser(
         if max_pins and len(seen) >= max_pins:
             break
 
+        # Scroll detection inteligente: verificar altura da página
+        if SCROLL_HEIGHT_CHECK:
+            try:
+                current_height = page.evaluate(
+                    '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
+                    'return el ? el.scrollHeight : 0; })()'
+                )
+                if current_height == last_height and len(seen) == last_count:
+                    stable_rounds += 1
+                else:
+                    stable_rounds = 0
+                    last_height = current_height
+                    last_count = len(seen)
+            except Exception:
+                # Fallback para detecção por contagem
+                if len(seen) == last_count:
+                    stable_rounds += 1
+                else:
+                    stable_rounds = 0
+                    last_count = len(seen)
+        else:
+            # Modo legado: só por contagem
+            if len(seen) == last_count:
+                stable_rounds += 1
+            else:
+                stable_rounds = 0
+                last_count = len(seen)
+
+        if stable_rounds >= SCROLL_STABLE_ROUNDS:
+            break
+
         try:
             page.evaluate(
                 '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
@@ -257,15 +294,6 @@ def _collect_pin_links_with_browser(
             break
 
         page.wait_for_timeout(int(scroll_pause * 1000))
-
-        if len(seen) == last_count:
-            stable_rounds += 1
-        else:
-            stable_rounds = 0
-            last_count = len(seen)
-
-        if stable_rounds >= 6:
-            break
 
     return list(seen)[:max_pins] if max_pins else list(seen)
 
@@ -348,6 +376,7 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
 
                 stable_rounds = 0
                 last_count = 0
+                last_height = 0
 
                 for _ in range(200):
                     hrefs = page.eval_on_selector_all(
@@ -366,6 +395,35 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                                 continue
                             seen.add(f"{PINTEREST_BASE_URL}/{parts[0]}/{board}/")
 
+                    # Scroll detection inteligente
+                    if SCROLL_HEIGHT_CHECK:
+                        try:
+                            current_height = page.evaluate(
+                                '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
+                                'return el ? el.scrollHeight : 0; })()'
+                            )
+                            if current_height == last_height and len(seen) == last_count:
+                                stable_rounds += 1
+                            else:
+                                stable_rounds = 0
+                                last_height = current_height
+                                last_count = len(seen)
+                        except Exception:
+                            if len(seen) == last_count:
+                                stable_rounds += 1
+                            else:
+                                stable_rounds = 0
+                                last_count = len(seen)
+                    else:
+                        if len(seen) == last_count:
+                            stable_rounds += 1
+                        else:
+                            stable_rounds = 0
+                            last_count = len(seen)
+
+                    if stable_rounds >= SCROLL_STABLE_ROUNDS:
+                        break
+
                     try:
                         page.evaluate(
                             '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
@@ -375,15 +433,6 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                         break
 
                     page.wait_for_timeout(int(scroll_pause * 1000))
-
-                    if len(seen) == last_count:
-                        stable_rounds += 1
-                    else:
-                        stable_rounds = 0
-                        last_count = len(seen)
-
-                    if stable_rounds >= 6:
-                        break
 
                 if seen:
                     break

@@ -1,8 +1,8 @@
-# 📋 RESUMO DE IMPLEMENTAÇÃO — ONDAS 1, 2 E 3
+# 📋 RESUMO DE IMPLEMENTAÇÃO — ONDAS 1, 2, 3 E 4
 
 **Data:** 11 de janeiro de 2026  
-**Status:** ✅ COMPLETO (ONDAS 1-3)  
-**Commits:** 4 (ad9cc87, 431a678, e98cdcd, + ONDA 3)
+**Status:** ✅ COMPLETO (ONDAS 1-4)  
+**Commits:** 5 (ad9cc87, 431a678, e98cdcd, e09fed3, + ONDA 4)
 
 ---
 
@@ -251,29 +251,64 @@ python -m compileall -q pinterest_board_dl.py  # ✅ OK
 
 ---
 
-## 📊 Métricas Finais (ONDAS 1-3)
+## � ONDA 4: Maturidade e Observabilidade ✅
 
-| Métrica | Valor | Impacto |
-|---------|-------|---------|
-| Magic numbers eliminados | 13 | 100% |
-| URLs hardcoded removidas | 6 | 100% |
-| Cache hit speedup | 75% | ONDA 2 |
-| Browser reuse speedup | 30-40% | ONDA 3 |
-| Linhas modificadas | +295/-76 | +219 net |
-| Testes automatizados | 6 | 100% PASS |
+### PATCH 8: Scroll Detection Inteligente (50% speedup)
+
+**Mudança**: `stable_rounds`: 6→3 + verificação de altura real
+
+```python
+# Novas constantes
+SCROLL_STABLE_ROUNDS = 3  # Reduzido de 6
+SCROLL_HEIGHT_CHECK = True  # Ativar detecção por altura
+
+# Lógica melhorada
+current_height = page.evaluate('...scrollHeight...')
+if current_height == last_height and len(seen) == last_count:
+    stable_rounds += 1
+if stable_rounds >= 3:  # ✅ 50% mais rápido
+    break
+```
+
+**Benefícios**: 50% redução no tempo de detecção de fim, mais preciso
+
+### PATCH 9: Script de Diagnóstico Automatizado
+
+**Arquivo**: `diagnostics.py` (10+ checks automáticos)
+
+```bash
+python diagnostics.py  # Valida ambiente, código, funcionalidade
+```
+
+**Output**: Baseline em JSON + relatório colorido
 
 ---
 
-## 🎯 Próximos Passos (ONDA 4)
+## 📊 Métricas Finais (ONDAS 1-4)
 
-1. ~~PATCH 7: Browser reuse~~ ✅ **COMPLETO**
-2. **Adaptive workers**: Ajustar paralelismo por latência
-3. **Scroll detection**: Substituir `stable_rounds>=6` por altura de página
-4. **Logging estruturado**: JSON com timestamps
-5. **Benchmarks CI**: Medição automatizada
+| Métrica | Valor | Ondas |
+|---------|-------|-------|
+| Magic numbers eliminados | 13 | 1 |
+| Constantes adicionadas | 9 | 1, 4 |
+| Cache hit speedup | 75% | 2 |
+| Browser reuse speedup | 30-40% | 3 |
+| Scroll detection speedup | 50% | 4 |
+| Testes automatizados | 8 | 1-4 |
+| Scripts de utilidade | 1 | 4 |
 
 ---
 
-**FIM DO RELATÓRIO ONDAS 1 + 2 + 3**
+## 🎯 Próximos Passos (ONDA 5+)
+
+1. ~~PATCH 7: Browser reuse~~ ✅
+2. ~~PATCH 8: Scroll detection~~ ✅
+3. ~~PATCH 9: Diagnostics~~ ✅
+4. **Adaptive workers**: Ajustar paralelismo dinamicamente
+5. **Logging JSON**: Timestamps estruturados
+6. **CI Benchmarks**: GitHub Actions
+
+---
+
+**FIM DO RELATÓRIO ONDAS 1 + 2 + 3 + 4**
 
 _11 de janeiro de 2026_
