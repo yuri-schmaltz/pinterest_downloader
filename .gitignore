@@ -51,6 +51,10 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Pinterest Cache
+.pinterest_cache.json
+pins/
+
 # Translations
 *.mo
 *.pot

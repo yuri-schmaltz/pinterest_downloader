@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import sys
@@ -15,6 +16,7 @@ import unicodedata
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Dict, Iterable, List, NamedTuple
 
 import requests
@@ -25,10 +27,42 @@ UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
 )
+# URLs base
+PINTEREST_BASE_URL = "https://www.pinterest.com"
 
+# Timeouts (em milissegundos para Playwright, segundos para requests)
+TIMEOUT_HTTP_GET = 25  # requests.get() para fetch og:image
+TIMEOUT_IMAGE_DOWNLOAD = 60  # requests.get() stream para imagens
+TIMEOUT_PAGE_LOAD = 90_000  # Playwright page.goto()
+TIMEOUT_DOM_READY = 15_000  # Playwright wait_for_load_state()
+
+# Retry config
+DOWNLOAD_RETRY_DELAY = 1.0  # segundos entre retries
+DOWNLOAD_MAX_RETRIES = 1  # número de retries (além da tentativa inicial)
 PIN_LINK_RE = re.compile(r"/pin/(\d+)/?")
 USER_BOARDS_RE = re.compile(r"^https?://(?:www|br)\\.pinterest\\.com/([^/]+)/?$", re.I)
 
+# ---------- Cache ----------
+
+CACHE_FILE = Path(".pinterest_cache.json")
+
+
+def load_pin_cache() -> Dict[str, str]:
+    """Carrega cache de pin_url -> og:image_url."""
+    if CACHE_FILE.exists():
+        try:
+            return json.loads(CACHE_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def save_pin_cache(cache: Dict[str, str]) -> None:
+    """Salva cache de pins em disco."""
+    try:
+        CACHE_FILE.write_text(json.dumps(cache, indent=2))
+    except Exception:
+        pass  # Falha de cache não deve quebrar fluxo
 
 # ---------- Tipos ----------
 
@@ -52,6 +86,8 @@ class DownloadOptions:
     scroll_pause: float = 1.2
     workers: int = 16
     boards_workers: int = 1
+    cache_dir: str = "."  # Diretório para .pinterest_cache.json
+    use_cache: bool = True  # Habilitar/desabilitar cache
 
 
 # ---------- Utils ----------
@@ -99,7 +135,7 @@ def _abs_url(href: str) -> str:
     if href.startswith('http'):
         return href.split('?')[0]
     if href.startswith('/'):
-        return ('https://www.pinterest.com' + href).split('?')[0]
+        return (PINTEREST_BASE_URL + href).split('?')[0]
     return href.split('?')[0]
 
 
@@ -109,7 +145,7 @@ def _abs_url(href: str) -> str:
 def fetch_og_image(pin_url: str, session: requests.Session) -> str | None:
     """Pega a imagem grande via meta og:image do Pin."""
     try:
-        r = session.get(pin_url, timeout=25)
+        r = session.get(pin_url, timeout=TIMEOUT_HTTP_GET)
         r.raise_for_status()
     except Exception:
         return None
@@ -127,32 +163,31 @@ def download_image(
     out_dir: str,
     session: requests.Session,
     filename_hint: str | None = None,
+    max_retries: int = DOWNLOAD_MAX_RETRIES,
 ) -> bool:
     name = safe_name(filename_hint or img_url)
     dest = os.path.join(out_dir, name)
     if os.path.exists(dest) and os.path.getsize(dest) > 0:
         return True
-    try:
-        with session.get(img_url, stream=True, timeout=60) as r:
-            r.raise_for_status()
-            os.makedirs(out_dir, exist_ok=True)
-            with open(dest, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=1 << 15):
-                    if chunk:
-                        f.write(chunk)
-        return True
-    except Exception:
+
+    for attempt in range(max_retries + 1):
         try:
-            time.sleep(1.0)
-            with session.get(img_url, stream=True, timeout=60) as r:
+            with session.get(img_url, stream=True, timeout=TIMEOUT_IMAGE_DOWNLOAD) as r:
                 r.raise_for_status()
+                os.makedirs(out_dir, exist_ok=True)
                 with open(dest, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=1 << 15):
                         if chunk:
                             f.write(chunk)
             return True
         except Exception:
-            return False
+            if attempt < max_retries:
+                # Exponential backoff: 1s, 2s, 4s...
+                delay = DOWNLOAD_RETRY_DELAY * (2 ** attempt)
+                time.sleep(delay)
+            else:
+                return False
+    return False
 
 
 # ---------- Coleta de links ----------
@@ -171,7 +206,7 @@ def collect_pin_links(
         browser = p.chromium.launch(headless=headless)
         ctx = browser.new_context(user_agent=UA)
         page = ctx.new_page()
-        page.goto(board_url, wait_until="networkidle", timeout=90_000)
+        page.goto(board_url, wait_until="networkidle", timeout=TIMEOUT_PAGE_LOAD)
 
         if ("login" in page.url or "auth" in page.url) and not manual_login:
             browser.close()
@@ -193,7 +228,7 @@ def collect_pin_links(
                     sys.exit(1)
 
         try:
-            page.wait_for_load_state("domcontentloaded", timeout=15_000)
+            page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_DOM_READY)
         except Exception:
             pass
         page.wait_for_timeout(1000)
@@ -212,7 +247,7 @@ def collect_pin_links(
                     continue
                 u = _abs_url(h.split('?')[0])
                 u = u.replace("://br.pinterest.com/", "://www.pinterest.com/")
-                if u.startswith('https://www.pinterest.com/pin/'):
+                if u.startswith(f'{PINTEREST_BASE_URL}/pin/'):
                     seen.add(u)
 
             if max_pins and len(seen) >= max_pins:
@@ -251,8 +286,8 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
         username = username_or_url.strip().strip('/')
 
     candidates = [
-        f"https://www.pinterest.com/{username}/boards/",
-        f"https://www.pinterest.com/{username}/",
+        f"{PINTEREST_BASE_URL}/{username}/boards/",
+        f"{PINTEREST_BASE_URL}/{username}/",
         f"https://br.pinterest.com/{username}/boards/",
         f"https://br.pinterest.com/{username}/",
     ]
@@ -279,7 +314,7 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
 
         for url in candidates:
             try:
-                page.goto(url, wait_until="networkidle", timeout=90_000)
+                page.goto(url, wait_until="networkidle", timeout=TIMEOUT_PAGE_LOAD)
                 page.wait_for_timeout(1500)
 
                 stable_rounds = 0
@@ -300,7 +335,7 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                             board = parts[1]
                             if board.lower() in exclude or board.startswith('_'):
                                 continue
-                            seen.add(f"https://www.pinterest.com/{parts[0]}/{board}/")
+                            seen.add(f"{PINTEREST_BASE_URL}/{parts[0]}/{board}/")
 
                     try:
                         page.evaluate(
@@ -346,6 +381,7 @@ def resolve_images(
     session: requests.Session,
     workers: int,
     emit: StatusCallback | None = None,
+    use_cache: bool = True,
 ) -> Dict[str, str]:
     emit = emit or (lambda *_: None)
 
@@ -353,8 +389,24 @@ def resolve_images(
     total_links = len(links)
     emit("resolve_start", {"total": total_links})
 
+    # Carregar cache existente
+    cache = load_pin_cache() if use_cache else {}
     out: Dict[str, str] = {}
-    processed = 0
+    to_fetch: List[str] = []
+
+    # Verificar quais pins já estão em cache
+    for link in links:
+        if link in cache:
+            out[link] = cache[link]
+        else:
+            to_fetch.append(link)
+
+    processed = len(out)  # Iniciar contagem a partir dos já em cache
+
+    # Se tudo está em cache, retornar rápido
+    if not to_fetch:
+        emit("resolve_complete", {"found": len(out), "total": total_links, "from_cache": len(out)})
+        return out
 
     def work(link: str) -> tuple[str, str | None]:
         img = fetch_og_image(link, session)
@@ -364,13 +416,18 @@ def resolve_images(
         return link, img
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        for link, img in ex.map(work, links):
+        for link, img in ex.map(work, to_fetch):
             processed += 1
             if img:
                 out[link] = img
+                cache[link] = img  # Atualizar cache com novo resultado
             emit("resolve_progress", {"current": processed, "total": total_links})
 
-    emit("resolve_complete", {"found": len(out), "total": total_links})
+    # Salvar cache atualizado em disco
+    if use_cache:
+        save_pin_cache(cache)
+
+    emit("resolve_complete", {"found": len(out), "total": total_links, "from_cache": len(out) - len(to_fetch)})
     return out
 
 
@@ -435,9 +492,9 @@ def download_board(
     emit("pins_collected", {"board_url": board_url, "count": len(pin_links)})
     emit(
         "log",
-        {"message": f"  [2/3] Resolvendo imagem grande de {len(pin_links)} pins (paralelo)…"},
+        {"message": f"  [2/3] Resolvendo imagem grande de {len(pin_links)} pins (paralelo, cache={'ativado' if options.use_cache else 'desativado'})…"},
     )
-    pin_img = resolve_images(pin_links, session=session, workers=options.workers, emit=emit)
+    pin_img = resolve_images(pin_links, session=session, workers=options.workers, emit=emit, use_cache=options.use_cache)
 
     if not pin_img:
         emit("log", {"message": "  Não foi possível resolver nenhuma imagem. Pulando."})
@@ -593,6 +650,17 @@ def main() -> None:
         default=1,
         help="Paralelismo entre QUADROS (abre N Chromiums; use 2~3 com cautela)",
     )
+    ap.add_argument(
+        "--cache-dir",
+        type=str,
+        default=".",
+        help="Diretório para armazenar cache de pins (default: .)",
+    )
+    ap.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Desabilita cache de metadados de pins (sempre refetch)",
+    )
     args = ap.parse_args()
 
     if not args.board_url and not args.user:
@@ -609,6 +677,8 @@ def main() -> None:
         scroll_pause=args.scroll_pause,
         workers=args.workers,
         boards_workers=args.boards_workers,
+        cache_dir=args.cache_dir,
+        use_cache=not args.no_cache,
     )
 
     total_ok = 0

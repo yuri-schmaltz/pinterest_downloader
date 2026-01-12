@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pinterest-board-downloader"
+version = "2.0.0"
+description = "Ferramenta para baixar imagens de quadros do Pinterest via CLI ou GUI."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Yuri Schmaltz", email = "yurix@example.com"}
+]
+dependencies = [
+    "requests>=2.31.0",
+    "playwright>=1.45.0",
+    "PyQt6>=6.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "pytest>=7.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yurix/app-pinterest-downloader"
+Repository = "https://github.com/yurix/app-pinterest-downloader.git"
+
+[tool.black]
+line-length = 120
+target-version = ['py310', 'py311', 'py312']
+extend-exclude = '''
+/(
+  # diretórios
+  \.eggs
+  | \.git
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "C",    # flake8-comprehensions
+    "B",    # flake8-bugbear
+]
+ignore = [
+    "E501",  # line too long (controlled by black)
+    "W503",  # line break before binary operator
+]
+
+[tool.ruff.isort]
+known-first-party = ["pinterest_board_dl", "pinterest_board_gui"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "-v --tb=short"
