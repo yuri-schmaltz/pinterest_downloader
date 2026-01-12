@@ -22,6 +22,8 @@ from typing import Callable, Dict, Iterable, List, NamedTuple
 import requests
 from playwright.sync_api import sync_playwright
 
+from json_logger import get_logger, reset_logger
+
 # ---------- Config ----------
 UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -481,10 +483,14 @@ def resolve_images(
     use_cache: bool = True,
 ) -> Dict[str, str]:
     emit = emit or (lambda *_: None)
+    logger = get_logger()
 
     links = list(pin_links)
     total_links = len(links)
     emit("resolve_start", {"total": total_links})
+
+    # Log phase start
+    logger.start_phase("resolve_images")
 
     # Carregar cache existente
     cache = load_pin_cache() if use_cache else {}
@@ -499,10 +505,12 @@ def resolve_images(
             to_fetch.append(link)
 
     processed = len(out)  # Iniciar contagem a partir dos já em cache
+    cache_hits = len(out)
 
     # Se tudo está em cache, retornar rápido
     if not to_fetch:
         emit("resolve_complete", {"found": len(out), "total": total_links, "from_cache": len(out)})
+        logger.end_phase("resolve_images", count=len(out), message=f"Todos os {len(out)} pins em cache")
         return out
 
     def work(link: str) -> tuple[str, str | None]:
@@ -524,7 +532,9 @@ def resolve_images(
     if use_cache:
         save_pin_cache(cache)
 
-    emit("resolve_complete", {"found": len(out), "total": total_links, "from_cache": len(out) - len(to_fetch)})
+    resolved_count = len(out)
+    logger.end_phase("resolve_images", count=resolved_count, message=f"Resolvidas {resolved_count} imagens (cache: {cache_hits})")
+    emit("resolve_complete", {"found": len(out), "total": total_links, "from_cache": cache_hits})
     return out
 
 
@@ -537,7 +547,12 @@ def download_board(
     browser_shared=None,
 ) -> BoardDownloadResult:
     emit = status_cb or (lambda *_: None)
+    logger = get_logger()
     session = session or create_session()
+
+    # Log phase start
+    logger.start_phase("download_board")
+    logger.info("download_board", f"Iniciando download: {board_url}", board_url=board_url)
 
     target_dir = out_dir_for(board_url, options.out_root)
 
@@ -586,6 +601,8 @@ def download_board(
                 "output_dir": target_dir,
             },
         )
+        logger.warn("download_board", "Nenhum pin encontrado", board_url=board_url)
+        logger.end_phase("download_board", count=0, message="Nenhum pin encontrado")
         return BoardDownloadResult(board_url, 0, 0, target_dir)
 
     emit("pins_collected", {"board_url": board_url, "count": len(pin_links)})
@@ -606,6 +623,8 @@ def download_board(
                 "output_dir": target_dir,
             },
         )
+        logger.warn("download_board", "Nenhuma imagem resolvida", board_url=board_url, count=len(pin_links))
+        logger.end_phase("download_board", count=0, message="Nenhuma imagem resolvida")
         return BoardDownloadResult(board_url, 0, 0, target_dir)
 
     emit(
@@ -648,6 +667,7 @@ def download_board(
         },
     )
 
+    logger.end_phase("download_board", count=ok, message=f"Baixadas {ok}/{total} imagens")
     return BoardDownloadResult(board_url, ok, total, target_dir)
 
 
@@ -658,6 +678,11 @@ def download_user_boards(
     manual_login_handler: Callable[[str], None] | None = None,
 ) -> List[BoardDownloadResult]:
     emit = status_cb or (lambda *_: None)
+    logger = get_logger()
+    
+    # Log phase start
+    logger.start_phase("download_user_boards")
+    logger.info("download_user_boards", f"Iniciando downloads do usuário: {username_or_url}", board_url=username_or_url)
     
     # Criar browser uma única vez para todas as operações
     with sync_playwright() as p:
@@ -673,10 +698,13 @@ def download_user_boards(
 
             if not boards:
                 emit("log", {"message": "Nenhum quadro público encontrado para o usuário."})
+                logger.warn("download_user_boards", "Nenhum quadro público encontrado", board_url=username_or_url)
+                logger.end_phase("download_user_boards", count=0, message="Nenhum quadro encontrado")
                 return []
 
             emit("boards_found", {"boards": boards})
             emit("log", {"message": f"Encontrados {len(boards)} quadros. Iniciando downloads…"})
+            logger.info("download_user_boards", f"Encontrados {len(boards)} quadros", board_url=username_or_url, count=len(boards))
 
             results: Dict[str, BoardDownloadResult] = {}
 
@@ -717,6 +745,10 @@ def download_user_boards(
 
             ordered_results = [results[b] for b in boards if b in results]
             emit("user_complete", {"boards": boards, "results": ordered_results})
+            
+            # Log phase end
+            total_downloaded = sum(r.downloaded for r in ordered_results)
+            logger.end_phase("download_user_boards", count=total_downloaded, message=f"Baixadas {total_downloaded} imagens de {len(ordered_results)} quadros")
             return ordered_results
         finally:
             browser_shared.close()
@@ -772,6 +804,17 @@ def main() -> None:
         action="store_true",
         help="Desabilita cache de metadados de pins (sempre refetch)",
     )
+    ap.add_argument(
+        "--json-log",
+        action="store_true",
+        help="Habilita logging estruturado em JSON com timestamps",
+    )
+    ap.add_argument(
+        "--log-file",
+        type=str,
+        default="download_log.json",
+        help="Arquivo para salvar logs JSON (default: download_log.json)",
+    )
     args = ap.parse_args()
 
     if not args.board_url and not args.user:
@@ -779,6 +822,12 @@ def main() -> None:
         sys.exit(2)
 
     os.makedirs(args.out, exist_ok=True)
+
+    # Initialize logger if JSON logging is enabled
+    if args.json_log:
+        logger = get_logger(output_file=args.log_file, enabled=True)
+    else:
+        logger = get_logger(enabled=False)
 
     options = DownloadOptions(
         out_root=args.out,
@@ -809,6 +858,12 @@ def main() -> None:
         total_all += res.total
 
     print(f"\n==> TOTAL: {total_ok}/{total_all} imagens baixadas.")
+
+    # Save JSON logs if enabled
+    if args.json_log:
+        logger = get_logger()
+        logger.save()
+        print(f"\nLogs JSON salvos em: {args.log_file}")
 
 
 if __name__ == "__main__":

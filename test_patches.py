@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Testes rápidos e fumaça para validar patches ONDA 1, 2, 3 e 4."""
+"""Testes rápidos e fumaça para validar patches ONDA 1, 2, 3, 4 e 5B."""
 
 import json
 import tempfile
@@ -174,11 +174,84 @@ def test_diagnostics_script():
     print("✅ PASS: Script de diagnóstico presente e válido\n")
 
 
+def test_json_logger():
+    """Test 9: Verificar funcionalidade de json_logger (ONDA 5B)."""
+    print("TEST 9: JSON Logger (ONDA 5B)")
+    
+    import json
+    from json_logger import get_logger, reset_logger, LogEntry
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        log_file = Path(tmpdir) / "test_log.json"
+        
+        # Reset logger to clean state
+        reset_logger()
+        
+        # Get logger instance
+        logger = get_logger(output_file=str(log_file), enabled=True)
+        
+        # Test phase tracking
+        logger.start_phase("test_phase_1")
+        time.sleep(0.1)  # Simulate some work
+        logger.end_phase("test_phase_1", count=10, message="Test phase completed")
+        
+        # Test info/warn/error logging
+        logger.info("test_phase_2", "Starting test", board_url="https://example.com", count=5)
+        logger.warn("test_phase_2", "Warning message", board_url="https://example.com")
+        logger.error("test_phase_2", "Error occurred", board_url="https://example.com")
+        
+        # Save logs
+        logger.save()
+        
+        # Verify log file was created
+        assert log_file.exists(), f"Log file not created at {log_file}"
+        
+        # Verify JSON content
+        with open(log_file, 'r') as f:
+            data = json.load(f)
+        
+        # The structure should be {version, generated_at, total_entries, logs}
+        assert isinstance(data, dict), "Logs should be a dict"
+        assert "logs" in data, "Missing 'logs' key"
+        assert "version" in data, "Missing 'version' key"
+        
+        logs = data["logs"]
+        assert isinstance(logs, list), "Logs list should be a list"
+        assert len(logs) > 0, "Logs should not be empty"
+        
+        # Check first log entry structure
+        first_log = logs[0]
+        assert "timestamp" in first_log, "Missing timestamp"
+        assert "phase" in first_log, "Missing phase"
+        assert "level" in first_log, "Missing level"
+        assert "message" in first_log, "Missing message"
+        
+        # Verify some values
+        assert first_log["phase"] == "test_phase_1", "Phase mismatch"
+        
+        # Test get_summary
+        reset_logger()
+        logger2 = get_logger(output_file=str(log_file), enabled=True)
+        logger2.start_phase("summary_test")
+        logger2.end_phase("summary_test", count=42)
+        summary = logger2.get_summary()
+        
+        # Summary has structure: {"total_entries": N, "phases": {phase_name: {count, duration_ms, errors}}}
+        assert "phases" in summary, "Missing 'phases' in summary"
+        assert "summary_test" in summary["phases"], "Phase not in summary"
+        # start_phase and end_phase together create 1 entry with duration
+        assert summary["phases"]["summary_test"]["count"] >= 1, "Count should be at least 1"
+        assert summary["phases"]["summary_test"]["duration_ms"] > 0, "Duration should be > 0"
+        
+        # Clean up
+        reset_logger()
+    
+    print("✅ PASS: JSON Logger funciona corretamente (ONDA 5B)\n")
 
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("SMOKE TESTS - ONDAS 1, 2, 3 E 4")
+    print("SMOKE TESTS - ONDAS 1, 2, 3, 4 E 5B")
     print("=" * 60 + "\n")
     
     try:
@@ -190,6 +263,7 @@ if __name__ == "__main__":
         test_browser_reuse()
         test_scroll_detection()
         test_diagnostics_script()
+        test_json_logger()
         
         print("=" * 60)
         print("✅ TODOS OS TESTES PASSARAM!")

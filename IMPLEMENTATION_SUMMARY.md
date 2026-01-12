@@ -303,12 +303,114 @@ python diagnostics.py  # Valida ambiente, código, funcionalidade
 1. ~~PATCH 7: Browser reuse~~ ✅
 2. ~~PATCH 8: Scroll detection~~ ✅
 3. ~~PATCH 9: Diagnostics~~ ✅
-4. **Adaptive workers**: Ajustar paralelismo dinamicamente
-5. **Logging JSON**: Timestamps estruturados
+4. ~~PATCH 10: Logging JSON~~ ✅ **ONDA 5B**
+5. **Adaptive workers**: Ajustar paralelismo dinamicamente
 6. **CI Benchmarks**: GitHub Actions
 
 ---
 
-**FIM DO RELATÓRIO ONDAS 1 + 2 + 3 + 4**
+## 🟢 ONDA 5B: Logging Estruturado em JSON ✅
+
+### Objetivo
+Implementar sistema de logging estruturado que rastreia cada fase de download (coleta, resolução, download) com timestamps ISO 8601 e métricas, permitindo análise e auditoria posteriores.
+
+### Patches Implementados
+
+#### **PATCH 1: Módulo json_logger.py**
+- ✅ Criado novo módulo `json_logger.py` (212 linhas)
+- ✅ `LogEntry` dataclass: timestamp, phase, level, message, duration_ms, board_url, count, error, metadata
+- ✅ `JSONLogger` class:
+  - `start_phase(phase)` / `end_phase(phase, count, message)` — rastreamento de fases com duração
+  - `info/warn/error(phase, message, board_url, **metadata)` — logging estruturado
+  - `save()` — exporta logs para JSON com timestamp de geração
+  - `get_summary()` — retorna resumo por fase com counts e durações
+  - `get_phase_duration(phase)` — lookup de duração de fase
+- ✅ Singleton global: `get_logger()`, `reset_logger()` para gerenciar instância global
+
+#### **PATCH 2: Integração em pinterest_board_dl.py**
+- ✅ Import: `from json_logger import get_logger, reset_logger`
+- ✅ Logging em `resolve_images()`:
+  - `logger.start_phase("resolve_images")`
+  - `logger.end_phase("resolve_images", count=<resolved>, message=...)`
+  - Rastreia cache hits e imagens resolvidas
+- ✅ Logging em `download_board()`:
+  - `logger.start_phase("download_board")`
+  - `logger.info()` no início com URL do quadro
+  - `logger.warn()` para casos sem pins ou sem imagens resolvidas
+  - `logger.end_phase()` com count de imagens baixadas
+- ✅ Logging em `download_user_boards()`:
+  - `logger.start_phase("download_user_boards")`
+  - `logger.info()` com contagem de quadros encontrados
+  - `logger.warn()` se nenhum quadro público encontrado
+  - `logger.end_phase()` com total baixado de todos quadros
+
+#### **PATCH 3: Flags CLI**
+- ✅ `--json-log` — ativa logging JSON (padrão: desativado)
+- ✅ `--log-file <path>` — define arquivo de saída (padrão: `download_log.json`)
+- ✅ Inicialização do logger em `main()` baseada em flags
+- ✅ Salvamento automático ao final de `main()` se logging ativado
+
+### Estrutura de Saída JSON
+```json
+{
+  "version": "1.0",
+  "generated_at": "2026-01-11T15:30:45.123Z",
+  "total_entries": 42,
+  "logs": [
+    {
+      "timestamp": "2026-01-11T15:30:45.100Z",
+      "phase": "download_board",
+      "level": "INFO",
+      "message": "Iniciando download: https://...",
+      "board_url": "https://...",
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-01-11T15:30:46.200Z",
+      "phase": "resolve_images",
+      "level": "INFO",
+      "message": "Resolvidas 125 imagens (cache: 50)",
+      "count": 125,
+      "duration_ms": 2150.5,
+      "metadata": {}
+    }
+  ]
+}
+```
+
+### Teste de Smoke
+✅ `TEST 9: JSON Logger (ONDA 5B)` — PASS (9/9 testes passam)
+- ✅ LogEntry criada corretamente
+- ✅ start_phase/end_phase rastreiam duração
+- ✅ info/warn/error registram eventos
+- ✅ save() gera JSON válido com estrutura correta
+- ✅ get_summary() retorna fases com métricas
+
+### Exemplo de Uso
+
+```bash
+# Ativar logging estruturado
+python pinterest_board_dl.py --user my_username --json-log --log-file my_downloads.json
+
+# Verificar logs após download
+cat my_downloads.json | python -m json.tool
+```
+
+### Benefícios
+- 📊 **Auditoria**: Registra exatamente quando cada fase começou/terminou
+- ⏱️ **Performance**: Duração de cada fase para identificar gargalos
+- 🔍 **Debug**: Timestamps ISO 8601 permitem correlacionar com logs de sistema
+- 📈 **Análise**: Métricas (counts, erros) para estatísticas agregadas
+- 🔐 **Rastreabilidade**: Qual quadro/usuário foi processado em que hora
+
+### Commit
+```bash
+git add json_logger.py pinterest_board_dl.py test_patches.py IMPLEMENTATION_SUMMARY.md
+git commit -m "feat: ONDA 5B - Logging estruturado com JSON timestamps"
+```
+
+---
+
+**FIM DO RELATÓRIO ONDAS 1 + 2 + 3 + 4 + 5B**
 
 _11 de janeiro de 2026_
