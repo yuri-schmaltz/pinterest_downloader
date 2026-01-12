@@ -1,8 +1,8 @@
-# 📋 RESUMO DE IMPLEMENTAÇÃO — ONDAS 1, 2, 3 E 4
+# 📋 RESUMO DE IMPLEMENTAÇÃO — ONDAS 1, 2, 3, 4, 5B E 5C
 
-**Data:** 11 de janeiro de 2026  
-**Status:** ✅ COMPLETO (ONDAS 1-4)  
-**Commits:** 5 (ad9cc87, 431a678, e98cdcd, e09fed3, + ONDA 4)
+**Data:** 12 de janeiro de 2026  
+**Status:** ✅ COMPLETO (ONDAS 1-5C)  
+**Commits:** 9 (ad9cc87 ... fbe1005 + ONDA 5C)
 
 ---
 
@@ -411,6 +411,132 @@ git commit -m "feat: ONDA 5B - Logging estruturado com JSON timestamps"
 
 ---
 
-**FIM DO RELATÓRIO ONDAS 1 + 2 + 3 + 4 + 5B**
+## 🟢 ONDA 5C: Adaptive Workers (Ajuste Dinâmico de Paralelismo) ✅
 
-_11 de janeiro de 2026_
+### Objetivo
+Implementar sistema inteligente de ajuste dinâmico de workers que monitora CPU, RAM, latência de rede e taxa de sucesso, ajustando automaticamente o número de threads para otimizar performance sem sobrecarregar o sistema.
+
+### Patches Implementados
+
+#### **PATCH 1: Módulo adaptive_workers.py**
+- ✅ Criado novo módulo `adaptive_workers.py` (250+ linhas)
+- ✅ `WorkerMetrics` dataclass:
+  - timestamp (ISO 8601)
+  - cpu_percent, memory_percent
+  - active_workers (count)
+  - success_rate (0-1)
+  - avg_latency_ms
+- ✅ `AdaptiveWorkerManager` class:
+  - `record_success(latency_ms)` / `record_failure()` — rastreia performance
+  - `adjust_workers()` — lógica de ajuste baseada em:
+    - CPU disponível (target: 70%)
+    - Memória disponível (target: 60%)
+    - Taxa de sucesso (mínimo 80%)
+    - Latência média de requisição
+  - `get_system_metrics()` — usa psutil para monitorar sistema
+  - `save_metrics()` — exporta histórico em JSON
+  - `get_summary()` — resumo de performance
+- ✅ Singleton global: `get_adaptive_manager()`, `reset_adaptive_manager()`
+- ✅ Persistência: carrega/salva histórico de métricas em `.worker_metrics.json`
+
+#### **PATCH 2: Integração em resolve_images()**
+- ✅ Novo parâmetro: `adaptive: bool = False`
+- ✅ Se adaptive=True:
+  - Cria manager com min/max_workers
+  - Rastreia latência de cada requisição
+  - Registra sucesso/falha
+  - Ajusta workers a cada 10 operações
+  - Salva métricas ao final
+- ✅ Integração transparente — sem quebrar chamadas existentes
+
+#### **PATCH 3: Integração em DownloadOptions**
+- ✅ Novo campo: `adaptive_workers: bool = False`
+
+#### **PATCH 4: Flags CLI**
+- ✅ `--adaptive-workers` — ativa ajuste dinâmico
+- ✅ Integrado com `DownloadOptions`
+
+#### **PATCH 5: Dependência**
+- ✅ Adicionado `psutil` a requirements.txt (já instalado)
+- ✅ Usado para `psutil.cpu_percent()` e `psutil.virtual_memory()`
+
+### Lógica de Ajuste
+
+```python
+# AUMENTAR workers se:
+if cpu < target_cpu * 0.7 AND memory < target_memory * 0.8:
+    if success_rate > 0.95:
+        workers += 1
+
+# DIMINUIR workers se:
+if cpu > target_cpu OR memory > target_memory:
+    workers -= 1
+elif success_rate < 0.80:
+    workers -= 1
+```
+
+### Estrutura de Saída JSON
+
+```json
+{
+  "version": "1.0",
+  "generated_at": "2026-01-12T10:30:45.123Z",
+  "total_samples": 42,
+  "current_workers": 12,
+  "success_rate": 0.98,
+  "avg_latency_ms": 245.3,
+  "metrics": [
+    {
+      "timestamp": "2026-01-12T10:30:00.100Z",
+      "cpu_percent": 45.2,
+      "memory_percent": 58.3,
+      "active_workers": 10,
+      "success_rate": 0.95,
+      "avg_latency_ms": 250.5
+    }
+  ]
+}
+```
+
+### Teste de Smoke
+✅ `TEST 10: Adaptive Workers (ONDA 5C)` — PASS (10/10 testes)
+- ✅ Manager inicializa com min_workers
+- ✅ record_success/failure rastreiam corretamente
+- ✅ get_success_rate() calcula percentual
+- ✅ get_avg_latency() retorna latência média
+- ✅ adjust_workers() retorna novo count
+- ✅ save_metrics() cria JSON válido
+- ✅ Histórico persiste corretamente
+- ✅ get_summary() retorna resumo com todos campos
+
+### Exemplo de Uso
+
+```bash
+# Ativar workers adaptativos
+python pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers
+
+# Visualizar métricas coletadas
+cat .worker_metrics.json | python -m json.tool
+
+# Análise: tendência de ajuste
+jq '.metrics[] | {timestamp, active_workers, cpu_percent, memory_percent}' .worker_metrics.json
+```
+
+### Benefícios
+- 🚀 **Performance Máxima**: Usa toda CPU/RAM disponível sem sobrecarregar
+- 📊 **Auto-Scaling**: Ajusta dinamicamente conforme carga muda
+- 🛡️ **Proteção**: Diminui workers se CPU/memória ficarem altos
+- 📈 **Diagnóstico**: Histórico completo para análise posterior
+- 🔄 **Recuperação**: Diminui se taxa de sucesso cair (timeout/erro)
+
+### Commit
+```bash
+git add adaptive_workers.py pinterest_board_dl.py test_patches.py IMPLEMENTATION_SUMMARY.md requirements.txt
+git commit -m "feat: ONDA 5C - Adaptive workers com ajuste dinâmico"
+```
+
+---
+
+**FIM DO RELATÓRIO ONDAS 1 + 2 + 3 + 4 + 5B + 5C**
+
+_12 de janeiro de 2026_

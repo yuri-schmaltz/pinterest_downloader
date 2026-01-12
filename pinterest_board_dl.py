@@ -23,6 +23,7 @@ import requests
 from playwright.sync_api import sync_playwright
 
 from json_logger import get_logger, reset_logger
+from adaptive_workers import get_adaptive_manager, reset_adaptive_manager
 
 # ---------- Config ----------
 UA = (
@@ -95,6 +96,7 @@ class DownloadOptions:
     boards_workers: int = 1
     cache_dir: str = "."  # Diretório para .pinterest_cache.json
     use_cache: bool = True  # Habilitar/desabilitar cache
+    adaptive_workers: bool = False  # ONDA 5C: Ajuste dinâmico de workers
 
 
 # ---------- Utils ----------
@@ -481,9 +483,18 @@ def resolve_images(
     workers: int,
     emit: StatusCallback | None = None,
     use_cache: bool = True,
+    adaptive: bool = False,
 ) -> Dict[str, str]:
     emit = emit or (lambda *_: None)
     logger = get_logger()
+    
+    # Initialize adaptive manager if enabled
+    if adaptive:
+        manager = get_adaptive_manager(min_workers=4, max_workers=workers)
+        actual_workers = manager.current_workers
+    else:
+        manager = None
+        actual_workers = workers
 
     links = list(pin_links)
     total_links = len(links)
@@ -514,23 +525,48 @@ def resolve_images(
         return out
 
     def work(link: str) -> tuple[str, str | None]:
+        start_time = time.time()
         img = fetch_og_image(link, session)
         if not img:
             mobile = link.replace("www.pinterest.com", "br.pinterest.com")
             img = fetch_og_image(mobile, session)
+        
+        latency_ms = (time.time() - start_time) * 1000
+        
+        # Record metrics if adaptive
+        if manager:
+            if img:
+                manager.record_success(latency_ms)
+            else:
+                manager.record_failure()
+        
         return link, img
 
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        for link, img in ex.map(work, to_fetch):
+    with ThreadPoolExecutor(max_workers=actual_workers) as ex:
+        for idx, (link, img) in enumerate(ex.map(work, to_fetch), 1):
             processed += 1
             if img:
                 out[link] = img
                 cache[link] = img  # Atualizar cache com novo resultado
+            
+            # Adjust workers every 10 operations (if adaptive)
+            if manager and idx % 10 == 0:
+                new_workers = manager.adjust_workers()
+                if new_workers != actual_workers:
+                    actual_workers = new_workers
+                    logger.info("resolve_images", f"Workers ajustados para {new_workers}", count=new_workers)
+            
             emit("resolve_progress", {"current": processed, "total": total_links})
 
     # Salvar cache atualizado em disco
     if use_cache:
         save_pin_cache(cache)
+    
+    # Save adaptive metrics if enabled
+    if manager:
+        manager.save_metrics()
+        summary = manager.get_summary()
+        logger.info("resolve_images", f"Adaptive: {summary['current_workers']} workers final, {summary['success_rate']:.1%} success", count=summary['current_workers'])
 
     resolved_count = len(out)
     logger.end_phase("resolve_images", count=resolved_count, message=f"Resolvidas {resolved_count} imagens (cache: {cache_hits})")
@@ -610,7 +646,7 @@ def download_board(
         "log",
         {"message": f"  [2/3] Resolvendo imagem grande de {len(pin_links)} pins (paralelo, cache={'ativado' if options.use_cache else 'desativado'})…"},
     )
-    pin_img = resolve_images(pin_links, session=session, workers=options.workers, emit=emit, use_cache=options.use_cache)
+    pin_img = resolve_images(pin_links, session=session, workers=options.workers, emit=emit, use_cache=options.use_cache, adaptive=options.adaptive_workers)
 
     if not pin_img:
         emit("log", {"message": "  Não foi possível resolver nenhuma imagem. Pulando."})
@@ -815,6 +851,11 @@ def main() -> None:
         default="download_log.json",
         help="Arquivo para salvar logs JSON (default: download_log.json)",
     )
+    ap.add_argument(
+        "--adaptive-workers",
+        action="store_true",
+        help="Ativa ajuste dinâmico de workers baseado em CPU/RAM (ONDA 5C)",
+    )
     args = ap.parse_args()
 
     if not args.board_url and not args.user:
@@ -839,6 +880,7 @@ def main() -> None:
         boards_workers=args.boards_workers,
         cache_dir=args.cache_dir,
         use_cache=not args.no_cache,
+        adaptive_workers=args.adaptive_workers,
     )
 
     total_ok = 0

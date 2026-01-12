@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Testes rápidos e fumaça para validar patches ONDA 1, 2, 3, 4 e 5B."""
+"""Testes rápidos e fumaça para validar patches ONDA 1, 2, 3, 4, 5B e 5C."""
 
 import json
 import tempfile
@@ -249,9 +249,81 @@ def test_json_logger():
     print("✅ PASS: JSON Logger funciona corretamente (ONDA 5B)\n")
 
 
+def test_adaptive_workers():
+    """Test 10: Verificar funcionalidade de adaptive workers (ONDA 5C)."""
+    print("TEST 10: Adaptive Workers (ONDA 5C)")
+    
+    from adaptive_workers import get_adaptive_manager, reset_adaptive_manager
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        metrics_file = Path(tmpdir) / "metrics.json"
+        
+        # Reset manager
+        reset_adaptive_manager()
+        
+        # Get manager
+        manager = get_adaptive_manager(min_workers=2, max_workers=8)
+        manager.metrics_file = metrics_file  # Use temp file
+        
+        # Test initial state
+        assert manager.current_workers == 2, "Should start with min_workers"
+        assert manager.get_success_rate() == 1.0, "Initial success rate should be 1.0"
+        
+        # Record some successful operations
+        for i in range(10):
+            manager.record_success(50.0 + i * 5)  # 50-95ms latency
+        
+        success_rate = manager.get_success_rate()
+        assert success_rate == 1.0, "Success rate should be 100%"
+        assert len(manager.latencies) == 10, "Should have 10 latencies"
+        
+        avg_latency = manager.get_avg_latency()
+        assert avg_latency > 0, "Average latency should be > 0"
+        
+        # Test adjustment (should increase if CPU/memory low)
+        # Note: actual adjustment depends on system state
+        initial_workers = manager.current_workers
+        new_workers = manager.adjust_workers()
+        
+        # Verify metrics are recorded
+        assert len(manager.metrics_history) > 0, "Metrics should be recorded"
+        
+        # Test save
+        manager.save_metrics()
+        assert metrics_file.exists(), "Metrics file should be created"
+        
+        # Verify JSON content
+        with open(metrics_file, 'r') as f:
+            data = json.load(f)
+        
+        assert "version" in data, "Missing version"
+        assert "metrics" in data, "Missing metrics array"
+        assert len(data["metrics"]) > 0, "Should have at least one metric"
+        
+        first_metric = data["metrics"][0]
+        assert "timestamp" in first_metric, "Missing timestamp"
+        assert "cpu_percent" in first_metric, "Missing cpu_percent"
+        assert "memory_percent" in first_metric, "Missing memory_percent"
+        assert "active_workers" in first_metric, "Missing active_workers"
+        assert "success_rate" in first_metric, "Missing success_rate"
+        assert "avg_latency_ms" in first_metric, "Missing avg_latency_ms"
+        
+        # Test get_summary
+        summary = manager.get_summary()
+        assert "current_workers" in summary, "Summary missing current_workers"
+        assert "success_rate" in summary, "Summary missing success_rate"
+        assert "avg_latency_ms" in summary, "Summary missing avg_latency_ms"
+        assert summary["success_rate"] == 1.0, "Summary success_rate should match"
+        
+        # Clean up
+        reset_adaptive_manager()
+    
+    print("✅ PASS: Adaptive Workers funciona corretamente (ONDA 5C)\n")
+
+
 if __name__ == "__main__":
     print("=" * 60)
-    print("SMOKE TESTS - ONDAS 1, 2, 3, 4 E 5B")
+    print("SMOKE TESTS - ONDAS 1, 2, 3, 4, 5B E 5C")
     print("=" * 60 + "\n")
     
     try:
@@ -264,6 +336,7 @@ if __name__ == "__main__":
         test_scroll_detection()
         test_diagnostics_script()
         test_json_logger()
+        test_adaptive_workers()
         
         print("=" * 60)
         print("✅ TODOS OS TESTES PASSARAM!")
