@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import List
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -178,9 +180,34 @@ class MainWindow(QMainWindow):
         self.worker: DownloadWorker | None = None
         self.board_items: dict[str, QListWidgetItem] = {}
 
+        # Set application icon
+        self._set_window_icon()
+
         self._build_ui()
 
     # --- UI helpers ---
+    def _set_window_icon(self) -> None:
+        """Define o ícone da aplicação."""
+        icon_path = Path(__file__).parent / "icon.svg"
+        
+        if icon_path.exists():
+            # Renderizar SVG para QPixmap
+            renderer = QSvgRenderer(str(icon_path))
+            pixmap = QPixmap(256, 256)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            
+            from PyQt6.QtGui import QPainter
+            painter = QPainter(pixmap)
+            renderer.render(painter)
+            painter.end()
+            
+            # Definir ícone
+            icon = QIcon(pixmap)
+            self.setWindowIcon(icon)
+            
+            # Definir também para o QApplication (barra de tarefas)
+            QApplication.instance().setWindowIcon(icon)
+    
     def _build_ui(self) -> None:
         central = QWidget()
         layout = QVBoxLayout(central)
