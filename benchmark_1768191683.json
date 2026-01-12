@@ -1,0 +1,22 @@
+{
+  "benchmark_timestamp": "2026-01-12T04:21:19.296Z",
+  "git_commit": "bccc42478ff09a75c79102ad9503b7710ee6d278",
+  "diagnostics": {
+    "python_version": "3.12.3",
+    "import_time_s": 3.0994415283203125e-06,
+    "main_size_kb": 32.529296875,
+    "gui_size_kb": 17.85546875,
+    "scroll_stable_rounds": 3,
+    "scroll_height_check": true,
+    "max_retries": 1
+  },
+  "smoke_tests": {
+    "passed": 11,
+    "duration_seconds": 2.950467824935913,
+    "output": "timizado\n\nTEST 8: Script de diagn\u00f3stico\n\u2705 PASS: Script de diagn\u00f3stico presente e v\u00e1lido\n\nTEST 9: JSON Logger (ONDA 5B)\n\u2705 PASS: JSON Logger funciona corretamente (ONDA 5B)\n\nTEST 10: Adaptive Workers (ONDA 5C)\n\u2705 PASS: Adaptive Workers funciona corretamente (ONDA 5C)\n\nTEST 11: Rate Limiting (ONDA 5E)\n\u2705 PASS: Rate limiting funcionando corretamente\n\n============================================================\n\u2705 TODOS OS 11 TESTES PASSARAM!\n============================================================\n"
+  },
+  "baseline_comparison": {
+    "baseline_exists": true,
+    "baseline_timestamp": "unknown"
+  }
+}
