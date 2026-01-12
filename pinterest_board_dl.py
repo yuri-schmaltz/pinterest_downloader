@@ -24,6 +24,7 @@ from playwright.sync_api import sync_playwright
 
 from json_logger import get_logger, reset_logger
 from adaptive_workers import get_adaptive_manager, reset_adaptive_manager
+from rate_limiter import get_rate_limiter, reset_rate_limiter, RateLimitConfig
 
 # ---------- Config ----------
 UA = (
@@ -97,6 +98,7 @@ class DownloadOptions:
     cache_dir: str = "."  # Diretório para .pinterest_cache.json
     use_cache: bool = True  # Habilitar/desabilitar cache
     adaptive_workers: bool = False  # ONDA 5C: Ajuste dinâmico de workers
+    rate_limiting: bool = False  # ONDA 5E: Rate limiting inteligente
 
 
 # ---------- Utils ----------
@@ -151,13 +153,32 @@ def _abs_url(href: str) -> str:
 # ---------- Resolução de imagem ----------
 
 
-def fetch_og_image(pin_url: str, session: requests.Session) -> str | None:
+def fetch_og_image(pin_url: str, session: requests.Session, use_rate_limit: bool = False) -> str | None:
     """Pega a imagem grande via meta og:image do Pin."""
+    # Aplicar rate limiting se habilitado
+    if use_rate_limit:
+        limiter = get_rate_limiter()
+        limiter.acquire()  # Bloqueia até poder fazer requisição
+    
     try:
         r = session.get(pin_url, timeout=TIMEOUT_HTTP_GET)
+        
+        # Check for 429 (Too Many Requests)
+        if r.status_code == 429 and use_rate_limit:
+            limiter = get_rate_limiter()
+            limiter.report_429()
+            return None
+        
         r.raise_for_status()
+        
+        # Report success if using rate limit
+        if use_rate_limit:
+            limiter = get_rate_limiter()
+            limiter.report_success()
+    
     except Exception:
         return None
+    
     m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', r.text, re.I)
     if not m:
         m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', r.text, re.I)
@@ -484,6 +505,7 @@ def resolve_images(
     emit: StatusCallback | None = None,
     use_cache: bool = True,
     adaptive: bool = False,
+    rate_limiting: bool = False,
 ) -> Dict[str, str]:
     emit = emit or (lambda *_: None)
     logger = get_logger()
@@ -526,10 +548,10 @@ def resolve_images(
 
     def work(link: str) -> tuple[str, str | None]:
         start_time = time.time()
-        img = fetch_og_image(link, session)
+        img = fetch_og_image(link, session, use_rate_limit=rate_limiting)
         if not img:
             mobile = link.replace("www.pinterest.com", "br.pinterest.com")
-            img = fetch_og_image(mobile, session)
+            img = fetch_og_image(mobile, session, use_rate_limit=rate_limiting)
         
         latency_ms = (time.time() - start_time) * 1000
         
@@ -646,7 +668,7 @@ def download_board(
         "log",
         {"message": f"  [2/3] Resolvendo imagem grande de {len(pin_links)} pins (paralelo, cache={'ativado' if options.use_cache else 'desativado'})…"},
     )
-    pin_img = resolve_images(pin_links, session=session, workers=options.workers, emit=emit, use_cache=options.use_cache, adaptive=options.adaptive_workers)
+    pin_img = resolve_images(pin_links, session=session, workers=options.workers, emit=emit, use_cache=options.use_cache, adaptive=options.adaptive_workers, rate_limiting=options.rate_limiting)
 
     if not pin_img:
         emit("log", {"message": "  Não foi possível resolver nenhuma imagem. Pulando."})
@@ -856,6 +878,11 @@ def main() -> None:
         action="store_true",
         help="Ativa ajuste dinâmico de workers baseado em CPU/RAM (ONDA 5C)",
     )
+    ap.add_argument(
+        "--rate-limiting",
+        action="store_true",
+        help="Ativa limitação inteligente de requisições (ONDA 5E)",
+    )
     args = ap.parse_args()
 
     if not args.board_url and not args.user:
@@ -881,6 +908,7 @@ def main() -> None:
         cache_dir=args.cache_dir,
         use_cache=not args.no_cache,
         adaptive_workers=args.adaptive_workers,
+        rate_limiting=args.rate_limiting,
     )
 
     total_ok = 0
@@ -906,6 +934,17 @@ def main() -> None:
         logger = get_logger()
         logger.save()
         print(f"\nLogs JSON salvos em: {args.log_file}")
+    
+    # Save rate limiting stats if enabled
+    if args.rate_limiting:
+        limiter = get_rate_limiter()
+        stats = limiter.get_stats()
+        print(f"\n==> RATE LIMITING:")
+        print(f"  Total requests: {stats['total_requests']}")
+        print(f"  429 errors: {stats['total_429s']}")
+        print(f"  Backoff time: {stats['backoff_seconds']:.1f}s")
+        limiter.save_stats("rate_limit_stats.json")
+        print(f"  Stats salvas em: rate_limit_stats.json")
 
 
 if __name__ == "__main__":

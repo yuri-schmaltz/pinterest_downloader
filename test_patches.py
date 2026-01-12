@@ -323,7 +323,7 @@ def test_adaptive_workers():
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("SMOKE TESTS - ONDAS 1, 2, 3, 4, 5B E 5C")
+    print("SMOKE TESTS - ONDAS 1, 2, 3, 4, 5B, 5C E 5E")
     print("=" * 60 + "\n")
     
     try:
@@ -338,8 +338,17 @@ if __name__ == "__main__":
         test_json_logger()
         test_adaptive_workers()
         
+        # TEST 11: Rate Limiting (ONDA 5E)
+        print("TEST 11: Rate Limiting (ONDA 5E)")
+        import subprocess
+        result = subprocess.run(["python3", "test_11_rate_limiting.py"], capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"❌ FAIL: Test 11 falhou\n{result.stdout}\n{result.stderr}")
+            sys.exit(1)
+        print("✅ PASS: Rate limiting funcionando corretamente\n")
+        
         print("=" * 60)
-        print("✅ TODOS OS TESTES PASSARAM!")
+        print("✅ TODOS OS 11 TESTES PASSARAM!")
         print("=" * 60)
         sys.exit(0)
         
