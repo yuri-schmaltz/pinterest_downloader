@@ -1,8 +1,8 @@
-# 📋 RESUMO DE IMPLEMENTAÇÃO — ONDAS 1, 2, 3, 4, 5B E 5C
+# 📋 RESUMO DE IMPLEMENTAÇÃO — ONDAS 1, 2, 3, 4, 5B, 5C, 5D E 5E
 
 **Data:** 12 de janeiro de 2026  
-**Status:** ✅ COMPLETO (ONDAS 1-5C)  
-**Commits:** 9 (ad9cc87 ... fbe1005 + ONDA 5C)
+**Status:** ✅ COMPLETO (ONDAS 1-5E)  
+**Commits:** 11+ (ad9cc87 ... bccc424 + ONDA 5D/5E)
 
 ---
 
@@ -537,6 +537,196 @@ git commit -m "feat: ONDA 5C - Adaptive workers com ajuste dinâmico"
 
 ---
 
-**FIM DO RELATÓRIO ONDAS 1 + 2 + 3 + 4 + 5B + 5C**
+## 🔄 ONDA 5D: CI Benchmarks (GitHub Actions) ✅
 
-_12 de janeiro de 2026_
+### Objetivo
+Automatizar testes e benchmarking no CI/CD com GitHub Actions.
+
+### Implementação
+
+#### **GitHub Actions Workflow** (`.github/workflows/tests.yml`)
+
+**Job 1: Test Matrix**
+```yaml
+strategy:
+  matrix:
+    python-version: ["3.10", "3.11", "3.12"]
+steps:
+  - Checkout code
+  - Setup Python ${{ matrix.python-version }}
+  - Install dependencies (pip install -r requirements.txt)
+  - Run test_patches.py (11 tests)
+  - Syntax check (python -m py_compile *.py)
+```
+
+**Job 2: Benchmark**
+```yaml
+steps:
+  - Checkout code + fetch history
+  - Setup Python 3.11
+  - Run benchmark.py
+  - Upload artifacts (benchmark_*.json)
+  - Comment on PRs with results
+```
+
+**Job 3: Lint**
+```yaml
+steps:
+  - Black formatting check
+  - Ruff linting
+  - MyPy type checking
+```
+
+#### **Local Benchmarking** (`benchmark.py`)
+
+**Funcionalidades:**
+- Executa `diagnostics.py` e captura JSON
+- Executa `test_patches.py` e conta testes PASS/FAIL
+- Compara com baseline anterior (via git diff)
+- Salva relatório JSON com timestamp e commit SHA
+- Exibe sumário visual com emojis
+
+**Exemplo de saída:**
+```
+╔══════════════════════════════════════════════════════════╗
+║                🎯 BENCHMARK RUNNER - ONDA 5D              ║
+╚══════════════════════════════════════════════════════════╝
+
+🧪 Smoke Tests:
+   Passed: 11
+   Duration: 3.0s
+
+🔍 Diagnostics:
+   Checks: 0/0
+
+📦 Git Commit: bccc4247
+⏰ Timestamp: 2026-01-12T04:21:19.296Z
+
+💾 Relatório salvo em: benchmark_1768191683.json
+```
+
+### Triggers
+- `push` para `main`, `dev`
+- `pull_request` para `main`, `dev`
+- `workflow_dispatch` (manual)
+
+### Benefícios
+- ✅ **Testes Automáticos**: 11 testes rodando em 3 versões Python (3.10, 3.11, 3.12)
+- 📊 **Benchmarks Persistentes**: Histórico de performance via artifacts
+- 🔍 **Comparação de Baselines**: Detecta regressões automaticamente
+- 💬 **PR Comments**: Resultados publicados em PRs automaticamente
+- 🛡️ **Lint Enforced**: Black + Ruff + MyPy no CI
+
+---
+
+## 🚦 ONDA 5E: Rate Limiting Inteligente ✅
+
+### Objetivo
+Proteger contra rate limits do Pinterest com sliding windows e exponential backoff.
+
+### Implementação
+
+#### **Módulo `rate_limiter.py`**
+
+**RateLimitConfig (dataclass):**
+```python
+max_requests_per_second: 5.0    # Pinterest: 5 req/s
+max_requests_per_minute: 200    # Pinterest: 200 req/min
+max_requests_per_hour: 10000    # Pinterest: 10k req/h
+backoff_on_429: 60.0            # Backoff inicial em 429
+backoff_multiplier: 2.0         # Dobrar backoff a cada 429
+max_backoff: 300.0              # Máximo 5 minutos
+```
+
+**RateLimiter (class):**
+- **Sliding Windows**: `deque` para 1s, 1min, 1hora
+- **acquire(timeout)**: Bloqueia até ser seguro fazer requisição
+- **report_429()**: Exponential backoff em HTTP 429
+- **report_success()**: Diminui backoff gradualmente após sucessos
+- **get_stats()**: Retorna métricas (total reqs, 429s, backoff atual)
+- **save_stats(file)**: Salva JSON com estatísticas
+- **Thread-safe**: `threading.Lock` para concorrência
+- **Singleton**: `get_rate_limiter()`, `reset_rate_limiter()`
+
+#### **Integração em `pinterest_board_dl.py`**
+
+**DownloadOptions:**
+```python
+@dataclass
+class DownloadOptions:
+    # ... campos existentes ...
+    rate_limiting: bool = False  # NOVO
+```
+
+**fetch_og_image() modificado:**
+```python
+def fetch_og_image(url: str, session: requests.Session, use_rate_limit: bool = False) -> str | None:
+    if use_rate_limit:
+        limiter = get_rate_limiter()
+        if not limiter.acquire(timeout=30.0):
+            return None  # Timeout
+    
+    try:
+        resp = session.get(url, ...)
+        if resp.status_code == 429 and use_rate_limit:
+            limiter.report_429()
+            return None
+        
+        if use_rate_limit:
+            limiter.report_success()
+        
+        # ... resto do código ...
+```
+
+**resolve_images() modificado:**
+```python
+def resolve_images(..., rate_limiting: bool = False):
+    def work(link: str):
+        img = fetch_og_image(link, session, use_rate_limit=rate_limiting)
+        # ... resto ...
+```
+
+**CLI Flag:**
+```python
+ap.add_argument("--rate-limiting", action="store_true", 
+                help="Ativa limitação inteligente de requisições (ONDA 5E)")
+```
+
+**Stats ao Final:**
+```python
+if args.rate_limiting:
+    limiter = get_rate_limiter()
+    stats = limiter.get_stats()
+    print(f"\n==> RATE LIMITING:")
+    print(f"  Total requests: {stats['total_requests']}")
+    print(f"  429 errors: {stats['total_429s']}")
+    print(f"  Backoff time: {stats['backoff_seconds']:.1f}s")
+    limiter.save_stats("rate_limit_stats.json")
+```
+
+### Testes (Test 11)
+✅ **10 sub-testes**:
+1. Inicialização com config padrão
+2. Config customizada
+3. Acquire básico (não bloqueia se abaixo do limite)
+4. Sliding window (bloqueia após 5 req/s)
+5. Report 429 (exponential backoff)
+6. Report success (gradual backoff reset)
+7. Thread-safety (3 threads simultâneas)
+8. Get stats (total_requests, total_429s, backoff_seconds, windows)
+9. Save stats (JSON válido)
+10. Singleton pattern
+
+**Resultado:** 10/10 PASS ✅
+
+### Benefícios
+- 🛡️ **Proteção Completa**: 3 níveis de limite (1s, 1min, 1hora)
+- 🔄 **Exponential Backoff**: Auto-recupera de 429s
+- 📊 **Métricas Detalhadas**: Total reqs, 429s, tempo de backoff
+- 🧵 **Thread-Safe**: Funciona com workers paralelos
+- ⚡ **Baixa Overhead**: Deques eficientes para sliding windows
+- 🔧 **Configurável**: Limites customizáveis por API
+
+---
+
+**FIM DO RELATÓRIO ONDAS 1-5E**
