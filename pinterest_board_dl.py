@@ -193,6 +193,83 @@ def download_image(
 # ---------- Coleta de links ----------
 
 
+def _collect_pin_links_with_browser(
+    page,
+    board_url: str,
+    manual_login: bool,
+    scroll_pause: float,
+    max_pins: int | None,
+    manual_login_handler: Callable[[], None] | None = None,
+) -> List[str]:
+    """Lógica interna: coleta pins usando page já inicializado."""
+    page.goto(board_url, wait_until="networkidle", timeout=TIMEOUT_PAGE_LOAD)
+
+    if ("login" in page.url or "auth" in page.url) and not manual_login:
+        return []
+
+    if manual_login:
+        if manual_login_handler:
+            manual_login_handler()
+        else:
+            print(
+                "\n>>> Faça login na janela aberta e certifique-se de estar no QUADRO desejado."
+                "\n>>> Volte ao terminal e pressione ENTER para continuar…",
+                flush=True,
+            )
+            try:
+                input()
+            except KeyboardInterrupt:
+                sys.exit(1)
+
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_DOM_READY)
+    except Exception:
+        pass
+    page.wait_for_timeout(1000)
+
+    seen = set()
+    stable_rounds = 0
+    last_count = 0
+
+    while True:
+        hrefs = page.eval_on_selector_all(
+            'a[href^="/pin/"]',
+            'els => Array.from(new Set(els.map(e => e.getAttribute("href"))))',
+        )
+        for h in hrefs:
+            if not h:
+                continue
+            u = _abs_url(h.split('?')[0])
+            u = u.replace("://br.pinterest.com/", "://www.pinterest.com/")
+            if u.startswith(f'{PINTEREST_BASE_URL}/pin/'):
+                seen.add(u)
+
+        if max_pins and len(seen) >= max_pins:
+            break
+
+        try:
+            page.evaluate(
+                '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
+                'if (!el) return; window.scrollTo(0, el.scrollHeight); })()'
+            )
+        except Exception:
+            print("  Aviso: falha ao rolar (DOM indisponível). Encerrando coleta deste quadro.")
+            break
+
+        page.wait_for_timeout(int(scroll_pause * 1000))
+
+        if len(seen) == last_count:
+            stable_rounds += 1
+        else:
+            stable_rounds = 0
+            last_count = len(seen)
+
+        if stable_rounds >= 6:
+            break
+
+    return list(seen)[:max_pins] if max_pins else list(seen)
+
+
 def collect_pin_links(
     board_url: str,
     headless: bool,
@@ -200,85 +277,41 @@ def collect_pin_links(
     scroll_pause: float,
     max_pins: int | None,
     manual_login_handler: Callable[[], None] | None = None,
+    browser=None,
 ) -> List[str]:
-    """Abre o quadro, rola a página e coleta URLs de Pins."""
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
+    """Abre o quadro, rola a página e coleta URLs de Pins.
+    
+    Se browser for fornecido, reusa-o. Caso contrário, cria um temporário.
+    """
+    if browser is not None:
+        # Reusa browser existente
         ctx = browser.new_context(user_agent=UA)
         page = ctx.new_page()
-        page.goto(board_url, wait_until="networkidle", timeout=TIMEOUT_PAGE_LOAD)
-
-        if ("login" in page.url or "auth" in page.url) and not manual_login:
-            browser.close()
-            return []
-
-        if manual_login:
-            if manual_login_handler:
-                manual_login_handler()
-            else:
-                print(
-                    "\n>>> Faça login na janela aberta e certifique-se de estar no QUADRO desejado."
-                    "\n>>> Volte ao terminal e pressione ENTER para continuar…",
-                    flush=True,
-                )
-                try:
-                    input()
-                except KeyboardInterrupt:
-                    browser.close()
-                    sys.exit(1)
-
         try:
-            page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_DOM_READY)
-        except Exception:
-            pass
-        page.wait_for_timeout(1000)
-
-        seen = set()
-        stable_rounds = 0
-        last_count = 0
-
-        while True:
-            hrefs = page.eval_on_selector_all(
-                'a[href^="/pin/"]',
-                'els => Array.from(new Set(els.map(e => e.getAttribute("href"))))',
+            return _collect_pin_links_with_browser(
+                page, board_url, manual_login, scroll_pause, max_pins, manual_login_handler
             )
-            for h in hrefs:
-                if not h:
-                    continue
-                u = _abs_url(h.split('?')[0])
-                u = u.replace("://br.pinterest.com/", "://www.pinterest.com/")
-                if u.startswith(f'{PINTEREST_BASE_URL}/pin/'):
-                    seen.add(u)
-
-            if max_pins and len(seen) >= max_pins:
-                break
-
+        finally:
+            ctx.close()
+    else:
+        # Cria browser temporário (API legada)
+        with sync_playwright() as p:
+            browser_temp = p.chromium.launch(headless=headless)
+            ctx = browser_temp.new_context(user_agent=UA)
+            page = ctx.new_page()
             try:
-                page.evaluate(
-                    '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
-                    'if (!el) return; window.scrollTo(0, el.scrollHeight); })()'
+                return _collect_pin_links_with_browser(
+                    page, board_url, manual_login, scroll_pause, max_pins, manual_login_handler
                 )
-            except Exception:
-                print("  Aviso: falha ao rolar (DOM indisponível). Encerrando coleta deste quadro.")
-                break
-
-            page.wait_for_timeout(int(scroll_pause * 1000))
-
-            if len(seen) == last_count:
-                stable_rounds += 1
-            else:
-                stable_rounds = 0
-                last_count = len(seen)
-
-            if stable_rounds >= 6:
-                break
-
-        browser.close()
-        return list(seen)[:max_pins] if max_pins else list(seen)
+            finally:
+                browser_temp.close()
 
 
-def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float) -> List[str]:
-    """Coleta URLs de todos os quadros públicos do usuário."""
+def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float, browser=None) -> List[str]:
+    """Coleta URLs de todos os quadros públicos do usuário.
+    
+    Se browser for fornecido, reusa-o. Caso contrário, cria um temporário.
+    """
     m = USER_BOARDS_RE.match(username_or_url.strip())
     if m:
         username = m.group(1)
@@ -305,13 +338,9 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
         "followers",
     }
 
-    seen = set()
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        ctx = browser.new_context(user_agent=UA)
-        page = ctx.new_page()
-
+    def _collect_with_page(page) -> set:
+        """Helper interno para coletar boards usando page fornecido."""
+        seen = set()
         for url in candidates:
             try:
                 page.goto(url, wait_until="networkidle", timeout=TIMEOUT_PAGE_LOAD)
@@ -360,9 +389,28 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                     break
             except Exception:
                 continue
+        return seen
 
-        browser.close()
-        return sorted(seen)
+    if browser is not None:
+        # Reusa browser existente
+        ctx = browser.new_context(user_agent=UA)
+        page = ctx.new_page()
+        try:
+            seen = _collect_with_page(page)
+            return sorted(seen)
+        finally:
+            ctx.close()
+    else:
+        # Cria browser temporário (API legada)
+        with sync_playwright() as p:
+            browser_temp = p.chromium.launch(headless=headless)
+            ctx = browser_temp.new_context(user_agent=UA)
+            page = ctx.new_page()
+            try:
+                seen = _collect_with_page(page)
+                return sorted(seen)
+            finally:
+                browser_temp.close()
 
 
 def create_session() -> requests.Session:
@@ -437,6 +485,7 @@ def download_board(
     session: requests.Session | None = None,
     status_cb: StatusCallback | None = None,
     manual_login_handler: Callable[[str], None] | None = None,
+    browser_shared=None,
 ) -> BoardDownloadResult:
     emit = status_cb or (lambda *_: None)
     session = session or create_session()
@@ -474,6 +523,7 @@ def download_board(
         scroll_pause=options.scroll_pause,
         max_pins=options.max_pins,
         manual_login_handler=handle_manual_login if options.manual_login else None,
+        browser=browser_shared,
     )
 
     if not pin_links:
@@ -559,56 +609,68 @@ def download_user_boards(
     manual_login_handler: Callable[[str], None] | None = None,
 ) -> List[BoardDownloadResult]:
     emit = status_cb or (lambda *_: None)
-    emit("log", {"message": "Coletando quadros públicos do usuário…"})
-    boards = collect_board_urls(
-        username_or_url,
-        headless=options.headless,
-        scroll_pause=options.scroll_pause,
-    )
-
-    if not boards:
-        emit("log", {"message": "Nenhum quadro público encontrado para o usuário."})
-        return []
-
-    emit("boards_found", {"boards": boards})
-    emit("log", {"message": f"Encontrados {len(boards)} quadros. Iniciando downloads…"})
-
-    results: Dict[str, BoardDownloadResult] = {}
-
-    if options.boards_workers <= 1:
-        session = create_session()
-        for idx, board in enumerate(boards, 1):
-            res = download_board(
-                board,
-                options,
-                session=session,
-                status_cb=emit,
-                manual_login_handler=manual_login_handler,
-            )
-            results[board] = res
-            emit("overall_progress", {"current": idx, "total": len(boards)})
-    else:
-        def worker(board_url: str) -> BoardDownloadResult:
-            return download_board(
-                board_url,
-                options,
-                session=None,
-                status_cb=emit,
-                manual_login_handler=manual_login_handler,
+    
+    # Criar browser uma única vez para todas as operações
+    with sync_playwright() as p:
+        browser_shared = p.chromium.launch(headless=options.headless)
+        try:
+            emit("log", {"message": "Coletando quadros públicos do usuário…"})
+            boards = collect_board_urls(
+                username_or_url,
+                headless=options.headless,
+                scroll_pause=options.scroll_pause,
+                browser=browser_shared,
             )
 
-        with ThreadPoolExecutor(max_workers=options.boards_workers) as ex:
-            futs = {ex.submit(worker, board): board for board in boards}
-            completed = 0
-            for fut in as_completed(futs):
-                res = fut.result()
-                results[res.board_url] = res
-                completed += 1
-                emit("overall_progress", {"current": completed, "total": len(boards)})
+            if not boards:
+                emit("log", {"message": "Nenhum quadro público encontrado para o usuário."})
+                return []
 
-    ordered_results = [results[b] for b in boards if b in results]
-    emit("user_complete", {"boards": boards, "results": ordered_results})
-    return ordered_results
+            emit("boards_found", {"boards": boards})
+            emit("log", {"message": f"Encontrados {len(boards)} quadros. Iniciando downloads…"})
+
+            results: Dict[str, BoardDownloadResult] = {}
+
+            if options.boards_workers <= 1:
+                session = create_session()
+                for idx, board in enumerate(boards, 1):
+                    res = download_board(
+                        board,
+                        options,
+                        session=session,
+                        status_cb=emit,
+                        manual_login_handler=manual_login_handler,
+                        browser_shared=browser_shared,
+                    )
+                    results[board] = res
+                    emit("overall_progress", {"current": idx, "total": len(boards)})
+            else:
+                # Nota: modo paralelo (boards_workers > 1) não pode reusar browser
+                # pois Playwright não é thread-safe. Cada worker criará seu próprio browser.
+                def worker(board_url: str) -> BoardDownloadResult:
+                    return download_board(
+                        board_url,
+                        options,
+                        session=None,
+                        status_cb=emit,
+                        manual_login_handler=manual_login_handler,
+                        browser_shared=None,  # Sem browser compartilhado em modo paralelo
+                    )
+
+                with ThreadPoolExecutor(max_workers=options.boards_workers) as ex:
+                    futs = {ex.submit(worker, board): board for board in boards}
+                    completed = 0
+                    for fut in as_completed(futs):
+                        res = fut.result()
+                        results[res.board_url] = res
+                        completed += 1
+                        emit("overall_progress", {"current": completed, "total": len(boards)})
+
+            ordered_results = [results[b] for b in boards if b in results]
+            emit("user_complete", {"boards": boards, "results": ordered_results})
+            return ordered_results
+        finally:
+            browser_shared.close()
 
 
 # ---------- CLI ----------

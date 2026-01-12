@@ -20,6 +20,8 @@ from pinterest_board_dl import (
     load_pin_cache,
     save_pin_cache,
     DownloadOptions,
+    collect_pin_links,
+    collect_board_urls,
 )
 
 
@@ -116,6 +118,26 @@ def test_cli_help():
     print("✅ PASS: Flags de cache presentes no CLI\n")
 
 
+def test_browser_reuse():
+    """Test 6: Validar que collect_pin_links e collect_board_urls aceitam browser opcional."""
+    print("TEST 6: Browser reuse - API signature")
+    
+    import inspect
+    
+    # Verificar signatures
+    sig_pins = inspect.signature(collect_pin_links)
+    sig_boards = inspect.signature(collect_board_urls)
+    
+    assert 'browser' in sig_pins.parameters, "collect_pin_links missing 'browser' parameter"
+    assert 'browser' in sig_boards.parameters, "collect_board_urls missing 'browser' parameter"
+    
+    # Verificar defaults (None = opcional)
+    assert sig_pins.parameters['browser'].default is None, "browser param should default to None"
+    assert sig_boards.parameters['browser'].default is None, "browser param should default to None"
+    
+    print("✅ PASS: Funções aceitam browser opcional corretamente\n")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("SMOKE TESTS - ONDA 1 E ONDA 2")
@@ -127,6 +149,7 @@ if __name__ == "__main__":
         test_download_options()
         test_retry_logic()
         test_cli_help()
+        test_browser_reuse()
         
         print("=" * 60)
         print("✅ TODOS OS TESTES PASSARAM!")
