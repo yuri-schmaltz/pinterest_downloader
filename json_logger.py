@@ -155,7 +155,7 @@ class JSONLogger:
         }
         
         try:
-            self.output_file.write_text(json.dumps(data, indent=2))
+            self.output_file.write_text(json.dumps(data, indent=2, ensure_ascii=False))
         except Exception as e:
             print(f"⚠️  Erro ao salvar logs: {e}", file=sys.stderr)
     

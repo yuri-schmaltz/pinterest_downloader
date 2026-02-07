@@ -212,7 +212,7 @@ class RateLimiter:
         stats["timestamp"] = datetime.utcnow().isoformat(timespec='milliseconds') + 'Z'
         
         try:
-            Path(filename).write_text(json.dumps(stats, indent=2))
+            Path(filename).write_text(json.dumps(stats, indent=2, ensure_ascii=False))
         except Exception as e:
             print(f"⚠️  Erro ao salvar stats de rate limit: {e}")
 

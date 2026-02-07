@@ -55,7 +55,7 @@ def test_cache_functions():
             "https://www.pinterest.com/pin/456": "https://example.com/img2.jpg",
         }
         
-        cache_json = json.dumps(test_cache, indent=2)
+        cache_json = json.dumps(test_cache, indent=2, ensure_ascii=False)
         cache_file.write_text(cache_json)
         
         # Carregar cache

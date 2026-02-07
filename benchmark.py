@@ -185,7 +185,7 @@ class BenchmarkRunner:
         
         # Salvar relatório
         report_file = Path(f"benchmark_{int(time.time())}.json")
-        report_file.write_text(json.dumps(report, indent=2))
+        report_file.write_text(json.dumps(report, indent=2, ensure_ascii=False))
         print(f"\n💾 Relatório salvo em: {report_file}")
         
         return report

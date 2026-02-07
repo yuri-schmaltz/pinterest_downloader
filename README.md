@@ -106,9 +106,13 @@ O botão **Cancelar** solicita o término do processo atual de forma segura.
 
 ## 📚 Documentação Completa
 
+### Guias de Uso
+- **[RUNBOOK_INSTALL.md](RUNBOOK_INSTALL.md)** — Instalação e configuração (Linux/Windows)
+- **[RUNBOOK_TROUBLESHOOTING.md](RUNBOOK_TROUBLESHOOTING.md)** — Resolução de problemas comuns
+
+### Guias Técnicos
 - **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** — Resumo técnico de todas as implementações
 - **[ONDAS_COMPLETAS.md](ONDAS_COMPLETAS.md)** — Resumo visual com métricas e benefícios
-- **[ONDA_4_GUIDE.md](ONDA_4_GUIDE.md)** — Guia de diagnóstico e scroll inteligente
 - **[ONDA_5B_GUIDE.md](ONDA_5B_GUIDE.md)** — Guia de JSON logging com exemplos jq
 - **[ONDA_5C_GUIDE.md](ONDA_5C_GUIDE.md)** — Guia de adaptive workers e métricas
 - **[ONDA_5D_GUIDE.md](ONDA_5D_GUIDE.md)** — Guia de CI/CD e benchmarks

@@ -179,7 +179,7 @@ def check_cache_functionality() -> Tuple[str, str]:
         cache_file = Path(".pinterest_cache.json.test")
         
         # Salvar
-        cache_file.write_text(json.dumps(cache_test))
+        cache_file.write_text(json.dumps(cache_test, ensure_ascii=False))
         
         # Carregar
         loaded = json.loads(cache_file.read_text())
@@ -333,11 +333,11 @@ def main():
     # Baseline
     print_section("📈 BASELINE")
     metrics = collect_metrics()
-    print(f"\n{json.dumps(metrics, indent=2)}\n")
+    print(f"\n{json.dumps(metrics, indent=2, ensure_ascii=False)}\n")
     
     # Save metrics
     metrics_file = Path("diagnostics_baseline.json")
-    metrics_file.write_text(json.dumps(metrics, indent=2))
+    metrics_file.write_text(json.dumps(metrics, indent=2, ensure_ascii=False))
     print(f"{GREEN}✅{RESET} Métricas salvas em: {metrics_file}\n")
     
     print(f"{BOLD}{'=' * 70}{RESET}")

@@ -51,25 +51,118 @@ SCROLL_HEIGHT_CHECK = True  # usar detecção de altura de página
 PIN_LINK_RE = re.compile(r"/pin/(\d+)/?")
 USER_BOARDS_RE = re.compile(r"^https?://(?:www|br)\\.pinterest\\.com/([^/]+)/?$", re.I)
 
-# ---------- Cache ----------
+# ---------- Cache (XDG/AppData compliant) ----------
 
-CACHE_FILE = Path(".pinterest_cache.json")
+APP_NAME = "pinterest-downloader"
 
 
-def load_pin_cache() -> Dict[str, str]:
-    """Carrega cache de pin_url -> og:image_url."""
-    if CACHE_FILE.exists():
+def get_cache_dir() -> Path:
+    """Retorna o diretório de cache apropriado para o SO.
+    
+    Linux: XDG_CACHE_HOME (~/.cache/pinterest-downloader/)
+    Windows: LOCALAPPDATA (C:\\Users\\<user>\\AppData\\Local\\pinterest-downloader\\)
+    Fallback: Diretório atual
+    """
+    if sys.platform == "win32":
+        # Windows: Use LOCALAPPDATA
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            cache_dir = Path(base) / APP_NAME
+        else:
+            cache_dir = Path.home() / "AppData" / "Local" / APP_NAME
+    else:
+        # Linux/macOS: Use XDG_CACHE_HOME
+        xdg_cache = os.environ.get("XDG_CACHE_HOME")
+        if xdg_cache:
+            cache_dir = Path(xdg_cache) / APP_NAME
+        else:
+            cache_dir = Path.home() / ".cache" / APP_NAME
+    
+    # Ensure directory exists
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        # Fallback to current directory if creation fails
+        cache_dir = Path(".")
+    
+    return cache_dir
+
+
+def get_config_dir() -> Path:
+    """Retorna o diretório de configuração apropriado para o SO.
+    
+    Linux: XDG_CONFIG_HOME (~/.config/pinterest-downloader/)
+    Windows: LOCALAPPDATA (C:\\Users\\<user>\\AppData\\Local\\pinterest-downloader\\)
+    Fallback: Diretório atual
+    """
+    if sys.platform == "win32":
+        # Windows: Use LOCALAPPDATA (same as cache for simplicity)
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            config_dir = Path(base) / APP_NAME
+        else:
+            config_dir = Path.home() / "AppData" / "Local" / APP_NAME
+    else:
+        # Linux/macOS: Use XDG_CONFIG_HOME
+        xdg_config = os.environ.get("XDG_CONFIG_HOME")
+        if xdg_config:
+            config_dir = Path(xdg_config) / APP_NAME
+        else:
+            config_dir = Path.home() / ".config" / APP_NAME
+    
+    # Ensure directory exists
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        # Fallback to current directory if creation fails
+        config_dir = Path(".")
+    
+    return config_dir
+
+
+def get_cache_file_path(filename: str = ".pinterest_cache.json") -> Path:
+    """Retorna o caminho completo para um arquivo de cache."""
+    return get_cache_dir() / filename
+
+
+# Legacy compatibility: CACHE_FILE now resolves dynamically
+CACHE_FILE = get_cache_file_path()
+
+
+def load_pin_cache(cache_dir: str | None = None) -> Dict[str, str]:
+    """Carrega cache de pin_url -> og:image_url.
+    
+    Args:
+        cache_dir: Diretório personalizado (opcional). Se None, usa XDG/AppData.
+    """
+    if cache_dir:
+        cache_path = Path(cache_dir) / ".pinterest_cache.json"
+    else:
+        cache_path = get_cache_file_path()
+    
+    if cache_path.exists():
         try:
-            return json.loads(CACHE_FILE.read_text())
+            return json.loads(cache_path.read_text())
         except Exception:
             return {}
     return {}
 
 
-def save_pin_cache(cache: Dict[str, str]) -> None:
-    """Salva cache de pins em disco."""
+def save_pin_cache(cache: Dict[str, str], cache_dir: str | None = None) -> None:
+    """Salva cache de pins em disco.
+    
+    Args:
+        cache: Dict de pin_url -> og:image_url
+        cache_dir: Diretório personalizado (opcional). Se None, usa XDG/AppData.
+    """
+    if cache_dir:
+        cache_path = Path(cache_dir) / ".pinterest_cache.json"
+    else:
+        cache_path = get_cache_file_path()
+    
     try:
-        CACHE_FILE.write_text(json.dumps(cache, indent=2))
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass  # Falha de cache não deve quebrar fluxo
 
@@ -126,6 +219,29 @@ def slugify(name: str) -> str:
     s = re.sub(r'\s+', ' ', s).strip()
     s = s.replace('/', '／').replace('\x00', '')
     return s or "sem_nome"
+
+
+def normalize_url(url_or_user: str) -> str:
+    """Normaliza entrada do usuário para uma URL válida do Pinterest."""
+    url = url_or_user.strip()
+    if not url:
+        return ""
+    if url.startswith(("http://", "https://")):
+        return url
+    
+    # Se contém '.' no domínio mas s/ protocolo
+    if "." in url.split("/")[0]:
+        return f"https://{url}"
+        
+    # Remove '/' extras no início (ex: /pin/...)
+    url = url.lstrip("/")
+    
+    # Se parece um pin path
+    if url.startswith("pin/"):
+        return f"{PINTEREST_BASE_URL}/{url}"
+        
+    # Assume ser um username (yuri_schmaltz) ou username/board
+    return f"{PINTEREST_BASE_URL}/{url}"
 
 
 def split_user_board_from_url(board_url: str) -> tuple[str, str]:
@@ -604,18 +720,20 @@ def download_board(
     manual_login_handler: Callable[[str], None] | None = None,
     browser_shared=None,
 ) -> BoardDownloadResult:
+    board_url = normalize_url(board_url)
     emit = status_cb or (lambda *_: None)
     logger = get_logger()
     session = session or create_session()
 
     # Log phase start
     logger.start_phase("download_board")
-    logger.info("download_board", f"Iniciando download: {board_url}", board_url=board_url)
+    display_url = urllib.parse.unquote(board_url)
+    logger.info("download_board", f"Iniciando download: {display_url}", board_url=board_url)
 
     target_dir = out_dir_for(board_url, options.out_root)
 
-    emit("board_start", {"board_url": board_url, "output_dir": target_dir})
-    emit("log", {"message": f"[BOARD] {board_url}"})
+    emit("board_start", {"board_url": display_url, "output_dir": target_dir})
+    emit("log", {"message": f"[BOARD] {display_url}"})
     emit("log", {"message": "  [1/3] Coletando links dos pins…"})
     def handle_manual_login() -> None:
         emit(
@@ -735,12 +853,15 @@ def download_user_boards(
     status_cb: StatusCallback | None = None,
     manual_login_handler: Callable[[str], None] | None = None,
 ) -> List[BoardDownloadResult]:
+    username_or_url = normalize_url(username_or_url)
+    display_name = urllib.parse.unquote(username_or_url)
     emit = status_cb or (lambda *_: None)
     logger = get_logger()
     
     # Log phase start
     logger.start_phase("download_user_boards")
-    logger.info("download_user_boards", f"Iniciando downloads do usuário: {username_or_url}", board_url=username_or_url)
+    logger.info("download_user_boards", f"Iniciando downloads do usuário: {display_name}", board_url=username_or_url)
+    emit("log", {"message": f"[USER] {display_name}"})
     
     # Criar browser uma única vez para todas as operações
     with sync_playwright() as p:
