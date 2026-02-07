@@ -17,7 +17,12 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, NamedTuple
+from typing import Callable, Dict, Iterable, List, NamedTuple, TypedDict
+
+class BoardMetadata(TypedDict):
+    url: str
+    title: str
+    thumbnail_url: str
 
 import requests
 from playwright.sync_api import sync_playwright
@@ -476,8 +481,8 @@ def collect_pin_links(
                 browser_temp.close()
 
 
-def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float, browser=None) -> List[str]:
-    """Coleta URLs de todos os quadros públicos do usuário.
+def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float, browser=None) -> List[BoardMetadata]:
+    """Coleta URLs e metadados de todos os quadros públicos do usuário.
     
     Se browser for fornecido, reusa-o. Caso contrário, cria um temporário.
     """
@@ -507,9 +512,11 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
         "followers",
     }
 
-    def _collect_with_page(page) -> set:
+    def _collect_with_page(page) -> List[BoardMetadata]:
         """Helper interno para coletar boards usando page fornecido."""
-        seen = set()
+        seen_urls = set()
+        results: List[BoardMetadata] = []
+        
         for url in candidates:
             try:
                 page.goto(url, wait_until="networkidle", timeout=TIMEOUT_PAGE_LOAD)
@@ -520,21 +527,45 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                 last_height = 0
 
                 for _ in range(200):
-                    hrefs = page.eval_on_selector_all(
-                        'a[href]',
-                        'els => Array.from(new Set(els.map(e => e.getAttribute("href"))))',
+                    # Extrair objetos com metadados via JS
+                    boards_data = page.evaluate(
+                        f"""(username) => {{
+                            const results = [];
+                            const exclude = {list(exclude)};
+                            const els = document.querySelectorAll('a[href]');
+                            
+                            els.forEach(el => {{
+                                const href = el.getAttribute("href");
+                                if (!href) return;
+                                
+                                // Extrair partes do path: /<user>/<board>/
+                                const parts = href.split('/').filter(Boolean);
+                                if (parts.length === 2 && parts[0].toLowerCase() === username.toLowerCase()) {{
+                                    const board = parts[1];
+                                    if (exclude.includes(board.toLowerCase()) || board.startsWith('_')) return;
+                                    
+                                    const fullUrl = "https://www.pinterest.com/" + parts[0] + "/" + parts[1] + "/";
+                                    
+                                    // Tentar encontrar título
+                                    let title = el.innerText.split('\\n')[0].trim() || board;
+                                    
+                                    // Tentar encontrar thumbnail
+                                    let thumb = "";
+                                    const img = el.querySelector('img');
+                                    if (img) thumb = img.getAttribute('src') || "";
+                                    
+                                    results.push({{url: fullUrl, title: title, thumbnail_url: thumb}});
+                                }}
+                            }});
+                            return results;
+                        }}""",
+                        username
                     )
-                    for h in hrefs:
-                        if not h:
-                            continue
-                        u = _abs_url(h)
-                        parsed = urllib.parse.urlsplit(u)
-                        parts = [x for x in parsed.path.split('/') if x]
-                        if len(parts) == 2 and parts[0].lower() == username.lower():
-                            board = parts[1]
-                            if board.lower() in exclude or board.startswith('_'):
-                                continue
-                            seen.add(f"{PINTEREST_BASE_URL}/{parts[0]}/{board}/")
+                    
+                    for b in boards_data:
+                        if b['url'] not in seen_urls:
+                            seen_urls.add(b['url'])
+                            results.append(b)
 
                     # Scroll detection inteligente
                     if SCROLL_HEIGHT_CHECK:
@@ -543,24 +574,24 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                                 '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
                                 'return el ? el.scrollHeight : 0; })()'
                             )
-                            if current_height == last_height and len(seen) == last_count:
+                            if current_height == last_height and len(results) == last_count:
                                 stable_rounds += 1
                             else:
                                 stable_rounds = 0
                                 last_height = current_height
-                                last_count = len(seen)
+                                last_count = len(results)
                         except Exception:
-                            if len(seen) == last_count:
+                            if len(results) == last_count:
                                 stable_rounds += 1
                             else:
                                 stable_rounds = 0
-                                last_count = len(seen)
+                                last_count = len(results)
                     else:
-                        if len(seen) == last_count:
+                        if len(results) == last_count:
                             stable_rounds += 1
                         else:
                             stable_rounds = 0
-                            last_count = len(seen)
+                            last_count = len(results)
 
                     if stable_rounds >= SCROLL_STABLE_ROUNDS:
                         break
@@ -575,30 +606,26 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
 
                     page.wait_for_timeout(int(scroll_pause * 1000))
 
-                if seen:
+                if results:
                     break
             except Exception:
                 continue
-        return seen
+        return results
 
     if browser is not None:
-        # Reusa browser existente
         ctx = browser.new_context(user_agent=UA)
         page = ctx.new_page()
         try:
-            seen = _collect_with_page(page)
-            return sorted(seen)
+            return _collect_with_page(page)
         finally:
             ctx.close()
     else:
-        # Cria browser temporário (API legada)
         with sync_playwright() as p:
             browser_temp = p.chromium.launch(headless=headless)
             ctx = browser_temp.new_context(user_agent=UA)
             page = ctx.new_page()
             try:
-                seen = _collect_with_page(page)
-                return sorted(seen)
+                return _collect_with_page(page)
             finally:
                 browser_temp.close()
 
@@ -943,14 +970,12 @@ def _cli_status_printer(stage: str, data: Dict) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Baixa imagens de um QUADRO do Pinterest, ou de TODOS os quadros públicos de um usuário."
+        description="Baixa imagens de TODOS os quadros públicos de um usuário do Pinterest."
     )
     ap.add_argument(
-        "board_url",
-        nargs="?",
-        help="URL do quadro. Ex.: https://www.pinterest.com/<usuario>/<quadro>/",
+        "user",
+        help="Usuário do Pinterest para baixar todos os quadros (ex.: yuri_schmaltz ou URL do perfil)",
     )
-    ap.add_argument("--user", help="Usuário para baixar TODOS os quadros públicos (ex.: yuri_schmaltz)")
     ap.add_argument("-o", "--out", default="pins", help="Pasta raiz de saída (default: ./pins)")
     ap.add_argument("--headful", action="store_true", help="Abre o navegador visível (útil p/ depurar/login)")
     ap.add_argument(
@@ -1006,8 +1031,8 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    if not args.board_url and not args.user:
-        print("Erro: informe uma URL de quadro OU use --user <usuario>.")
+    if not args.user:
+        ap.print_help()
         sys.exit(2)
 
     os.makedirs(args.out, exist_ok=True)
@@ -1035,16 +1060,10 @@ def main() -> None:
     total_ok = 0
     total_all = 0
 
-    if args.user:
-        results = download_user_boards(args.user, options, status_cb=_cli_status_printer)
-        if not results:
-            sys.exit(5)
-        for res in results:
-            total_ok += res.downloaded
-            total_all += res.total
-    else:
-        board = args.board_url.strip()
-        res = download_board(board, options, status_cb=_cli_status_printer)
+    results = download_user_boards(args.user, options, status_cb=_cli_status_printer)
+    if not results:
+        sys.exit(5)
+    for res in results:
         total_ok += res.downloaded
         total_all += res.total
 

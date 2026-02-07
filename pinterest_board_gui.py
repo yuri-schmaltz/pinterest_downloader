@@ -57,17 +57,17 @@ class DownloadWorker(QThread):
 
     def __init__(
         self,
-        mode: str,
         options: DownloadOptions,
-        board_url: str | None = None,
-        username_or_url: str | None = None,
+        username_or_url: str,
+        discovery_mode: bool = False,
+        selected_boards: List[str] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.mode = mode
         self.options = options
-        self.board_url = board_url
         self.username_or_url = username_or_url
+        self.discovery_mode = discovery_mode
+        self.selected_boards = selected_boards
         self._manual_event = threading.Event()
         self._cancelled = False
 
@@ -138,16 +138,24 @@ class DownloadWorker(QThread):
     def run(self) -> None:
         try:
             totals = [0, 0]
-            if self.mode == "board" and self.board_url:
-                result = download_board(
-                    self.board_url,
-                    self.options,
-                    status_cb=self._status_callback,
-                    manual_login_handler=self._manual_login_wait if self.options.manual_login else None,
+            if not self.username_or_url:
+                raise ValueError("Usuário ou URL não informado.")
+
+            if self.discovery_mode:
+                self.log_message.emit(f"Buscando quadros de: {self.username_or_url}…")
+                boards = collect_board_urls(
+                    self.username_or_url,
+                    headless=self.options.headless,
+                    scroll_pause=self.options.scroll_pause,
                 )
-                totals[0] += result.downloaded
-                totals[1] += result.total
-            elif self.mode == "user" and self.username_or_url:
+                self.boards_found.emit(boards)
+                return
+
+            if self.selected_boards:
+                # Seletivos: ignorar busca automática
+                boards_to_process = self.selected_boards
+            else:
+                # Comportamento padrão: busca automática de todos os quadros
                 results = download_user_boards(
                     self.username_or_url,
                     self.options,
@@ -157,15 +165,36 @@ class DownloadWorker(QThread):
                 for res in results:
                     totals[0] += res.downloaded
                     totals[1] += res.total
-                    if self._cancelled:
-                        raise DownloadCancelled()
-            else:
-                raise ValueError("Modo ou parâmetros inválidos para download.")
-
-            if self._cancelled:
-                self.cancelled.emit()
-            else:
                 self.finished_with_totals.emit(totals[0], totals[1])
+                return
+
+            # Se chegamos aqui, temos boards_to_process (selecionados)
+            from pinterest_board_dl import create_session, download_board, sync_playwright
+            
+            with sync_playwright() as p:
+                browser_shared = p.chromium.launch(headless=self.options.headless)
+                try:
+                    self.overall_progress.emit(0, len(boards_to_process))
+                    session = create_session()
+                    for idx, board in enumerate(boards_to_process, 1):
+                        if self._cancelled:
+                            raise DownloadCancelled()
+                        
+                        res = download_board(
+                            board,
+                            self.options,
+                            session=session,
+                            status_cb=self._status_callback,
+                            manual_login_handler=self._manual_login_wait if self.options.manual_login else None,
+                            browser_shared=browser_shared,
+                        )
+                        totals[0] += res.downloaded
+                        totals[1] += res.total
+                        self.overall_progress.emit(idx, len(boards_to_process))
+                finally:
+                    browser_shared.close()
+            
+            self.finished_with_totals.emit(totals[0], totals[1])
         except DownloadCancelled:
             self.cancelled.emit()
         except Exception as exc:  # pragma: no cover - exibição no GUI
@@ -175,15 +204,17 @@ class DownloadWorker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Pinterest Board Downloader")
-        self.setMinimumSize(1000, 700)
+        self.setWindowTitle("Pinterest Board Downloader - Seleção Visual")
+        self.resize(1100, 750)
         self.worker: DownloadWorker | None = None
-        self.board_items: dict[str, QListWidgetItem] = {}
+        self.boards_metadata: List[BoardMetadata] = []
+        self.selected_urls: List[str] = []
+        self.board_items: Dict[str, QListWidgetItem] = {}
 
         # Set application icon
         self._set_window_icon()
-
         self._build_ui()
+        self._apply_style()
 
     # --- UI helpers ---
     def _set_window_icon(self) -> None:
@@ -210,37 +241,43 @@ class MainWindow(QMainWindow):
     
     def _build_ui(self) -> None:
         central = QWidget()
-        layout = QVBoxLayout(central)
+        main_layout = QHBoxLayout(central)
 
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_board_tab(), "Quadro único")
-        self.tabs.addTab(self._build_user_tab(), "Todos os quadros do usuário")
-        layout.addWidget(self.tabs)
+        # Coluna Esquerda: Configurações, Progresso e Log
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
 
-        layout.addWidget(self._build_options_group())
-        layout.addWidget(self._build_progress_group())
-        layout.addWidget(self._build_log_widget())
-        layout.addLayout(self._build_buttons())
+        left_layout.addWidget(self._build_user_input())
+        left_layout.addWidget(self._build_options_group())
+        left_layout.addWidget(self._build_progress_group())
+        left_layout.addWidget(self._build_log_widget())
+        left_layout.addLayout(self._build_buttons())
 
         self.status_label = QLabel("Pronto.")
-        layout.addWidget(self.status_label)
+        left_layout.addWidget(self.status_label)
+
+        # Coluna Direita: Seleção de Quadros
+        self.selection_panel = self._build_selection_panel()
+
+        main_layout.addWidget(left_widget, stretch=1)
+        main_layout.addWidget(self.selection_panel, stretch=1)
 
         self.setCentralWidget(central)
 
-    def _build_board_tab(self) -> QWidget:
+    def _build_user_input(self) -> QWidget:
         widget = QWidget()
-        form = QFormLayout(widget)
-        self.board_url_edit = QLineEdit()
-        self.board_url_edit.setPlaceholderText("https://www.pinterest.com/<usuario>/<quadro>/")
-        form.addRow("URL do quadro", self.board_url_edit)
-        return widget
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-    def _build_user_tab(self) -> QWidget:
-        widget = QWidget()
-        form = QFormLayout(widget)
+        layout.addWidget(QLabel("Usuário ou URL:"))
         self.user_edit = QLineEdit()
-        self.user_edit.setPlaceholderText("usuario_pinterest")
-        form.addRow("Usuário ou URL", self.user_edit)
+        self.user_edit.setPlaceholderText("ex: yuri_schmaltz")
+        layout.addWidget(self.user_edit)
+
+        self.list_boards_button = QPushButton("Listar Quadros")
+        self.list_boards_button.clicked.connect(self.start_discovery)
+        layout.addWidget(self.list_boards_button)
         return widget
 
     def _build_options_group(self) -> QGroupBox:
@@ -317,6 +354,24 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.board_list)
         return group
 
+    def _build_selection_panel(self) -> QGroupBox:
+        group = QGroupBox("Seleção de Quadros")
+        layout = QVBoxLayout(group)
+
+        self.select_all_check = QCheckBox("Selecionar Todos")
+        self.select_all_check.stateChanged.connect(self._toggle_select_all)
+        layout.addWidget(self.select_all_check)
+
+        self.selection_list = QListWidget()
+        self.selection_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self.selection_list.itemChanged.connect(self._update_selection_state)
+        layout.addWidget(self.selection_list)
+
+        self.info_selection_label = QLabel("Nenhum quadro carregado.")
+        layout.addWidget(self.info_selection_label)
+
+        return group
+
     def _build_log_widget(self) -> QGroupBox:
         group = QGroupBox("Log detalhado")
         layout = QVBoxLayout(group)
@@ -344,20 +399,52 @@ class MainWindow(QMainWindow):
         if directory:
             self.output_edit.setText(directory)
 
+    def start_discovery(self) -> None:
+        if self.worker and self.worker.isRunning():
+            return
+        
+        username = self.user_edit.text().strip()
+        if not username:
+            QMessageBox.warning(self, "Dados incompletos", "Informe o usuário ou URL do perfil.")
+            return
+
+        out_root = self.output_edit.text().strip() or str(Path("pins").resolve())
+        options = DownloadOptions(
+            out_root=out_root,
+            headless=not self.headful_check.isChecked(),
+            manual_login=self.manual_login_check.isChecked(),
+            scroll_pause=self.scroll_pause_spin.value(),
+        )
+
+        self.log_edit.clear()
+        self.selection_list.clear()
+        self.boards_metadata = []
+        self.info_selection_label.setText("Buscando quadros…")
+        
+        self.worker = DownloadWorker(
+            options=options,
+            username_or_url=username,
+            discovery_mode=True
+        )
+        self._connect_worker_signals()
+        self.worker.start()
+        
+        self.list_boards_button.setEnabled(False)
+        self.start_button.setEnabled(False)
+
     def start_download(self) -> None:
         if self.worker and self.worker.isRunning():
             QMessageBox.warning(self, "Download em andamento", "Aguarde o término antes de iniciar outro download.")
             return
 
-        mode = "board" if self.tabs.currentIndex() == 0 else "user"
-        board_url = self.board_url_edit.text().strip()
         username = self.user_edit.text().strip()
-
-        if mode == "board" and not board_url:
-            QMessageBox.warning(self, "Dados incompletos", "Informe a URL do quadro a ser baixado.")
-            return
-        if mode == "user" and not username:
+        if not username:
             QMessageBox.warning(self, "Dados incompletos", "Informe o usuário ou URL do perfil do Pinterest.")
+            return
+
+        # Verificar se algo foi selecionado
+        if not self.selected_urls:
+            QMessageBox.warning(self, "Seleção vazia", "Selecione ao menos um quadro para baixar.")
             return
 
         out_root = self.output_edit.text().strip() or str(Path("pins").resolve())
@@ -377,19 +464,21 @@ class MainWindow(QMainWindow):
         self.board_progress.reset()
         self.overall_progress.reset()
         self.board_list.clear()
-        self.board_items.clear()
+        # Não limpar board_items pois eles são usados no histórico agora? 
+        # Na verdade self.board_items no código original parece ser usado para o QListWidget de histórico.
+        
         self.status_label.setText("Iniciando…")
 
         self.worker = DownloadWorker(
-            mode=mode,
             options=options,
-            board_url=board_url if mode == "board" else None,
-            username_or_url=username if mode == "user" else None,
+            username_or_url=username,
+            selected_boards=self.selected_urls
         )
         self._connect_worker_signals()
         self.worker.start()
 
         self.start_button.setEnabled(False)
+        self.list_boards_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
 
     def _connect_worker_signals(self) -> None:
