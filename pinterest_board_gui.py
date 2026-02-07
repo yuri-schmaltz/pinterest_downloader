@@ -35,7 +35,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from pinterest_board_dl import DownloadOptions, download_board, download_user_boards
+from pinterest_board_dl import (
+    DownloadOptions,
+    download_board,
+    download_user_boards,
+    BoardMetadata,
+    collect_board_urls,
+)
 
 
 class DownloadCancelled(Exception):
@@ -214,7 +220,6 @@ class MainWindow(QMainWindow):
         # Set application icon
         self._set_window_icon()
         self._build_ui()
-        self._apply_style()
 
     # --- UI helpers ---
     def _set_window_icon(self) -> None:
@@ -543,10 +548,60 @@ class MainWindow(QMainWindow):
             item.setText(f"{board_url} → {downloaded}/{total} imagens (em {output_dir})")
         self.board_progress.setValue(self.board_progress.maximum())
 
-    def on_boards_found(self, boards: List[str]) -> None:
-        self.overall_progress.setMaximum(max(len(boards), 1))
-        self.overall_progress.setValue(0)
-        self.append_log(f"{len(boards)} quadros encontrados.")
+    def on_boards_found(self, boards: List[BoardMetadata]) -> None:
+        self.boards_metadata = boards
+        self.selection_list.clear()
+        self.selected_urls = []
+        
+        if not boards:
+            self.info_selection_label.setText("Nenhum quadro encontrado.")
+            self.list_boards_button.setEnabled(True)
+            self.start_button.setEnabled(False)
+            return
+
+        import requests
+        for b in boards:
+            # Texto do item: Título na linha 1, URL na linha 2
+            item = QListWidgetItem(f"{b['title']}\n{b['url']}")
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            
+            # Thumbnail (simples requests; pode travar levemente se muitos)
+            if b['thumbnail_url']:
+                try:
+                    resp = requests.get(b['thumbnail_url'], timeout=3)
+                    if resp.status_code == 200:
+                        pix = QPixmap()
+                        pix.loadFromData(resp.content)
+                        item.setIcon(QIcon(pix.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio)))
+                except Exception:
+                    pass
+            
+            self.selection_list.addItem(item)
+            
+        self.info_selection_label.setText(f"{len(boards)} quadros encontrados.")
+        self.list_boards_button.setEnabled(True)
+        self.start_button.setEnabled(False)
+
+    def _toggle_select_all(self, state: int) -> None:
+        cs = Qt.CheckState.Checked if state == Qt.CheckState.Checked.value else Qt.CheckState.Unchecked
+        for i in range(self.selection_list.count()):
+            self.selection_list.item(i).setCheckState(cs)
+        self._update_selection_state()
+
+    def _update_selection_state(self) -> None:
+        self.selected_urls = []
+        for i in range(self.selection_list.count()):
+            item = self.selection_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                # Recuperar URL da segunda linha
+                url = item.text().split('\n')[-1]
+                self.selected_urls.append(url)
+        
+        sel_count = len(self.selected_urls)
+        total_count = len(self.boards_metadata)
+        self.info_selection_label.setText(f"{sel_count} selecionados de {total_count}")
+        self.start_button.setEnabled(sel_count > 0)
 
     def on_overall_progress(self, current: int, total: int) -> None:
         self.overall_progress.setMaximum(max(total, 1))
