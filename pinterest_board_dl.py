@@ -50,7 +50,7 @@ DOWNLOAD_RETRY_DELAY = 1.0  # segundos entre retries
 DOWNLOAD_MAX_RETRIES = 1  # número de retries (além da tentativa inicial)
 
 # Scroll detection
-SCROLL_STABLE_ROUNDS = 3  # tentativas estáveis antes de parar (reduzido de 6)
+SCROLL_STABLE_ROUNDS = 6  # tentativas estáveis antes de parar (aumentado para boards grandes)
 SCROLL_HEIGHT_CHECK = True  # usar detecção de altura de página
 
 PIN_LINK_RE = re.compile(r"/pin/(\d+)/?")
@@ -274,58 +274,83 @@ def _abs_url(href: str) -> str:
 # ---------- Resolução de imagem ----------
 
 
-def fetch_og_image(pin_url: str, session: requests.Session, use_rate_limit: bool = False) -> str | None:
-    """Pega a imagem grande via meta og:image do Pin."""
+def fetch_pin_media(pin_url: str, session: requests.Session, use_rate_limit: bool = False) -> str | None:
+    """Pega a URL da mídia (vídeo se disponível, senão imagem) via meta tags do Pin."""
     # Aplicar rate limiting se habilitado
     if use_rate_limit:
         limiter = get_rate_limiter()
-        limiter.acquire()  # Bloqueia até poder fazer requisição
+        limiter.acquire()
     
     try:
         r = session.get(pin_url, timeout=TIMEOUT_HTTP_GET)
-        
-        # Check for 429 (Too Many Requests)
         if r.status_code == 429 and use_rate_limit:
             limiter = get_rate_limiter()
             limiter.report_429()
             return None
-        
         r.raise_for_status()
-        
-        # Report success if using rate limit
         if use_rate_limit:
             limiter = get_rate_limiter()
             limiter.report_success()
-    
     except Exception:
         return None
     
-    m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', r.text, re.I)
+    # 1. Tentar vídeo primeiro (og:video:secure_url)
+    m = re.search(r'<meta[^>]+property=["\']og:video:secure_url["\'][^>]+content=["\']([^"\']+)', r.text, re.I)
+    if not m:
+        m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:video:secure_url["\']', r.text, re.I)
+    
+    # 2. Fallback para imagem (og:image)
+    if not m:
+        m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', r.text, re.I)
     if not m:
         m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', r.text, re.I)
+        
     if not m:
         return None
+        
     url = m.group(1)
     return url.split('?')[0]
 
 
-def download_image(
-    img_url: str,
+def download_media(
+    media_url: str,
     out_dir: str,
     session: requests.Session,
     filename_hint: str | None = None,
     max_retries: int = DOWNLOAD_MAX_RETRIES,
 ) -> bool:
-    name = safe_name(filename_hint or img_url)
-    dest = os.path.join(out_dir, name)
-    if os.path.exists(dest) and os.path.getsize(dest) > 0:
-        return True
-
+    """Baixa mídia (imagem ou vídeo) e detecta extensão correta."""
+    # Placeholder initial name based on hint or URL
+    base_name = safe_name(filename_hint or media_url)
+    dest_path = Path(out_dir) / base_name
+    
+    # Se já existir qualquer arquivo com esse base_name (mesmo com extensão diferente),
+    # pode ser o mesmo pin. Mas vamos ser mais precisos no loop.
+    
     for attempt in range(max_retries + 1):
         try:
-            with session.get(img_url, stream=True, timeout=TIMEOUT_IMAGE_DOWNLOAD) as r:
+            with session.get(media_url, stream=True, timeout=TIMEOUT_IMAGE_DOWNLOAD) as r:
                 r.raise_for_status()
                 os.makedirs(out_dir, exist_ok=True)
+                
+                # Detectar extensão pelo Content-Type
+                content_type = r.headers.get("Content-Type", "")
+                ext = ".jpg"
+                if "video/mp4" in content_type:
+                    ext = ".mp4"
+                elif "image/png" in content_type:
+                    ext = ".png"
+                elif "image/gif" in content_type:
+                    ext = ".gif"
+                elif "image/webp" in content_type:
+                    ext = ".webp"
+                
+                final_filename = base_name if base_name.endswith(ext) else f"{base_name}{ext}"
+                dest = os.path.join(out_dir, final_filename)
+                
+                if os.path.exists(dest) and os.path.getsize(dest) > 0:
+                    return True
+                    
                 with open(dest, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=1 << 15):
                         if chunk:
@@ -333,7 +358,6 @@ def download_image(
             return True
         except Exception:
             if attempt < max_retries:
-                # Exponential backoff: 1s, 2s, 4s...
                 delay = DOWNLOAD_RETRY_DELAY * (2 ** attempt)
                 time.sleep(delay)
             else:
@@ -402,6 +426,17 @@ def _collect_pin_links_with_browser(
         # Scroll detection inteligente: verificar altura da página
         if SCROLL_HEIGHT_CHECK:
             try:
+                # Verificar se chegamos na seção "Mais como esse" para evitar poluição
+                has_more_like_this = page.evaluate(
+                    '(() => { '
+                    '  const headers = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6")); '
+                    '  return headers.some(h => h.innerText.includes("Mais como esse") || h.innerText.includes("More like this")); '
+                    '})()'
+                )
+                if has_more_like_this:
+                    # Se encontramos o cabeçalho de recomendações, paramos a coleta por aqui
+                    break
+
                 current_height = page.evaluate(
                     '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
                     'return el ? el.scrollHeight : 0; })()'
@@ -435,6 +470,8 @@ def _collect_pin_links_with_browser(
                 '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
                 'if (!el) return; window.scrollTo(0, el.scrollHeight); })()'
             )
+            # Aguarda um pouco mais em boards grandes para o Pinterest respirar
+            page.wait_for_timeout(500)
         except Exception:
             print("  Aviso: falha ao rolar (DOM indisponível). Encerrando coleta deste quadro.")
             break
@@ -691,10 +728,10 @@ def resolve_images(
 
     def work(link: str) -> tuple[str, str | None]:
         start_time = time.time()
-        img = fetch_og_image(link, session, use_rate_limit=rate_limiting)
+        img = fetch_pin_media(link, session, use_rate_limit=rate_limiting)
         if not img:
             mobile = link.replace("www.pinterest.com", "br.pinterest.com")
-            img = fetch_og_image(mobile, session, use_rate_limit=rate_limiting)
+            img = fetch_pin_media(mobile, session, use_rate_limit=rate_limiting)
         
         latency_ms = (time.time() - start_time) * 1000
         
@@ -843,7 +880,7 @@ def download_board(
 
     with ThreadPoolExecutor(max_workers=options.workers) as ex:
         futs = [
-            ex.submit(download_image, img_url, target_dir, session, filename_hint=link)
+            ex.submit(download_media, img_url, target_dir, session, filename_hint=link)
             for link, img_url in pin_img.items()
         ]
         for idx, fut in enumerate(as_completed(futs), 1):

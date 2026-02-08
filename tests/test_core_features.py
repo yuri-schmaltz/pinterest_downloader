@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 import sys
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from pinterest_board_dl import (
     PINTEREST_BASE_URL,
@@ -113,7 +113,7 @@ def test_cli_help():
         [sys.executable, "pinterest_board_dl.py", "--help"],
         capture_output=True,
         text=True,
-        cwd=Path(__file__).parent,
+        cwd=Path(__file__).parent.parent,
     )
     
     assert "--cache-dir" in result.stdout, "--cache-dir flag not found"
@@ -163,7 +163,7 @@ def test_diagnostics_script():
     """Test 8: Verificar existência do script de diagnóstico."""
     print("TEST 8: Script de diagnóstico")
     
-    diag_file = Path(__file__).parent / "diagnostics.py"
+    diag_file = Path(__file__).parent.parent / "diagnostics.py"
     assert diag_file.exists(), "diagnostics.py not found"
     
     # Verificar que é executável
@@ -341,7 +341,8 @@ if __name__ == "__main__":
         # TEST 11: Rate Limiting (ONDA 5E)
         print("TEST 11: Rate Limiting (ONDA 5E)")
         import subprocess
-        result = subprocess.run(["python3", "test_11_rate_limiting.py"], capture_output=True, text=True)
+        test_11_path = Path(__file__).parent / "test_11_rate_limiting.py"
+        result = subprocess.run(["python3", str(test_11_path)], capture_output=True, text=True, cwd=Path(__file__).parent.parent)
         if result.returncode != 0:
             print(f"❌ FAIL: Test 11 falhou\n{result.stdout}\n{result.stderr}")
             sys.exit(1)

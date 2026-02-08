@@ -6,6 +6,10 @@ Valida o sistema de rate limiting inteligente com sliding windows.
 
 import time
 import threading
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from rate_limiter import (
     RateLimiter,
     RateLimitConfig,

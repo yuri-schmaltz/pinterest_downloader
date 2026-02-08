@@ -1,9 +1,0 @@
-{
-  "python_version": "3.12.3",
-  "import_time_s": 3.0994415283203125e-06,
-  "main_size_kb": 32.529296875,
-  "gui_size_kb": 17.85546875,
-  "scroll_stable_rounds": 3,
-  "scroll_height_check": true,
-  "max_retries": 1
-}

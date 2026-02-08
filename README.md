@@ -100,23 +100,23 @@ O botão **Cancelar** solicita o término do processo atual de forma segura.
 ## Desenvolvimento
 
 - O módulo `pinterest_board_dl.py` agora concentra toda a lógica em funções reutilizáveis (`download_board`, `download_user_boards`, etc.), permitindo integrações em outros projetos.
-- Para executar testes: `python test_patches.py` (11 testes, 100% PASS)
+- Para executar testes: `pytest tests/` (11 testes, 100% PASS)
 - Para diagnóstico: `python diagnostics.py`
 - Para benchmark local: `python benchmark.py`
 
 ## 📚 Documentação Completa
 
 ### Guias de Uso
-- **[RUNBOOK_INSTALL.md](RUNBOOK_INSTALL.md)** — Instalação e configuração (Linux/Windows)
-- **[RUNBOOK_TROUBLESHOOTING.md](RUNBOOK_TROUBLESHOOTING.md)** — Resolução de problemas comuns
+- **[RUNBOOK_INSTALL.md](docs/RUNBOOK_INSTALL.md)** — Instalação e configuração (Linux/Windows)
+- **[RUNBOOK_TROUBLESHOOTING.md](docs/RUNBOOK_TROUBLESHOOTING.md)** — Resolução de problemas comuns
 
 ### Guias Técnicos
-- **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** — Resumo técnico de todas as implementações
-- **[ONDAS_COMPLETAS.md](ONDAS_COMPLETAS.md)** — Resumo visual com métricas e benefícios
-- **[ONDA_5B_GUIDE.md](ONDA_5B_GUIDE.md)** — Guia de JSON logging com exemplos jq
-- **[ONDA_5C_GUIDE.md](ONDA_5C_GUIDE.md)** — Guia de adaptive workers e métricas
-- **[ONDA_5D_GUIDE.md](ONDA_5D_GUIDE.md)** — Guia de CI/CD e benchmarks
-- **[ONDA_5E_GUIDE.md](ONDA_5E_GUIDE.md)** — Guia de rate limiting e proteção 429
+- **[IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md)** — Resumo técnico de todas as implementações
+- **[ONDAS_COMPLETAS.md](docs/ONDAS_COMPLETAS.md)** — Resumo visual com métricas e benefícios
+- **[ONDA_5B_GUIDE.md](docs/ONDA_5B_GUIDE.md)** — Guia de JSON logging com exemplos jq
+- **[ONDA_5C_GUIDE.md](docs/ONDA_5C_GUIDE.md)** — Guia de adaptive workers e métricas
+- **[ONDA_5D_GUIDE.md](docs/ONDA_5D_GUIDE.md)** — Guia de CI/CD e benchmarks
+- **[ONDA_5E_GUIDE.md](docs/ONDA_5E_GUIDE.md)** — Guia de rate limiting e proteção 429
 
 ## 📊 Performance
 
