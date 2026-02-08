@@ -369,7 +369,7 @@ class MainWindow(QMainWindow):
 
         self.selection_list = QListWidget()
         self.selection_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
-        self.selection_list.setIconSize(QSize(256, 256))
+        self.selection_list.setIconSize(QSize(128, 128))
         self.selection_list.itemChanged.connect(self._update_selection_state)
         layout.addWidget(self.selection_list)
 
@@ -569,14 +569,14 @@ class MainWindow(QMainWindow):
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
             
-            # Thumbnail ampliada (256x256)
+            # Thumbnail ampliada (128x128)
             if b['thumbnail_url']:
                 try:
                     resp = requests.get(b['thumbnail_url'], timeout=3)
                     if resp.status_code == 200:
                         pix = QPixmap()
                         pix.loadFromData(resp.content)
-                        item.setIcon(QIcon(pix.scaled(256, 256, Qt.AspectRatioMode.KeepAspectRatio)))
+                        item.setIcon(QIcon(pix.scaled(128, 128, Qt.AspectRatioMode.KeepAspectRatio)))
                 except Exception:
                     pass
             
