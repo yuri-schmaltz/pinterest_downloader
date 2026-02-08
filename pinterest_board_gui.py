@@ -369,6 +369,7 @@ class MainWindow(QMainWindow):
 
         self.selection_list = QListWidget()
         self.selection_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self.selection_list.setIconSize(QSize(256, 256))
         self.selection_list.itemChanged.connect(self._update_selection_state)
         layout.addWidget(self.selection_list)
 
@@ -560,21 +561,23 @@ class MainWindow(QMainWindow):
             return
 
         import requests
+        from PyQt6.QtCore import QSize
         for b in boards:
-            # Texto do item: Título + (N Pins) na linha 1, URL na linha 2
+            # Texto do item: Título + (N Pins) na linha 1
             pin_text = f" ({b['pin_count']})" if b.get('pin_count') else ""
-            item = QListWidgetItem(f"{b['title']}{pin_text}\n{b['url']}")
+            item = QListWidgetItem(f"{b['title']}{pin_text}")
+            item.setData(Qt.ItemDataRole.UserRole, b['url']) # Guardar URL internamente
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
             
-            # Thumbnail (simples requests; pode travar levemente se muitos)
+            # Thumbnail ampliada (256x256)
             if b['thumbnail_url']:
                 try:
                     resp = requests.get(b['thumbnail_url'], timeout=3)
                     if resp.status_code == 200:
                         pix = QPixmap()
                         pix.loadFromData(resp.content)
-                        item.setIcon(QIcon(pix.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio)))
+                        item.setIcon(QIcon(pix.scaled(256, 256, Qt.AspectRatioMode.KeepAspectRatio)))
                 except Exception:
                     pass
             
@@ -595,9 +598,10 @@ class MainWindow(QMainWindow):
         for i in range(self.selection_list.count()):
             item = self.selection_list.item(i)
             if item.checkState() == Qt.CheckState.Checked:
-                # Recuperar URL da segunda linha
-                url = item.text().split('\n')[-1]
-                self.selected_urls.append(url)
+                # Recuperar URL dos dados do usuário
+                url = item.data(Qt.ItemDataRole.UserRole)
+                if url:
+                    self.selected_urls.append(url)
         
         sel_count = len(self.selected_urls)
         total_count = len(self.boards_metadata)
