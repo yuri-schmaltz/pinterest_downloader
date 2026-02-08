@@ -595,7 +595,7 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                                     try {{
                                         const text = el.innerText;
                                         // Regex para pegar apenas a contagem de pins: "10 Pins", "1,5 mil Pins", etc.
-                                        const match = text.match(/([\d,.]+\s*(?:mil|mi|k|m|pins|pin)\s*(?:Pins|Pin)?)/i);
+                                        const match = text.match(/([\\d,.]+\s*(?:mil|mi|k|m|pins|pin)\s*(?:Pins|Pin)?)/i);
                                         if (match) pins = match[0].trim();
                                     }} catch(e) {{}}
                                     
