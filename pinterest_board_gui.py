@@ -561,8 +561,9 @@ class MainWindow(QMainWindow):
 
         import requests
         for b in boards:
-            # Texto do item: Título na linha 1, URL na linha 2
-            item = QListWidgetItem(f"{b['title']}\n{b['url']}")
+            # Texto do item: Título + (N Pins) na linha 1, URL na linha 2
+            pin_text = f" ({b['pin_count']})" if b.get('pin_count') else ""
+            item = QListWidgetItem(f"{b['title']}{pin_text}\n{b['url']}")
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
             

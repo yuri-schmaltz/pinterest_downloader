@@ -23,6 +23,7 @@ class BoardMetadata(TypedDict):
     url: str
     title: str
     thumbnail_url: str
+    pin_count: str
 
 import requests
 from playwright.sync_api import sync_playwright
@@ -50,7 +51,7 @@ DOWNLOAD_RETRY_DELAY = 1.0  # segundos entre retries
 DOWNLOAD_MAX_RETRIES = 1  # número de retries (além da tentativa inicial)
 
 # Scroll detection
-SCROLL_STABLE_ROUNDS = 6  # tentativas estáveis antes de parar (aumentado para boards grandes)
+SCROLL_STABLE_ROUNDS = 3  # tentativas estáveis antes de parar (reduzido de 6 na ONDA 4)
 SCROLL_HEIGHT_CHECK = True  # usar detecção de altura de página
 
 PIN_LINK_RE = re.compile(r"/pin/(\d+)/?")
@@ -324,9 +325,15 @@ def download_media(
     base_name = safe_name(filename_hint or media_url)
     dest_path = Path(out_dir) / base_name
     
-    # Se já existir qualquer arquivo com esse base_name (mesmo com extensão diferente),
-    # pode ser o mesmo pin. Mas vamos ser mais precisos no loop.
-    
+    # Pre-check: se já existir um arquivo com o mesmo "stem" (ex: ID do pin) e tamanho > 0, 
+    # podemos assumir que já foi baixado (mesmo que a extensão mude depois).
+    # Isso evita uma requisição HTTP só para verificar o cabeçalho.
+    if os.path.exists(out_dir):
+        stem = Path(base_name).stem
+        for existing_file in os.listdir(out_dir):
+            if existing_file.startswith(stem) and os.path.getsize(os.path.join(out_dir, existing_file)) > 0:
+                return True
+
     for attempt in range(max_retries + 1):
         try:
             with session.get(media_url, stream=True, timeout=TIMEOUT_IMAGE_DOWNLOAD) as r:
@@ -583,6 +590,17 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                                     
                                     const fullUrl = "https://www.pinterest.com/" + parts[0] + "/" + parts[1] + "/";
                                     
+                                    // Tentar encontrar número de pins
+                                    let pins = "";
+                                    try {{
+                                        const allDivs = Array.from(el.querySelectorAll('div, span'));
+                                        const countEl = allDivs.find(d => {{
+                                            const text = d.innerText.toLowerCase();
+                                            return (text.includes('pin') || text.includes('pins')) && /\\d/.test(text) && text.length < 30;
+                                        }});
+                                        if (countEl) pins = countEl.innerText.trim();
+                                    }} catch(e) {{}}
+                                    
                                     // Tentar encontrar título
                                     let title = el.innerText.split('\\n')[0].trim() || board;
                                     
@@ -591,7 +609,7 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                                     const img = el.querySelector('img');
                                     if (img) thumb = img.getAttribute('src') || "";
                                     
-                                    results.push({{url: fullUrl, title: title, thumbnail_url: thumb}});
+                                    results.push({{url: fullUrl, title: title, thumbnail_url: thumb, pin_count: pins}});
                                 }}
                             }});
                             return results;
