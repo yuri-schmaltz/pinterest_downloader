@@ -51,7 +51,7 @@ DOWNLOAD_RETRY_DELAY = 1.0  # segundos entre retries
 DOWNLOAD_MAX_RETRIES = 1  # número de retries (além da tentativa inicial)
 
 # Scroll detection
-SCROLL_STABLE_ROUNDS = 3  # tentativas estáveis antes de parar (reduzido de 6 na ONDA 4)
+SCROLL_STABLE_ROUNDS = 10  # Aumentado para 10 para lidar com carregamento lento/lag
 SCROLL_HEIGHT_CHECK = True  # usar detecção de altura de página
 
 PIN_LINK_RE = re.compile(r"/pin/(\d+)/?")
@@ -434,16 +434,26 @@ def _collect_pin_links_with_browser(
         if SCROLL_HEIGHT_CHECK:
             try:
                 # Verificar se chegamos na seção "Mais como esse" para evitar poluição
-                has_more_like_this = page.evaluate(
-                    '(() => { '
-                    '  const headers = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6")); '
-                    '  return headers.some(h => h.innerText.includes("Mais como esse") || h.innerText.includes("More like this")); '
-                    '})()'
-                )
-                if has_more_like_this:
-                    # Se encontramos o cabeçalho de recomendações, paramos a coleta por aqui
-                    break
-
+                # E apenas se NÃO estamos encontrando novos pins (para evitar falso positivo)
+                current_count = len(seen)
+                if current_count == last_count:
+                    has_more_like_this = page.evaluate(
+                        '(() => { '
+                        '  const headers = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6")); '
+                        '  return headers.some(h => h.innerText.includes("Mais como esse") || h.innerText.includes("More like this")); '
+                        '})()'
+                    )
+                    if has_more_like_this:
+                        # Se encontramos o cabeçalho de recomendações E não temos novos pins, paramos
+                         # Aumentar a chance de ser real: verificar se o scroll está lá embaixo
+                        is_bottom = page.evaluate(
+                            '(() => { '
+                            '  return (window.innerHeight + window.scrollY) >= (document.body.offsetHeight - 500);'
+                            '})()'
+                        )
+                        if is_bottom:
+                            stable_rounds += 2 # Acelerar parada
+                
                 current_height = page.evaluate(
                     '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
                     'return el ? el.scrollHeight : 0; })()'

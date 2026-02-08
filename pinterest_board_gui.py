@@ -629,6 +629,7 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Concluído: {downloaded}/{total} imagens baixadas.")
         self.append_log(f"Total geral: {downloaded}/{total} imagens.")
         self.start_button.setEnabled(True)
+        self.list_boards_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.worker = None
 
@@ -636,6 +637,7 @@ class MainWindow(QMainWindow):
         self.status_label.setText("Operação cancelada.")
         self.append_log("Operação cancelada pelo usuário.")
         self.start_button.setEnabled(True)
+        self.list_boards_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.worker = None
 
@@ -643,6 +645,7 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Erro durante o download", message)
         self.status_label.setText("Erro.")
         self.start_button.setEnabled(True)
+        self.list_boards_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.worker = None
 
