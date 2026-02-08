@@ -1,0 +1,97 @@
+name: Release AppImage
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build AppImage
+    runs-on: ubuntu-20.04  # Use older ubuntu for better glibc compatibility
+
+    permissions:
+      contents: write  # Needed for creating releases
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-venv
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller PinterestDownloader.spec
+
+      - name: Package AppImage
+        run: |
+          # Download linuxdeploy and plugin
+          wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage
+          
+          chmod +x linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-plugin-appimage-x86_64.AppImage
+          
+          # Setup AppDir
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          mkdir -p AppDir/usr/share/applications
+          
+          # Copy binaries and assets
+          cp dist/pinterest-board-downloader AppDir/usr/bin/
+          cp icon.svg AppDir/usr/share/icons/hicolor/256x256/apps/pinterest-downloader.svg
+          
+          # Create desktop file
+          cat > AppDir/usr/share/applications/pinterest-downloader.desktop <<EOF
+          [Desktop Entry]
+          Type=Application
+          Name=Pinterest Downloader
+          Comment=Download images from Pinterest boards
+          Exec=pinterest-board-downloader
+          Icon=pinterest-downloader
+          Categories=Utility;Network;
+          Terminal=false
+          EOF
+          
+          # Build AppImage - explicitly using python3.10 site-packages if needed, 
+          # but PyInstaller usually bundles everything.
+          # We just need linuxdeploy to wrap the binary.
+          
+          # Since PyInstaller already bundled libs, we point linuxdeploy to the AppDir
+          # and tell it where the executable is.
+          
+          # Note: The PyInstaller binary is practically standalone.
+          # We use linuxdeploy mainly to create the AppImage structure easily.
+          
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/pinterest-board-downloader \
+            --desktop-file AppDir/usr/share/applications/pinterest-downloader.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/pinterest-downloader.svg \
+            --output appimage
+
+      - name: Rename AppImage
+        run: |
+          mv Pinterest_Downloader*.AppImage PinterestDownloader-x86_64.AppImage
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: PinterestDownloader-x86_64.AppImage
+          generate_release_notes: true
