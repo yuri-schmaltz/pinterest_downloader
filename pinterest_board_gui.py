@@ -216,6 +216,7 @@ class MainWindow(QMainWindow):
         self.boards_metadata: List[BoardMetadata] = []
         self.selected_urls: List[str] = []
         self.board_items: Dict[str, QListWidgetItem] = {}
+        self.url_to_title: Dict[str, str] = {}
 
         # Set application icon
         self._set_window_icon()
@@ -513,11 +514,12 @@ class MainWindow(QMainWindow):
         self.log_edit.append(message)
 
     def on_board_started(self, board_url: str, output_dir: str) -> None:
-        item = QListWidgetItem(f"{board_url} → {output_dir}")
+        title = self.url_to_title.get(board_url, board_url)
+        item = QListWidgetItem(f"{title} → {output_dir}")
         self.board_list.addItem(item)
         self.board_items[board_url] = item
         item.setData(Qt.ItemDataRole.UserRole, {"downloaded": 0, "total": 0})
-        self.status_label.setText(f"Processando quadro: {board_url}")
+        self.status_label.setText(f"Processando quadro: {title}")
 
     def on_download_started(self, board_url: str, total: int) -> None:
         if total <= 0:
@@ -531,7 +533,8 @@ class MainWindow(QMainWindow):
             data = item.data(Qt.ItemDataRole.UserRole) or {}
             data.update({"total": total})
             item.setData(Qt.ItemDataRole.UserRole, data)
-            item.setText(f"{board_url} → {data.get('total', 0)} imagens")
+            title = self.url_to_title.get(board_url, board_url)
+            item.setText(f"{title} → {data.get('total', 0)} imagens")
 
     def on_download_progress(self, board_url: str, current: int, total: int, downloaded: int) -> None:
         self.board_progress.setMaximum(max(total, 1))
@@ -541,12 +544,14 @@ class MainWindow(QMainWindow):
             data = item.data(Qt.ItemDataRole.UserRole) or {}
             data.update({"downloaded": downloaded, "total": total})
             item.setData(Qt.ItemDataRole.UserRole, data)
-            item.setText(f"{board_url} → {downloaded}/{total} imagens")
+            title = self.url_to_title.get(board_url, board_url)
+            item.setText(f"{title} → {downloaded}/{total} imagens")
 
     def on_board_finished(self, board_url: str, downloaded: int, total: int, output_dir: str) -> None:
         item = self.board_items.get(board_url)
         if item:
-            item.setText(f"{board_url} → {downloaded}/{total} imagens (em {output_dir})")
+            title = self.url_to_title.get(board_url, board_url)
+            item.setText(f"{title} → {downloaded}/{total} imagens (em {output_dir})")
         self.board_progress.setValue(self.board_progress.maximum())
 
     def on_boards_found(self, boards: List[BoardMetadata]) -> None:
@@ -562,10 +567,19 @@ class MainWindow(QMainWindow):
 
         import requests
         for b in boards:
-            # Texto do item: Título + (N Pins) na linha 1
-            pin_text = f" ({b['pin_count']})" if b.get('pin_count') else ""
-            item = QListWidgetItem(f"{b['title']}{pin_text}")
+            # Limpeza do título (remover quebras de linha e espaços extras)
+            title = b['title'].replace('\n', ' ').strip()
+            
+            # Limpeza do pin_count (garantir que não tenha caracteres como "," no início)
+            pin_count = b.get('pin_count', '').strip()
+            if pin_count.startswith(','):
+                pin_count = pin_count[1:].strip()
+            
+            # Texto do item: Título + (N Pins)
+            pin_text = f" ({pin_count})" if pin_count else ""
+            item = QListWidgetItem(f"{title}{pin_text}")
             item.setData(Qt.ItemDataRole.UserRole, b['url']) # Guardar URL internamente
+            self.url_to_title[b['url']] = title # Armazenar para o histórico
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
             

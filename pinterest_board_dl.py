@@ -593,16 +593,21 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                                     // Tentar encontrar número de pins
                                     let pins = "";
                                     try {{
-                                        const allDivs = Array.from(el.querySelectorAll('div, span'));
-                                        const countEl = allDivs.find(d => {{
-                                            const text = d.innerText.toLowerCase();
-                                            return (text.includes('pin') || text.includes('pins')) && /\\d/.test(text) && text.length < 30;
-                                        }});
-                                        if (countEl) pins = countEl.innerText.trim();
+                                        const text = el.innerText;
+                                        // Regex para pegar apenas a contagem de pins: "10 Pins", "1,5 mil Pins", etc.
+                                        const match = text.match(/([\d,.]+\s*(?:mil|mi|k|m|pins|pin)\s*(?:Pins|Pin)?)/i);
+                                        if (match) pins = match[0].trim();
                                     }} catch(e) {{}}
                                     
-                                    // Tentar encontrar título
-                                    let title = el.innerText.split('\\n')[0].trim() || board;
+                                    // Tentar encontrar título usando data-test-id se possível
+                                    let title = board;
+                                    try {{
+                                        const h2 = el.querySelector('h2, [data-test-id="board-card-title"]');
+                                        if (h2) title = h2.innerText.trim();
+                                        else {{
+                                            title = el.innerText.split('\\n')[0].trim() || board;
+                                        }}
+                                    }} catch(e) {{}}
                                     
                                     // Tentar encontrar thumbnail
                                     let thumb = "";
