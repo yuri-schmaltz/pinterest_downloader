@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import List
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
@@ -561,7 +561,6 @@ class MainWindow(QMainWindow):
             return
 
         import requests
-        from PyQt6.QtCore import QSize
         for b in boards:
             # Texto do item: Título + (N Pins) na linha 1
             pin_text = f" ({b['pin_count']})" if b.get('pin_count') else ""
