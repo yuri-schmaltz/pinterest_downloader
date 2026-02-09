@@ -51,7 +51,7 @@ DOWNLOAD_RETRY_DELAY = 1.0  # segundos entre retries
 DOWNLOAD_MAX_RETRIES = 1  # número de retries (além da tentativa inicial)
 
 # Scroll detection
-SCROLL_STABLE_ROUNDS = 10  # Aumentado para 10 para lidar com carregamento lento/lag
+SCROLL_STABLE_ROUNDS = 20  # Aumentado para 20 para ser mais resiliente a lag e popups
 SCROLL_HEIGHT_CHECK = True  # usar detecção de altura de página
 
 PIN_LINK_RE = re.compile(r"/pin/(\d+)/?")
@@ -415,6 +415,20 @@ def _collect_pin_links_with_browser(
     last_height = 0
 
     while True:
+        # Tentar fechar popups de login/interferência
+        try:
+            # Pressionar ESC periodicamente para fechar modais flutuantes
+            if stable_rounds > 2:
+                page.keyboard.press("Escape")
+            
+            # Clicar em botões de fechar se visíveis (comum no Pinterest)
+            page.evaluate('() => { '
+                          '  const closes = Array.from(document.querySelectorAll(\'[aria-label="Close"], [aria-label="Fechar"], button\')); '
+                          '  closes.forEach(c => { if(c.innerText === "✕" || c.innerText === "X") c.click(); }); '
+                          '}')
+        except Exception:
+            pass
+
         hrefs = page.eval_on_selector_all(
             'a[href^="/pin/"]',
             'els => Array.from(new Set(els.map(e => e.getAttribute("href"))))',
@@ -434,38 +448,46 @@ def _collect_pin_links_with_browser(
         if SCROLL_HEIGHT_CHECK:
             try:
                 # Verificar se chegamos na seção "Mais como esse" para evitar poluição
-                # E apenas se NÃO estamos encontrando novos pins (para evitar falso positivo)
+                # Apenas se NÃO estamos encontrando novos pins (para evitar falso positivo durante carregamento)
                 current_count = len(seen)
-                if current_count == last_count:
-                    has_more_like_this = page.evaluate(
-                        '(() => { '
-                        '  const headers = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6")); '
-                        '  return headers.some(h => h.innerText.includes("Mais como esse") || h.innerText.includes("More like this")); '
-                        '})()'
-                    )
-                    if has_more_like_this:
-                        # Se encontramos o cabeçalho de recomendações E não temos novos pins, paramos
-                         # Aumentar a chance de ser real: verificar se o scroll está lá embaixo
-                        is_bottom = page.evaluate(
-                            '(() => { '
-                            '  return (window.innerHeight + window.scrollY) >= (document.body.offsetHeight - 500);'
-                            '})()'
-                        )
-                        if is_bottom:
-                            stable_rounds += 2 # Acelerar parada
                 
+                # Detecção de "Mais como esse" (More like this)
+                has_more_like_this = page.evaluate(
+                    '(() => { '
+                    '  const text = document.body.innerText; '
+                    '  return text.includes("Mais como esse") || text.includes("More like this"); '
+                    '})()'
+                )
+                
+                # Critério de parada: (Altura estável OU "Mais como esse" visível) E (Nenhum pin novo encontrado)
                 current_height = page.evaluate(
                     '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
                     'return el ? el.scrollHeight : 0; })()'
                 )
-                if current_height == last_height and len(seen) == last_count:
-                    stable_rounds += 1
+                
+                is_bottom = page.evaluate(
+                    '(() => { '
+                    '  return (window.innerHeight + window.scrollY) >= (document.body.offsetHeight - 800);'
+                    '})()'
+                )
+
+                if current_count == last_count:
+                    # Se não houve progresso e parece ser o fim/recomendações
+                    if has_more_like_this and is_bottom:
+                        stable_rounds += 2 # Acelerar parada se detectou recomendações no fundo
+                    elif current_height == last_height:
+                        stable_rounds += 1
+                    else:
+                        # Altura mudou mas pins não? Pode estar carregando outras coisas
+                        stable_rounds += 0.5 
                 else:
+                    # Houve progresso! Resetar rounds
                     stable_rounds = 0
                     last_height = current_height
-                    last_count = len(seen)
+                    last_count = current_count
+                    
             except Exception:
-                # Fallback para detecção por contagem
+                # Fallback para detecção simples por contagem
                 if len(seen) == last_count:
                     stable_rounds += 1
                 else:
@@ -480,6 +502,7 @@ def _collect_pin_links_with_browser(
                 last_count = len(seen)
 
         if stable_rounds >= SCROLL_STABLE_ROUNDS:
+            # Uma última tentativa de espera se estivermos longe do esperado (se tivéssemos essa info)
             break
 
         try:
@@ -488,9 +511,10 @@ def _collect_pin_links_with_browser(
                 'if (!el) return; window.scrollTo(0, el.scrollHeight); })()'
             )
             # Aguarda um pouco mais em boards grandes para o Pinterest respirar
-            page.wait_for_timeout(500)
+            wait_time = 500
+            if stable_rounds > 5: wait_time = 1000 # Ser mais paciente se estiver "travado"
+            page.wait_for_timeout(wait_time)
         except Exception:
-            print("  Aviso: falha ao rolar (DOM indisponível). Encerrando coleta deste quadro.")
             break
 
         page.wait_for_timeout(int(scroll_pause * 1000))
@@ -583,7 +607,7 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                 for _ in range(200):
                     # Extrair objetos com metadados via JS
                     boards_data = page.evaluate(
-                        f"""(username) => {{
+                        fr"""(username) => {{
                             const results = [];
                             const exclude = {list(exclude)};
                             const els = document.querySelectorAll('a[href]');
@@ -600,22 +624,39 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                                     
                                     const fullUrl = "https://www.pinterest.com/" + parts[0] + "/" + parts[1] + "/";
                                     
-                                    // Tentar encontrar número de pins
+                                    // Tentar encontrar número de pins de forma mais precisa
                                     let pins = "";
                                     try {{
+                                        // Pegar o container de texto do board card
                                         const text = el.innerText;
-                                        // Regex para pegar apenas a contagem de pins: "10 Pins", "1,5 mil Pins", etc.
-                                        const match = text.match(/([\\d,.]+\s*(?:mil|mi|k|m|pins|pin)\s*(?:Pins|Pin)?)/i);
-                                        if (match) pins = match[0].trim();
+                                        // Regex mais restrita: ignorar o título (que vem antes de quebras de linha ou espaços duplos)
+                                        // e ignorar sufixos de tempo (1d, 2h, etc)
+                                        const lines = text.split('\n').filter(l => l.trim());
+                                        for (const line of lines) {{
+                                            const match = line.match(/^([\d,.]+\s*(?:mil|mi|k|m|pins|pin))\s*$/i);
+                                            if (match) {{
+                                                pins = match[1].trim();
+                                                break;
+                                            }}
+                                        }}
+                                        
+                                        // Fallback se não achou em linhas separadas
+                                        if (!pins) {{
+                                            const match = text.match(/([\d,.]+\s*(?:mil|mi|k|m|pins|pin))\s*(?:Pins|Pin)?/i);
+                                            if (match) pins = match[1].trim();
+                                        }}
                                     }} catch(e) {{}}
                                     
                                     // Tentar encontrar título usando data-test-id se possível
                                     let title = board;
                                     try {{
-                                        const h2 = el.querySelector('h2, [data-test-id="board-card-title"]');
-                                        if (h2) title = h2.innerText.trim();
-                                        else {{
-                                            title = el.innerText.split('\\n')[0].trim() || board;
+                                        const titleEl = el.querySelector('h2, [data-test-id="board-card-title"]');
+                                        if (titleEl) {{
+                                            title = titleEl.innerText.trim();
+                                        }} else {{
+                                            // Fallback: primeira linha do texto
+                                            const firstLine = el.innerText.split('\n')[0].trim();
+                                            if (firstLine && !firstLine.match(/^\d/)) title = firstLine;
                                         }}
                                     }} catch(e) {{}}
                                     
@@ -874,6 +915,7 @@ def download_board(
                 "output_dir": target_dir,
             },
         )
+        emit("log", {"message": f"  Concluído: 0/0 pins (pulado)"})
         logger.warn("download_board", "Nenhum pin encontrado", board_url=board_url)
         logger.end_phase("download_board", count=0, message="Nenhum pin encontrado")
         return BoardDownloadResult(board_url, 0, 0, target_dir)

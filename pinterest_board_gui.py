@@ -370,7 +370,8 @@ class MainWindow(QMainWindow):
 
         self.selection_list = QListWidget()
         self.selection_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
-        self.selection_list.setIconSize(QSize(128, 128))
+        self.selection_list.setIconSize(QSize(96, 96)) # Reduzido um pouco para melhor proporção
+        self.selection_list.setSpacing(4) # Adiciona espaço entre os itens
         self.selection_list.itemChanged.connect(self._update_selection_state)
         layout.addWidget(self.selection_list)
 
@@ -514,43 +515,47 @@ class MainWindow(QMainWindow):
         self.log_edit.append(message)
 
     def on_board_started(self, board_url: str, output_dir: str) -> None:
-        title = self.url_to_title.get(board_url, board_url)
+        norm_url = board_url.rstrip('/') + '/'
+        title = self.url_to_title.get(norm_url, board_url)
         item = QListWidgetItem(f"{title} → {output_dir}")
         self.board_list.addItem(item)
-        self.board_items[board_url] = item
+        self.board_items[norm_url] = item
         item.setData(Qt.ItemDataRole.UserRole, {"downloaded": 0, "total": 0})
         self.status_label.setText(f"Processando quadro: {title}")
 
     def on_download_started(self, board_url: str, total: int) -> None:
+        norm_url = board_url.rstrip('/') + '/'
         if total <= 0:
             self.board_progress.setMaximum(1)
             self.board_progress.setValue(0)
         else:
             self.board_progress.setMaximum(total)
             self.board_progress.setValue(0)
-        item = self.board_items.get(board_url)
+        item = self.board_items.get(norm_url)
         if item:
             data = item.data(Qt.ItemDataRole.UserRole) or {}
             data.update({"total": total})
             item.setData(Qt.ItemDataRole.UserRole, data)
-            title = self.url_to_title.get(board_url, board_url)
+            title = self.url_to_title.get(norm_url, board_url)
             item.setText(f"{title} → {data.get('total', 0)} imagens")
 
     def on_download_progress(self, board_url: str, current: int, total: int, downloaded: int) -> None:
+        norm_url = board_url.rstrip('/') + '/'
         self.board_progress.setMaximum(max(total, 1))
         self.board_progress.setValue(min(current, total))
-        item = self.board_items.get(board_url)
+        item = self.board_items.get(norm_url)
         if item:
             data = item.data(Qt.ItemDataRole.UserRole) or {}
             data.update({"downloaded": downloaded, "total": total})
             item.setData(Qt.ItemDataRole.UserRole, data)
-            title = self.url_to_title.get(board_url, board_url)
+            title = self.url_to_title.get(norm_url, board_url)
             item.setText(f"{title} → {downloaded}/{total} imagens")
 
     def on_board_finished(self, board_url: str, downloaded: int, total: int, output_dir: str) -> None:
-        item = self.board_items.get(board_url)
+        norm_url = board_url.rstrip('/') + '/'
+        item = self.board_items.get(norm_url)
         if item:
-            title = self.url_to_title.get(board_url, board_url)
+            title = self.url_to_title.get(norm_url, board_url)
             item.setText(f"{title} → {downloaded}/{total} imagens (em {output_dir})")
         self.board_progress.setValue(self.board_progress.maximum())
 
@@ -578,8 +583,11 @@ class MainWindow(QMainWindow):
             # Texto do item: Título + (N Pins)
             pin_text = f" ({pin_count})" if pin_count else ""
             item = QListWidgetItem(f"{title}{pin_text}")
-            item.setData(Qt.ItemDataRole.UserRole, b['url']) # Guardar URL internamente
-            self.url_to_title[b['url']] = title # Armazenar para o histórico
+            
+            # Normalizar URL para garantir mapeamento correto no histórico
+            norm_url = b['url'].rstrip('/') + '/'
+            item.setData(Qt.ItemDataRole.UserRole, norm_url) # Guardar URL internamente
+            self.url_to_title[norm_url] = title # Armazenar para o histórico
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
             
