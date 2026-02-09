@@ -1,4 +1,4 @@
-name: Release AppImage
+name: Multi-Platform Release
 
 on:
   push:
@@ -89,9 +89,73 @@ jobs:
         run: |
           mv Pinterest_Downloader*.AppImage PinterestDownloader-x86_64.AppImage
 
+      - name: Build DEB
+        run: |
+          mkdir -p staging_deb/usr/bin
+          mkdir -p staging_deb/usr/share/applications
+          mkdir -p staging_deb/usr/share/icons/hicolor/scalable/apps
+          mkdir -p staging_deb/DEBIAN
+          cp -r dist/pinterest-downloader/* staging_deb/usr/bin/
+          cat > staging_deb/DEBIAN/control <<EOT
+          Package: pinterest-downloader
+          Version: \${GITHUB_REF#refs/tags/v}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Yuri Schmaltz <yurix@example.com>
+          Description: Pinterest Board Downloader
+           Tool to download images from Pinterest boards via CLI or GUI.
+          EOT
+          cat > staging_deb/usr/share/applications/pinterest-downloader.desktop <<EOT
+          [Desktop Entry]
+          Type=Application
+          Name=Pinterest Downloader
+          Comment=Download images from Pinterest boards
+          Exec=pinterest-downloader
+          Icon=pinterest-downloader
+          Categories=Utility;Network;
+          Terminal=false
+          EOT
+          cp icon.svg staging_deb/usr/share/icons/hicolor/scalable/apps/pinterest-downloader.svg
+          sudo dpkg-deb --build staging_deb pinterest-downloader_amd64.deb
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: PinterestDownloader-x86_64.AppImage
+          files: |
+            PinterestDownloader-x86_64.AppImage
+            pinterest-downloader_amd64.deb
+          generate_release_notes: true
+
+  build-windows:
+    name: Build EXE (Windows)
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller PinterestDownloader.spec
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/pinterest-downloader/pinterest-downloader.exe
           generate_release_notes: true
