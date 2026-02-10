@@ -59,6 +59,7 @@ class DownloadWorker(QThread):
     finished_with_totals = pyqtSignal(int, int)
     manual_login_requested = pyqtSignal(str, str)
     error = pyqtSignal(str)
+    pins_collected = pyqtSignal(str, int)
     cancelled = pyqtSignal()
 
     def __init__(
@@ -142,6 +143,8 @@ class DownloadWorker(QThread):
             found = data.get("found", 0)
             total = data.get("total", 0)
             self.log_message.emit(f"Resolução concluída ({found}/{total}).")
+        elif stage == "pins_collected":
+            self.pins_collected.emit(data.get("board_url", ""), data.get("count", 0))
 
     def run(self) -> None:
         try:
@@ -209,6 +212,135 @@ class DownloadWorker(QThread):
             self.error.emit(str(exc))
 
 
+# ---------- UI Constants ----------
+
+MAIN_QSS = """
+QMainWindow {
+    background-color: #121212;
+}
+QWidget {
+    color: #e0e0e0;
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 13px;
+}
+QGroupBox {
+    border: 2px solid #2c2c2c;
+    border-radius: 8px;
+    margin-top: 1.2em;
+    padding: 10px;
+    font-weight: bold;
+    color: #ffffff;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 5px;
+}
+QLineEdit, QSpinBox, QDoubleSpinBox {
+    background-color: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 5px;
+    color: #ffffff;
+}
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+    border: 1px solid #E60023;
+}
+QPushButton {
+    background-color: #2c2c2c;
+    border: none;
+    border-radius: 5px;
+    padding: 8px 15px;
+    color: #ffffff;
+    font-weight: bold;
+}
+QPushButton:hover {
+    background-color: #3d3d3d;
+}
+QPushButton:pressed {
+    background-color: #555;
+}
+QPushButton:disabled {
+    background-color: #1a1a1a;
+    color: #666;
+}
+
+#btn_start {
+    background-color: #E60023;
+}
+#btn_start:hover {
+    background-color: #ad001a;
+}
+#btn_list {
+    background-color: #0076d3;
+}
+#btn_list:hover {
+    background-color: #005a9e;
+}
+#btn_cancel {
+    background-color: #333;
+    color: #999;
+}
+#btn_cancel:enabled {
+    background-color: #ff4d4d;
+    color: white;
+}
+
+QProgressBar {
+    background-color: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 10px;
+    text-align: center;
+    color: white;
+    font-weight: bold;
+}
+QProgressBar::chunk {
+    background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 #E60023, stop:1 #ff4d4d);
+    border-radius: 9px;
+}
+
+QListWidget {
+    background-color: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 5px;
+    padding: 5px;
+}
+QListWidget::item {
+    border-radius: 5px;
+    padding: 10px;
+}
+QListWidget::item:selected {
+    background-color: #2c2c2c;
+    border: 1px solid #E60023;
+}
+QListWidget::item:hover {
+    background-color: #252525;
+}
+
+QTextEdit {
+    background-color: #0d0d0d;
+    border: 1px solid #333;
+    border-radius: 5px;
+    color: #76ff03; /* Lime green for log */
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 11px;
+}
+
+QScrollBar:vertical {
+    background: #121212;
+    width: 10px;
+    margin: 0px;
+}
+QScrollBar::handle:vertical {
+    background: #333;
+    min-height: 20px;
+    border-radius: 5px;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+"""
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -219,6 +351,9 @@ class MainWindow(QMainWindow):
         self.selected_urls: List[str] = []
         self.board_items: Dict[str, QListWidgetItem] = {}
         self.url_to_title: Dict[str, str] = {}
+
+        # Aplicar estilos
+        self.setStyleSheet(MAIN_QSS)
 
         # Set application icon
         self._set_window_icon()
@@ -280,10 +415,12 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(QLabel("Usuário ou URL:"))
         self.user_edit = QLineEdit()
-        self.user_edit.setPlaceholderText("ex: yuri_schmaltz")
+        self.user_edit.setPlaceholderText("Usuário ou link do perfil")
         layout.addWidget(self.user_edit)
 
         self.list_boards_button = QPushButton("Listar Quadros")
+        self.list_boards_button.setObjectName("btn_list")
+        self.list_boards_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.list_boards_button.clicked.connect(self.start_discovery)
         layout.addWidget(self.list_boards_button)
         return widget
@@ -371,9 +508,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.select_all_check)
 
         self.selection_list = QListWidget()
-        self.selection_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
-        self.selection_list.setIconSize(QSize(96, 96)) # Reduzido um pouco para melhor proporção
-        self.selection_list.setSpacing(4) # Adiciona espaço entre os itens
+        self.selection_list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.selection_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.selection_list.setMovement(QListWidget.Movement.Static)
+        self.selection_list.setFlow(QListWidget.Flow.LeftToRight)
+        self.selection_list.setWrapping(True)
+        self.selection_list.setWordWrap(True)
+        self.selection_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.selection_list.setIconSize(QSize(160, 160))
+        self.selection_list.setGridSize(QSize(200, 240))
+        self.selection_list.setSpacing(10)
         self.selection_list.itemChanged.connect(self._update_selection_state)
         layout.addWidget(self.selection_list)
 
@@ -395,8 +539,12 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout()
         layout.addStretch()
         self.start_button = QPushButton("Iniciar download")
+        self.start_button.setObjectName("btn_start")
+        self.start_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.start_button.clicked.connect(self.start_download)
         self.cancel_button = QPushButton("Cancelar")
+        self.cancel_button.setObjectName("btn_cancel")
+        self.cancel_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self.cancel_download)
         layout.addWidget(self.start_button)
@@ -504,6 +652,7 @@ class MainWindow(QMainWindow):
         self.worker.error.connect(self.on_error)
         self.worker.cancelled.connect(self.on_cancelled)
         self.worker.manual_login_requested.connect(self.on_manual_login_requested)
+        self.worker.pins_collected.connect(self.on_pins_collected)
 
     def cancel_download(self) -> None:
         if self.worker and self.worker.isRunning():
@@ -562,7 +711,24 @@ class MainWindow(QMainWindow):
             if expected and verified < expected:
                 status += f" (alvo: {expected})"
             item.setText(f"{title} → {status} (em {output_dir})")
+            
+            # Update selection list as well
+            self._update_selection_item_count(board_url, verified)
+            
         self.board_progress.setValue(self.board_progress.maximum())
+
+    def on_pins_collected(self, board_url: str, count: int) -> None:
+        self.append_log(f"  Confirmados {count} pins reais no quadro.")
+        self._update_selection_item_count(board_url, count)
+
+    def _update_selection_item_count(self, board_url: str, count: int) -> None:
+        norm_url = board_url.rstrip('/') + '/'
+        for i in range(self.selection_list.count()):
+            item = self.selection_list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == norm_url:
+                title = self.url_to_title.get(norm_url, board_url)
+                item.setText(f"{title} ({count} Pins)")
+                break
 
     def on_boards_found(self, boards: List[BoardMetadata]) -> None:
         self.boards_metadata = boards
@@ -603,7 +769,7 @@ class MainWindow(QMainWindow):
                     if resp.status_code == 200:
                         pix = QPixmap()
                         pix.loadFromData(resp.content)
-                        item.setIcon(QIcon(pix.scaled(128, 128, Qt.AspectRatioMode.KeepAspectRatio)))
+                        item.setIcon(QIcon(pix.scaled(160, 160, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)))
                 except Exception:
                     pass
             

@@ -1184,7 +1184,7 @@ def main() -> None:
     )
     ap.add_argument(
         "user",
-        help="Usuário do Pinterest para baixar todos os quadros (ex.: yuri_schmaltz ou URL do perfil)",
+        help="Usuário do Pinterest para baixar todos os quadros (ou URL do perfil)",
     )
     ap.add_argument("-o", "--out", default="pins", help="Pasta raiz de saída (default: ./pins)")
     ap.add_argument("--headful", action="store_true", help="Abre o navegador visível (útil p/ depurar/login)")
