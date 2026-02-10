@@ -24,6 +24,7 @@ class BoardMetadata(TypedDict):
     title: str
     thumbnail_url: str
     pin_count: str
+    pin_count_int: int | None
 
 import requests
 from playwright.sync_api import sync_playwright
@@ -227,6 +228,47 @@ def slugify(name: str) -> str:
     return s or "sem_nome"
 
 
+def parse_pin_count(count_str: str) -> int | None:
+    """Converte strings de contagem do Pinterest (ex: '1,2 mil', '1.2k', '10 pins') em int."""
+    if not count_str:
+        return None
+    
+    # Limpeza básica
+    s = count_str.strip().lower()
+    s = s.strip(',')
+    s = s.replace('pins', '').replace('pin', '').strip()
+    
+    if not s:
+        return None
+    
+    try:
+        # Lidando com multiplicadores
+        multiplier = 1
+        has_suffix = False
+        if 'mil' in s or 'k' in s:
+            multiplier = 1000
+            s = s.replace('mil', '').replace('k', '').strip()
+            has_suffix = True
+        elif 'mi' in s or 'm' in s:
+            multiplier = 1000000
+            s = s.replace('mi', '').replace('m', '').strip()
+            has_suffix = True
+            
+        if has_suffix:
+            # Com sufixo, '.' ou ',' são separadores decimais (ex: 1,2 mil = 1.2 * 1000)
+            s = s.replace(',', '.')
+        else:
+            # Sem sufixo, '.' ou ',' são provavelmente separadores de milhar (ex: 1.000 = 1000)
+            # Removemos tudo que não for dígito
+            s = re.sub(r'[.,]', '', s)
+        
+        # Tentar converter
+        val = float(s)
+        return int(val * multiplier)
+    except Exception:
+        return None
+
+
 def normalize_url(url_or_user: str) -> str:
     """Normaliza entrada do usuário para uma URL válida do Pinterest."""
     url = url_or_user.strip()
@@ -382,6 +424,7 @@ def _collect_pin_links_with_browser(
     scroll_pause: float,
     max_pins: int | None,
     manual_login_handler: Callable[[], None] | None = None,
+    target_pin_count: int | None = None,
 ) -> List[str]:
     """Lógica interna: coleta pins usando page já inicializado."""
     page.goto(board_url, wait_until="networkidle", timeout=TIMEOUT_PAGE_LOAD)
@@ -502,7 +545,14 @@ def _collect_pin_links_with_browser(
                 last_count = len(seen)
 
         if stable_rounds >= SCROLL_STABLE_ROUNDS:
-            # Uma última tentativa de espera se estivermos longe do esperado (se tivéssemos essa info)
+            # Se ainda não atingimos o alvo e não temos o indicativo de fim absoluto ("Mais como esse"),
+            # dar uma última chance aumentando o tempo de espera ou tentando mais alguns rounds.
+            if target_pin_count and len(seen) < target_pin_count:
+                # Se ainda faltam muitos e não vimos "Mais como esse", ser mais insistente
+                if not has_more_like_this and stable_rounds < (SCROLL_STABLE_ROUNDS * 2):
+                    stable_rounds -= 1 # Dar mais chances
+                    page.wait_for_timeout(2000)
+                    continue
             break
 
         try:
@@ -530,6 +580,7 @@ def collect_pin_links(
     max_pins: int | None,
     manual_login_handler: Callable[[], None] | None = None,
     browser=None,
+    target_pin_count: int | None = None,
 ) -> List[str]:
     """Abre o quadro, rola a página e coleta URLs de Pins.
     
@@ -541,7 +592,8 @@ def collect_pin_links(
         page = ctx.new_page()
         try:
             return _collect_pin_links_with_browser(
-                page, board_url, manual_login, scroll_pause, max_pins, manual_login_handler
+                page, board_url, manual_login, scroll_pause, max_pins, manual_login_handler,
+                target_pin_count=target_pin_count
             )
         finally:
             ctx.close()
@@ -553,7 +605,8 @@ def collect_pin_links(
             page = ctx.new_page()
             try:
                 return _collect_pin_links_with_browser(
-                    page, board_url, manual_login, scroll_pause, max_pins, manual_login_handler
+                    page, board_url, manual_login, scroll_pause, max_pins, manual_login_handler,
+                    target_pin_count=target_pin_count
                 )
             finally:
                 browser_temp.close()
@@ -676,6 +729,8 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
                     for b in boards_data:
                         if b['url'] not in seen_urls:
                             seen_urls.add(b['url'])
+                            # Pre-parse pin count to int
+                            b['pin_count_int'] = parse_pin_count(b['pin_count'])
                             results.append(b)
 
                     # Scroll detection inteligente
@@ -851,13 +906,18 @@ def resolve_images(
 
 
 def download_board(
-    board_url: str,
+    board_url: str | BoardMetadata,
     options: DownloadOptions,
     session: requests.Session | None = None,
     status_cb: StatusCallback | None = None,
     manual_login_handler: Callable[[str], None] | None = None,
     browser_shared=None,
 ) -> BoardDownloadResult:
+    target_pin_count = None
+    if isinstance(board_url, dict):
+        target_pin_count = board_url.get('pin_count_int')
+        board_url = board_url['url']
+
     board_url = normalize_url(board_url)
     emit = status_cb or (lambda *_: None)
     logger = get_logger()
@@ -902,6 +962,7 @@ def download_board(
         max_pins=options.max_pins,
         manual_login_handler=handle_manual_login if options.manual_login else None,
         browser=browser_shared,
+        target_pin_count=target_pin_count,
     )
 
     if not pin_links:
@@ -971,19 +1032,56 @@ def download_board(
                 },
             )
 
-    emit("log", {"message": f"  Concluído: {ok}/{total}"})
+    # ONDA 6: Verificação robusta pós-download
+    emit("log", {"message": f"  [EXTRA] Verificando integridade no disco…"})
+    verified_ok = 0
+    missing_pins_links = []
+    
+    # Criar mapeamento de Pin URL -> esperado nome de arquivo (sem extensão)
+    for link, img_url in pin_img.items():
+        stem = Path(safe_name(link)).stem
+        found = False
+        if os.path.exists(target_dir):
+            for existing_file in os.listdir(target_dir):
+                if existing_file.startswith(stem) and os.path.getsize(os.path.join(target_dir, existing_file)) > 0:
+                    found = True
+                    break
+        if found:
+            verified_ok += 1
+        else:
+            missing_pins_links.append(link)
+
+    if missing_pins_links:
+        emit("log", {"message": f"  Retentativa direcionada para {len(missing_pins_links)} pins ausentes…"})
+        # Tentar resolver novamente apenas os ausentes (sem cache para garantir)
+        miss_pin_img = resolve_images(missing_pins_links, session=session, workers=options.workers, emit=emit, use_cache=False, rate_limiting=options.rate_limiting)
+        with ThreadPoolExecutor(max_workers=options.workers) as ex:
+            futs = [ex.submit(download_media, iurl, target_dir, session, filename_hint=l) for l, iurl in miss_pin_img.items()]
+            for fut in as_completed(futs):
+                if fut.result(): verified_ok += 1
+
+    # Status final de verificação
+    status_msg = f"  Verificação: {verified_ok}/{total} pins efetivados no disco."
+    if target_pin_count and verified_ok < target_pin_count:
+        status_msg += f" (Esperado: {target_pin_count})"
+        
+    emit("log", {"message": status_msg})
+
+    emit("log", {"message": f"  Concluído: {verified_ok}/{total}"})
     emit(
         "board_complete",
         {
             "board_url": board_url,
-            "downloaded": ok,
+            "downloaded": verified_ok,
             "total": total,
             "output_dir": target_dir,
+            "verified": verified_ok,
+            "expected": target_pin_count,
         },
     )
 
-    logger.end_phase("download_board", count=ok, message=f"Baixadas {ok}/{total} imagens")
-    return BoardDownloadResult(board_url, ok, total, target_dir)
+    logger.end_phase("download_board", count=verified_ok, message=f"Baixadas/Verificadas {verified_ok}/{total} imagens")
+    return BoardDownloadResult(board_url, verified_ok, total, target_dir)
 
 
 def download_user_boards(

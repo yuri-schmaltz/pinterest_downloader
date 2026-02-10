@@ -53,7 +53,7 @@ class DownloadWorker(QThread):
     board_started = pyqtSignal(str, str)
     download_started = pyqtSignal(str, int)
     download_progress = pyqtSignal(str, int, int, int)
-    board_finished = pyqtSignal(str, int, int, str)
+    board_finished = pyqtSignal(str, int, int, str, int, int)
     boards_found = pyqtSignal(list)
     overall_progress = pyqtSignal(int, int)
     finished_with_totals = pyqtSignal(int, int)
@@ -122,6 +122,8 @@ class DownloadWorker(QThread):
                 data.get("downloaded", 0),
                 data.get("total", 0),
                 data.get("output_dir", ""),
+                data.get("verified", 0),
+                data.get("expected", 0) or 0,
             )
         elif stage == "boards_found":
             boards = data.get("boards", [])
@@ -551,12 +553,15 @@ class MainWindow(QMainWindow):
             title = self.url_to_title.get(norm_url, board_url)
             item.setText(f"{title} → {downloaded}/{total} imagens")
 
-    def on_board_finished(self, board_url: str, downloaded: int, total: int, output_dir: str) -> None:
+    def on_board_finished(self, board_url: str, downloaded: int, total: int, output_dir: str, verified: int = 0, expected: int = 0) -> None:
         norm_url = board_url.rstrip('/') + '/'
         item = self.board_items.get(norm_url)
         if item:
             title = self.url_to_title.get(norm_url, board_url)
-            item.setText(f"{title} → {downloaded}/{total} imagens (em {output_dir})")
+            status = f"{verified}/{total} pins verificados"
+            if expected and verified < expected:
+                status += f" (alvo: {expected})"
+            item.setText(f"{title} → {status} (em {output_dir})")
         self.board_progress.setValue(self.board_progress.maximum())
 
     def on_boards_found(self, boards: List[BoardMetadata]) -> None:
