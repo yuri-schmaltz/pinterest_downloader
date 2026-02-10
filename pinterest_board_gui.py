@@ -215,21 +215,12 @@ class DownloadWorker(QThread):
 # ---------- UI Constants ----------
 
 MAIN_QSS = """
-QMainWindow {
-    background-color: #121212;
-}
-QWidget {
-    color: #e0e0e0;
-    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    font-size: 13px;
-}
 QGroupBox {
-    border: 2px solid #2c2c2c;
+    border: 1px solid gray;
     border-radius: 8px;
     margin-top: 1.2em;
     padding: 10px;
     font-weight: bold;
-    color: #ffffff;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
@@ -237,32 +228,30 @@ QGroupBox::title {
     padding: 0 5px;
 }
 QLineEdit, QSpinBox, QDoubleSpinBox {
-    background-color: #1e1e1e;
-    border: 1px solid #333;
-    border-radius: 4px;
     padding: 5px;
-    color: #ffffff;
+    border: 1px solid gray;
+    border-radius: 4px;
 }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
     border: 1px solid #E60023;
 }
 QPushButton {
-    background-color: #2c2c2c;
     border: none;
     border-radius: 5px;
     padding: 8px 15px;
     color: #ffffff;
     font-weight: bold;
+    background-color: #5c5c5c;
 }
 QPushButton:hover {
-    background-color: #3d3d3d;
+    background-color: #6c6c6c;
 }
 QPushButton:pressed {
-    background-color: #555;
+    background-color: #4c4c4c;
 }
 QPushButton:disabled {
-    background-color: #1a1a1a;
-    color: #666;
+    background-color: #3c3c3c;
+    color: #888;
 }
 
 #btn_start {
@@ -278,8 +267,8 @@ QPushButton:disabled {
     background-color: #005a9e;
 }
 #btn_cancel {
-    background-color: #333;
-    color: #999;
+    background-color: #555;
+    color: #ccc;
 }
 #btn_cancel:enabled {
     background-color: #ff4d4d;
@@ -287,11 +276,9 @@ QPushButton:disabled {
 }
 
 QProgressBar {
-    background-color: #1e1e1e;
-    border: 1px solid #333;
+    border: 1px solid gray;
     border-radius: 10px;
     text-align: center;
-    color: white;
     font-weight: bold;
 }
 QProgressBar::chunk {
@@ -300,8 +287,7 @@ QProgressBar::chunk {
 }
 
 QListWidget {
-    background-color: #1a1a1a;
-    border: 1px solid #333;
+    border: 1px solid gray;
     border-radius: 5px;
     padding: 5px;
 }
@@ -310,34 +296,15 @@ QListWidget::item {
     padding: 10px;
 }
 QListWidget::item:selected {
-    background-color: #2c2c2c;
+    background-color: #5c5c5c;
     border: 1px solid #E60023;
-}
-QListWidget::item:hover {
-    background-color: #252525;
 }
 
 QTextEdit {
-    background-color: #0d0d0d;
-    border: 1px solid #333;
+    border: 1px solid gray;
     border-radius: 5px;
-    color: #76ff03; /* Lime green for log */
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 11px;
-}
-
-QScrollBar:vertical {
-    background: #121212;
-    width: 10px;
-    margin: 0px;
-}
-QScrollBar::handle:vertical {
-    background: #333;
-    min-height: 20px;
-    border-radius: 5px;
-}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0px;
 }
 """
 
@@ -433,9 +400,6 @@ class MainWindow(QMainWindow):
         select_button = QPushButton("Selecionar…")
         select_button.clicked.connect(self._select_output_dir)
 
-        self.headful_check = QCheckBox("Exibir navegador")
-        self.manual_login_check = QCheckBox("Pausar para login manual")
-
         self.max_pins_spin = QSpinBox()
         self.max_pins_spin.setRange(0, 1000000)
         self.max_pins_spin.setSpecialValueText("Sem limite")
@@ -449,17 +413,16 @@ class MainWindow(QMainWindow):
         self.workers_spin = QSpinBox()
         self.workers_spin.setRange(1, 64)
         self.workers_spin.setValue(16)
+        self.workers_spin.setToolTip("Número de downloads simultâneos dentro de um mesmo quadro.\nRecomendado: 16-32. Valores muito altos podem causar erros de rede.")
 
         self.boards_workers_spin = QSpinBox()
         self.boards_workers_spin.setRange(1, 8)
         self.boards_workers_spin.setValue(1)
+        self.boards_workers_spin.setToolTip("Número de quadros baixados ao mesmo tempo.\nRecomendado: 1-2. Aumentar muito consome muita CPU/RAM.")
 
         layout.addWidget(QLabel("Pasta de saída"), 0, 0)
         layout.addWidget(self.output_edit, 0, 1)
         layout.addWidget(select_button, 0, 2)
-
-        layout.addWidget(self.headful_check, 1, 0)
-        layout.addWidget(self.manual_login_check, 1, 1)
 
         layout.addWidget(QLabel("Máximo de pins por quadro"), 2, 0)
         layout.addWidget(self.max_pins_spin, 2, 1)
@@ -488,15 +451,11 @@ class MainWindow(QMainWindow):
         self.overall_progress.setFormat("%v / %m quadros")
         self.overall_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.board_list = QListWidget()
-        self.board_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        layout.addWidget(QLabel("Quadro atual"))
+        self.current_board_label = QLabel("Quadro atual")
+        layout.addWidget(self.current_board_label)
         layout.addWidget(self.board_progress)
         layout.addWidget(QLabel("Total de quadros"))
         layout.addWidget(self.overall_progress)
-        layout.addWidget(QLabel("Histórico de quadros"))
-        layout.addWidget(self.board_list)
         return group
 
     def _build_selection_panel(self) -> QGroupBox:
@@ -569,8 +528,8 @@ class MainWindow(QMainWindow):
         out_root = self.output_edit.text().strip() or str(Path("pins").resolve())
         options = DownloadOptions(
             out_root=out_root,
-            headless=not self.headful_check.isChecked(),
-            manual_login=self.manual_login_check.isChecked(),
+            headless=True,
+            manual_login=False,
             scroll_pause=self.scroll_pause_spin.value(),
         )
 
@@ -610,8 +569,8 @@ class MainWindow(QMainWindow):
 
         options = DownloadOptions(
             out_root=out_root,
-            headless=not self.headful_check.isChecked(),
-            manual_login=self.manual_login_check.isChecked(),
+            headless=True,
+            manual_login=False,
             max_pins=self.max_pins_spin.value() or None,
             scroll_pause=self.scroll_pause_spin.value(),
             workers=self.workers_spin.value(),
@@ -621,9 +580,6 @@ class MainWindow(QMainWindow):
         self.log_edit.clear()
         self.board_progress.reset()
         self.overall_progress.reset()
-        self.board_list.clear()
-        # Não limpar board_items pois eles são usados no histórico agora? 
-        # Na verdade self.board_items no código original parece ser usado para o QListWidget de histórico.
         
         self.status_label.setText("Iniciando…")
 
@@ -668,10 +624,7 @@ class MainWindow(QMainWindow):
     def on_board_started(self, board_url: str, output_dir: str) -> None:
         norm_url = board_url.rstrip('/') + '/'
         title = self.url_to_title.get(norm_url, board_url)
-        item = QListWidgetItem(f"{title} → {output_dir}")
-        self.board_list.addItem(item)
-        self.board_items[norm_url] = item
-        item.setData(Qt.ItemDataRole.UserRole, {"downloaded": 0, "total": 0})
+        self.current_board_label.setText(f"Quadro atual ({title})")
         self.status_label.setText(f"Processando quadro: {title}")
 
     def on_download_started(self, board_url: str, total: int) -> None:
@@ -682,38 +635,20 @@ class MainWindow(QMainWindow):
         else:
             self.board_progress.setMaximum(total)
             self.board_progress.setValue(0)
-        item = self.board_items.get(norm_url)
-        if item:
-            data = item.data(Qt.ItemDataRole.UserRole) or {}
-            data.update({"total": total})
-            item.setData(Qt.ItemDataRole.UserRole, data)
-            title = self.url_to_title.get(norm_url, board_url)
-            item.setText(f"{title} → {data.get('total', 0)} imagens")
+            self.board_progress.setValue(0)
 
     def on_download_progress(self, board_url: str, current: int, total: int, downloaded: int) -> None:
         norm_url = board_url.rstrip('/') + '/'
         self.board_progress.setMaximum(max(total, 1))
         self.board_progress.setValue(min(current, total))
-        item = self.board_items.get(norm_url)
-        if item:
-            data = item.data(Qt.ItemDataRole.UserRole) or {}
-            data.update({"downloaded": downloaded, "total": total})
-            item.setData(Qt.ItemDataRole.UserRole, data)
-            title = self.url_to_title.get(norm_url, board_url)
-            item.setText(f"{title} → {downloaded}/{total} imagens")
+        self.board_progress.setValue(min(current, total))
 
     def on_board_finished(self, board_url: str, downloaded: int, total: int, output_dir: str, verified: int = 0, expected: int = 0) -> None:
         norm_url = board_url.rstrip('/') + '/'
-        item = self.board_items.get(norm_url)
-        if item:
-            title = self.url_to_title.get(norm_url, board_url)
-            status = f"{verified}/{total} pins verificados"
-            if expected and verified < expected:
-                status += f" (alvo: {expected})"
-            item.setText(f"{title} → {status} (em {output_dir})")
-            
-            # Update selection list as well
-            self._update_selection_item_count(board_url, verified)
+        norm_url = board_url.rstrip('/') + '/'
+        
+        # Update selection list as well
+        self._update_selection_item_count(board_url, verified)
             
         self.board_progress.setValue(self.board_progress.maximum())
 
@@ -722,12 +657,25 @@ class MainWindow(QMainWindow):
         self._update_selection_item_count(board_url, count)
 
     def _update_selection_item_count(self, board_url: str, count: int) -> None:
-        norm_url = board_url.rstrip('/') + '/'
+        norm_url = board_url.strip().rstrip('/').lower()
         for i in range(self.selection_list.count()):
             item = self.selection_list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == norm_url:
-                title = self.url_to_title.get(norm_url, board_url)
-                item.setText(f"{title} ({count} Pins)")
+            stored_url = item.data(Qt.ItemDataRole.UserRole) or ""
+            stored_norm = stored_url.strip().rstrip('/').lower()
+            
+            if stored_norm == norm_url:
+                title = self.url_to_title.get(stored_url, board_url)
+                # Ensure title is not just url if we have a better one
+                if title == stored_url and self.url_to_title:
+                   # Try to find original title from board metadata list if needed
+                   for b in self.boards_metadata:
+                       if b['url'] == stored_url:
+                           title = b['title']
+                           break
+                
+                item.setText(f"{title}\n({count} Pins)")
+                # Force update visual
+                item.setData(Qt.ItemDataRole.DisplayRole, f"{title}\n({count} Pins)")
                 break
 
     def on_boards_found(self, boards: List[BoardMetadata]) -> None:
