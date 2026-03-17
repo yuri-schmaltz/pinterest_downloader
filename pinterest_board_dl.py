@@ -26,6 +26,13 @@ class BoardMetadata(TypedDict):
     pin_count: str
     pin_count_int: int | None
 
+class PinMetadata(TypedDict, total=False):
+    id: str
+    url: str
+    image_url: str
+    title: str
+    description: str
+
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -427,10 +434,102 @@ def _collect_pin_links_with_browser(
     target_pin_count: int | None = None,
 ) -> List[str]:
     """Lógica interna: coleta pins usando page já inicializado."""
-    page.goto(board_url, wait_until="networkidle", timeout=TIMEOUT_PAGE_LOAD)
+    page.goto(board_url, wait_until="load", timeout=TIMEOUT_PAGE_LOAD)
 
     if ("login" in page.url or "auth" in page.url) and not manual_login:
         return []
+
+    # ONDA 7: Metadata Buffer
+    metadata_cache: Dict[str, PinMetadata] = {}
+
+    def handle_response(response):
+        """Intercepta respostas XHR/Fetch para extrair metadados dos pins."""
+        is_resource = "resource/BoardFeedResource/get" in response.url or "resource/UserPinsResource/get" in response.url or "resource/BoardResource/get" in response.url
+        is_graphql = "/_/graphql/" in response.url
+        
+        if is_resource or is_graphql:
+            try:
+                data = response.json()
+                data_list = []
+                
+                if is_resource:
+                    if "resource_response" in data:
+                        data_list = data["resource_response"].get("data", [])
+                    elif "data" in data:
+                        data_list = data["data"]
+                elif is_graphql:
+                    # GraphQL pode retornar múltiplos objetos ou um feed aninhado
+                    def find_pins_graphql(obj):
+                        if not isinstance(obj, (dict, list)): return
+                        if isinstance(obj, list):
+                            for item in obj: find_pins_graphql(item)
+                            return
+                        
+                        # Tentar identificar se é um Pin pelos campos de imagem e ID
+                        imgs_dict = obj.get("images", {})
+                        # Pinterest novo (GraphQL) usa campos planos como images_736x, images_orig
+                        flat_orig = obj.get("images_orig") or obj.get("images_736x") or obj.get("images_474x")
+                        
+                        pid = str(obj.get("entityId") or obj.get("id") or "")
+                        
+                        if pid and (imgs_dict or flat_orig):
+                            purl = f"{PINTEREST_BASE_URL}/pin/{pid}/"
+                            
+                            iurl = None
+                            if flat_orig:
+                                iurl = flat_orig.get("url")
+                            elif imgs_dict:
+                                orig = imgs_dict.get("orig", {}) or imgs_dict.get("736x", {})
+                                iurl = orig.get("url")
+                                
+                            if iurl:
+                                metadata_cache[purl] = {
+                                    "id": pid, "url": purl, "image_url": iurl,
+                                    "title": obj.get("title") or obj.get("gridTitle") or obj.get("grid_title", ""),
+                                    "description": obj.get("description", "")
+                                }
+                        
+                        for v in obj.values():
+                            if isinstance(v, (dict, list)): find_pins_graphql(v)
+
+                    find_pins_graphql(data)
+                    return # Já processado recursivamente
+
+                if not isinstance(data_list, list):
+                    return
+                # Tentar extrair de diferentes formatos de resposta do Pinterest
+                if "resource_response" in data:
+                    data_list = data["resource_response"].get("data", [])
+                elif "data" in data:
+                    data_list = data["data"]
+
+                if not isinstance(data_list, list):
+                    return
+
+                for pin in data_list:
+                    if not isinstance(pin, dict): continue
+                    pin_id = str(pin.get("id", ""))
+                    if not pin_id: continue
+                    
+                    pin_url = f"{PINTEREST_BASE_URL}/pin/{pin_id}/"
+                    
+                    # Pegar melhor imagem disponível
+                    images = pin.get("images", {})
+                    orig = images.get("orig", {}) or images.get("736x", {})
+                    img_url = orig.get("url")
+                    
+                    if img_url:
+                        metadata_cache[pin_url] = {
+                            "id": pin_id,
+                            "url": pin_url,
+                            "image_url": img_url,
+                            "title": pin.get("title") or pin.get("grid_title", ""),
+                            "description": pin.get("description", "")
+                        }
+            except Exception:
+                pass
+
+    page.on("response", handle_response)
 
     if manual_login:
         if manual_login_handler:
@@ -569,7 +668,58 @@ def _collect_pin_links_with_browser(
 
         page.wait_for_timeout(int(scroll_pause * 1000))
 
+    # Tentar extrair metadados da página inicial (PWS_DATA)
+    try:
+        pws_data_raw = page.evaluate('() => { var el = document.getElementById("__PWS_DATA__") || document.querySelector("script[id=\'__PWS_DATA__\']"); return el ? el.innerText : null; }')
+        if pws_data_raw:
+            print("DEBUG: __PWS_DATA__ encontrado no HTML.")
+            pws_json = json.loads(pws_data_raw)
+            # Navegar na estrutura complexa do PWS_DATA para achar pins
+            def extract_from_dict(d):
+                if not isinstance(d, (dict, list)): return
+                if isinstance(d, list):
+                    for item in d: extract_from_dict(item)
+                    return
+                
+                pid = str(d.get("entityId") or d.get("id") or "")
+                imgs_dict = d.get("images", {})
+                flat_orig = d.get("images_orig") or d.get("images_736x") or d.get("images_474x")
+
+                if pid and (imgs_dict or flat_orig):
+                    purl = f"{PINTEREST_BASE_URL}/pin/{pid}/"
+                    iurl = None
+                    if flat_orig:
+                        iurl = flat_orig.get("url")
+                    elif imgs_dict:
+                        orig = imgs_dict.get("orig", {}) or imgs_dict.get("736x", {})
+                        iurl = orig.get("url")
+                    
+                    if iurl and purl not in metadata_cache:
+                        metadata_cache[purl] = {
+                            "id": pid, "url": purl, "image_url": iurl,
+                            "title": d.get("title") or d.get("gridTitle") or d.get("grid_title", "")
+                        }
+                
+                for v in d.values():
+                    if isinstance(v, (dict, list)): extract_from_dict(v)
+
+            extract_from_dict(pws_json)
+    except Exception:
+        pass
+
+    # Atualizar cache global temporário
+    _intercepted_metadata.update(metadata_cache)
+
     return list(seen)[:max_pins] if max_pins else list(seen)
+
+# Singleton para armazenar metadados interceptados durante a sessão de coleta
+_intercepted_metadata: Dict[str, PinMetadata] = {}
+
+def get_intercepted_metadata() -> Dict[str, PinMetadata]:
+    return _intercepted_metadata
+
+def clear_intercepted_metadata() -> None:
+    _intercepted_metadata.clear()
 
 
 def collect_pin_links(
@@ -650,7 +800,7 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
         
         for url in candidates:
             try:
-                page.goto(url, wait_until="networkidle", timeout=TIMEOUT_PAGE_LOAD)
+                page.goto(url, wait_until="load", timeout=TIMEOUT_PAGE_LOAD)
                 page.wait_for_timeout(1500)
 
                 stable_rounds = 0
@@ -836,23 +986,28 @@ def resolve_images(
 
     # Carregar cache existente
     cache = load_pin_cache() if use_cache else {}
+    intercepted = get_intercepted_metadata()
+    
     out: Dict[str, str] = {}
     to_fetch: List[str] = []
 
-    # Verificar quais pins já estão em cache
+    # Verificar quais pins já estão em cache ou foram interceptados
     for link in links:
-        if link in cache:
+        if link in intercepted:
+            out[link] = intercepted[link]["image_url"]
+        elif link in cache:
             out[link] = cache[link]
         else:
             to_fetch.append(link)
 
-    processed = len(out)  # Iniciar contagem a partir dos já em cache
-    cache_hits = len(out)
+    processed = len(out)
+    cache_hits = len(out) - len([l for l in out if l in intercepted])
+    intercept_hits = len([l for l in out if l in intercepted])
 
-    # Se tudo está em cache, retornar rápido
+    # Se tudo está em cache ou interceptado, retornar rápido
     if not to_fetch:
-        emit("resolve_complete", {"found": len(out), "total": total_links, "from_cache": len(out)})
-        logger.end_phase("resolve_images", count=len(out), message=f"Todos os {len(out)} pins em cache")
+        emit("resolve_complete", {"found": len(out), "total": total_links, "from_cache": cache_hits, "intercepted": intercept_hits})
+        logger.end_phase("resolve_images", count=len(out), message=f"Todos os {len(out)} pins resolvidos (Intercept: {intercept_hits}, Cache: {cache_hits})")
         return out
 
     def work(link: str) -> tuple[str, str | None]:
@@ -922,6 +1077,12 @@ def download_board(
     emit = status_cb or (lambda *_: None)
     logger = get_logger()
     session = session or create_session()
+    
+    # ONDA 7: Garantir que o cache de interceptação comece limpo para este board
+    # (Ou acumulativo se for multi-board? Pinterest costuma misturar se não limpar)
+    # Vamos manter acumulativo dentro de download_user_boards mas limpar aqui para single-board CLI
+    if browser_shared is None: 
+        clear_intercepted_metadata()
 
     # Log phase start
     logger.start_phase("download_board")
@@ -1103,6 +1264,7 @@ def download_user_boards(
     # Criar browser uma única vez para todas as operações
     with sync_playwright() as p:
         browser_shared = p.chromium.launch(headless=options.headless)
+        clear_intercepted_metadata() # Limpar antes de começar batch
         try:
             emit("log", {"message": "Coletando quadros públicos do usuário…"})
             boards = collect_board_urls(
