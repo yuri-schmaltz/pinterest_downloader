@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pinterest Board Downloader</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <!-- Header -->
+  <header id="header">
+    <div class="header-row">
+      <img src="../icons/icon-32.png" alt="Logo" class="logo">
+      <h1>Pinterest Downloader</h1>
+    </div>
+    <div id="page-info" class="page-info">
+      <span id="page-status-dot" class="status-dot"></span>
+      <span id="page-status-text">Verificando página…</span>
+    </div>
+  </header>
+
+  <!-- Not on Pinterest Warning -->
+  <div id="not-pinterest" class="panel warning-panel" style="display:none;">
+    <div class="warning-icon">⚠️</div>
+    <p>Navegue para uma página do <strong>Pinterest</strong> para usar a extensão.</p>
+    <p class="hint">Acesse um perfil ou board do Pinterest e reabra este popup.</p>
+  </div>
+
+  <!-- Private Profile Warning -->
+  <div id="private-warning" class="panel warning-panel" style="display:none;">
+    <div class="warning-icon">🔒</div>
+    <p>Este perfil é <strong>privado</strong>.</p>
+    <p class="hint">Faça login no Pinterest e recarregue a página para acessar os quadros.</p>
+  </div>
+
+  <!-- Main Content -->
+  <main id="main-content" style="display:none;">
+
+    <!-- Action Buttons -->
+    <div id="action-bar" class="action-bar">
+      <button id="btn-discover" class="btn btn-primary" title="Descobrir boards do perfil atual">
+        <span class="btn-icon">📋</span> Listar Quadros
+      </button>
+      <button id="btn-collect" class="btn btn-secondary" title="Coletar pins do board atual" style="display:none;">
+        <span class="btn-icon">📌</span> Coletar Pins
+      </button>
+    </div>
+
+    <!-- Options Panel (collapsible) -->
+    <details id="options-panel" class="options-panel">
+      <summary>⚙️ Opções</summary>
+      <div class="options-grid">
+        <label for="opt-max-pins">Máx. pins por board</label>
+        <input type="number" id="opt-max-pins" min="0" value="0" placeholder="0 = sem limite">
+
+        <label for="opt-scroll-pause">Pausa rolagem (s)</label>
+        <input type="number" id="opt-scroll-pause" min="0.1" max="10" step="0.1" value="1.2">
+      </div>
+    </details>
+
+    <!-- Board Selection -->
+    <div id="boards-section" class="section" style="display:none;">
+      <div class="section-header">
+        <h2>Quadros Encontrados</h2>
+        <label class="select-all-label">
+          <input type="checkbox" id="select-all">
+          <span>Todos</span>
+        </label>
+      </div>
+      <div id="boards-list" class="boards-list"></div>
+      <div id="boards-info" class="info-label">Nenhum quadro carregado.</div>
+    </div>
+
+    <!-- Progress Section -->
+    <div id="progress-section" class="section" style="display:none;">
+      <h2>Progresso</h2>
+
+      <div class="progress-item">
+        <div class="progress-label">
+          <span id="progress-phase">Fase atual</span>
+          <span id="progress-detail" class="progress-detail"></span>
+        </div>
+        <div class="progress-bar-container">
+          <div id="progress-bar" class="progress-bar" style="width:0%"></div>
+        </div>
+        <div class="progress-numbers">
+          <span id="progress-current">0</span> / <span id="progress-total">0</span>
+        </div>
+      </div>
+
+      <div class="progress-item">
+        <div class="progress-label">
+          <span>Total geral</span>
+        </div>
+        <div class="progress-bar-container">
+          <div id="overall-bar" class="progress-bar overall" style="width:0%"></div>
+        </div>
+        <div class="progress-numbers">
+          <span id="overall-current">0</span> / <span id="overall-total">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Download Controls -->
+    <div id="download-controls" class="action-bar" style="display:none;">
+      <button id="btn-download" class="btn btn-download" disabled>
+        <span class="btn-icon">⬇️</span> Baixar Selecionados
+      </button>
+      <button id="btn-cancel" class="btn btn-cancel" disabled>
+        ✕ Cancelar
+      </button>
+    </div>
+
+    <!-- Log -->
+    <details id="log-panel" class="log-panel">
+      <summary>📄 Log (<span id="log-count">0</span>)</summary>
+      <div id="log-content" class="log-content"></div>
+    </details>
+  </main>
+
+  <!-- Status Bar -->
+  <footer id="status-bar" class="status-bar">
+    <span id="status-text">Pronto.</span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
