@@ -19,6 +19,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, NamedTuple, TypedDict
 
+class PrivateProfileError(Exception):
+    """Raised when trying to access a private Pinterest profile without login."""
+    def __init__(self, username: str) -> None:
+        self.username = username
+        super().__init__(
+            f"O perfil '{username}' é privado. "
+            "Marque a opção 'Login Manual (perfis privados)' e tente novamente."
+        )
+
+
 class BoardMetadata(TypedDict):
     url: str
     title: str
@@ -546,10 +556,17 @@ def _collect_pin_links_with_browser(
                 sys.exit(1)
 
     try:
-        page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_DOM_READY)
+        page.wait_for_load_state("networkidle", timeout=10000)
     except Exception:
         pass
-    page.wait_for_timeout(1000)
+    
+    try:
+        # Aguarda que os primeiros pins sejam carregados na tela
+        page.wait_for_selector('a[href^="/pin/"]', state='visible', timeout=10000)
+    except Exception:
+        pass
+        
+    page.wait_for_timeout(3000)
 
     seen = set()
     stable_rounds = 0
@@ -762,7 +779,14 @@ def collect_pin_links(
                 browser_temp.close()
 
 
-def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float, browser=None) -> List[BoardMetadata]:
+def collect_board_urls(
+    username_or_url: str,
+    headless: bool,
+    scroll_pause: float,
+    manual_login: bool = False,
+    manual_login_handler: Callable[[], None] | None = None,
+    browser=None
+) -> List[BoardMetadata]:
     """Coleta URLs e metadados de todos os quadros públicos do usuário.
     
     Se browser for fornecido, reusa-o. Caso contrário, cria um temporário.
@@ -798,10 +822,38 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
         seen_urls = set()
         results: List[BoardMetadata] = []
         
-        for url in candidates:
+        for i, url in enumerate(candidates):
             try:
                 page.goto(url, wait_until="load", timeout=TIMEOUT_PAGE_LOAD)
+                
+                if manual_login and i == 0:
+                    if manual_login_handler:
+                        manual_login_handler()
+                    else:
+                        print(
+                            "\n>>> Faça login na janela aberta."
+                            "\n>>> Volte ao terminal e pressione ENTER para continuar…",
+                            flush=True,
+                        )
+                        try:
+                            input()
+                        except KeyboardInterrupt:
+                            import sys
+                            sys.exit(1)
+
                 page.wait_for_timeout(1500)
+
+                # Detectar perfil privado antes de tentar coletar
+                is_private = page.evaluate(
+                    '(() => {'
+                    '  const text = document.body.innerText || "";'
+                    '  return text.includes("This profile is private") || '
+                    '         text.includes("Este perfil é privado") || '
+                    '         text.includes("profile is private");'
+                    '})()'
+                )
+                if is_private and not manual_login:
+                    raise PrivateProfileError(username)
 
                 stable_rounds = 0
                 last_count = 0
@@ -924,6 +976,8 @@ def collect_board_urls(username_or_url: str, headless: bool, scroll_pause: float
 
                 if results:
                     break
+            except PrivateProfileError:
+                raise
             except Exception:
                 continue
         return results
@@ -1069,11 +1123,13 @@ def download_board(
     browser_shared=None,
 ) -> BoardDownloadResult:
     target_pin_count = None
-    if isinstance(board_url, dict):
+    if isinstance(board_url, str):
+        _board_url_str: str = board_url
+    else:
         target_pin_count = board_url.get('pin_count_int')
-        board_url = board_url['url']
+        _board_url_str: str = board_url['url']
 
-    board_url = normalize_url(board_url)
+    actual_board_url = normalize_url(_board_url_str)
     emit = status_cb or (lambda *_: None)
     logger = get_logger()
     session = session or create_session()
@@ -1086,10 +1142,10 @@ def download_board(
 
     # Log phase start
     logger.start_phase("download_board")
-    display_url = urllib.parse.unquote(board_url)
-    logger.info("download_board", f"Iniciando download: {display_url}", board_url=board_url)
+    display_url = urllib.parse.unquote(actual_board_url)
+    logger.info("download_board", f"Iniciando download: {display_url}", board_url=actual_board_url)
 
-    target_dir = out_dir_for(board_url, options.out_root)
+    target_dir = out_dir_for(actual_board_url, options.out_root)
 
     emit("board_start", {"board_url": display_url, "output_dir": target_dir})
     emit("log", {"message": f"[BOARD] {display_url}"})
@@ -1097,10 +1153,10 @@ def download_board(
     def handle_manual_login() -> None:
         emit(
             "manual_login_required",
-            {"board_url": board_url, "message": "Faça login e retorne para continuar."},
+            {"board_url": actual_board_url, "message": "Faça login e retorne para continuar."},
         )
         if manual_login_handler:
-            manual_login_handler(board_url)
+            manual_login_handler(actual_board_url)
             return
         if sys.stdin.isatty():
             print(
@@ -1116,7 +1172,7 @@ def download_board(
             raise RuntimeError("Manual login requerido sem manipulador interativo disponível.")
 
     pin_links = collect_pin_links(
-        board_url=board_url,
+        board_url=actual_board_url,
         headless=options.headless,
         manual_login=options.manual_login,
         scroll_pause=options.scroll_pause,
@@ -1131,18 +1187,18 @@ def download_board(
         emit(
             "board_complete",
             {
-                "board_url": board_url,
+                "board_url": actual_board_url,
                 "downloaded": 0,
                 "total": 0,
                 "output_dir": target_dir,
             },
         )
         emit("log", {"message": f"  Concluído: 0/0 pins (pulado)"})
-        logger.warn("download_board", "Nenhum pin encontrado", board_url=board_url)
+        logger.warn("download_board", "Nenhum pin encontrado", board_url=actual_board_url)
         logger.end_phase("download_board", count=0, message="Nenhum pin encontrado")
-        return BoardDownloadResult(board_url, 0, 0, target_dir)
+        return BoardDownloadResult(actual_board_url, 0, 0, target_dir)
 
-    emit("pins_collected", {"board_url": board_url, "count": len(pin_links)})
+    emit("pins_collected", {"board_url": actual_board_url, "count": len(pin_links)})
     emit(
         "log",
         {"message": f"  [2/3] Resolvendo imagem grande de {len(pin_links)} pins (paralelo, cache={'ativado' if options.use_cache else 'desativado'})…"},
@@ -1154,15 +1210,15 @@ def download_board(
         emit(
             "board_complete",
             {
-                "board_url": board_url,
+                "board_url": actual_board_url,
                 "downloaded": 0,
                 "total": 0,
                 "output_dir": target_dir,
             },
         )
-        logger.warn("download_board", "Nenhuma imagem resolvida", board_url=board_url, count=len(pin_links))
+        logger.warn("download_board", "Nenhuma imagem resolvida", board_url=actual_board_url, count=len(pin_links))
         logger.end_phase("download_board", count=0, message="Nenhuma imagem resolvida")
-        return BoardDownloadResult(board_url, 0, 0, target_dir)
+        return BoardDownloadResult(actual_board_url, 0, 0, target_dir)
 
     emit(
         "log",
@@ -1173,7 +1229,7 @@ def download_board(
 
     ok = 0
     total = len(pin_img)
-    emit("download_start", {"board_url": board_url, "total": total})
+    emit("download_start", {"board_url": actual_board_url, "total": total})
 
     with ThreadPoolExecutor(max_workers=options.workers) as ex:
         futs = [
@@ -1186,7 +1242,7 @@ def download_board(
             emit(
                 "download_progress",
                 {
-                    "board_url": board_url,
+                    "board_url": actual_board_url,
                     "current": idx,
                     "total": total,
                     "downloaded": ok,
@@ -1232,7 +1288,7 @@ def download_board(
     emit(
         "board_complete",
         {
-            "board_url": board_url,
+            "board_url": actual_board_url,
             "downloaded": verified_ok,
             "total": total,
             "output_dir": target_dir,
@@ -1242,7 +1298,7 @@ def download_board(
     )
 
     logger.end_phase("download_board", count=verified_ok, message=f"Baixadas/Verificadas {verified_ok}/{total} imagens")
-    return BoardDownloadResult(board_url, verified_ok, total, target_dir)
+    return BoardDownloadResult(actual_board_url, verified_ok, total, target_dir)
 
 
 def download_user_boards(
@@ -1297,14 +1353,14 @@ def download_user_boards(
                         manual_login_handler=manual_login_handler,
                         browser_shared=browser_shared,
                     )
-                    results[board] = res
+                    results[res.board_url] = res
                     emit("overall_progress", {"current": idx, "total": len(boards)})
             else:
                 # Nota: modo paralelo (boards_workers > 1) não pode reusar browser
                 # pois Playwright não é thread-safe. Cada worker criará seu próprio browser.
-                def worker(board_url: str) -> BoardDownloadResult:
+                def worker(board_data: str | BoardMetadata) -> BoardDownloadResult:
                     return download_board(
-                        board_url,
+                        board_data,
                         options,
                         session=None,
                         status_cb=emit,
@@ -1321,7 +1377,7 @@ def download_user_boards(
                         completed += 1
                         emit("overall_progress", {"current": completed, "total": len(boards)})
 
-            ordered_results = [results[b] for b in boards if b in results]
+            ordered_results = [results[b['url']] for b in boards if b['url'] in results]
             emit("user_complete", {"boards": boards, "results": ordered_results})
             
             # Log phase end

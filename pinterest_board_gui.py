@@ -37,6 +37,7 @@ from PyQt6.QtWidgets import (
 
 from pinterest_board_dl import (
     DownloadOptions,
+    PrivateProfileError,
     download_board,
     download_user_boards,
     BoardMetadata,
@@ -158,6 +159,8 @@ class DownloadWorker(QThread):
                     self.username_or_url,
                     headless=self.options.headless,
                     scroll_pause=self.options.scroll_pause,
+                    manual_login=self.options.manual_login,
+                    manual_login_handler=lambda: self._manual_login_wait(self.username_or_url),
                 )
                 self.boards_found.emit(boards)
                 return
@@ -208,6 +211,8 @@ class DownloadWorker(QThread):
             self.finished_with_totals.emit(totals[0], totals[1])
         except DownloadCancelled:
             self.cancelled.emit()
+        except PrivateProfileError as exc:
+            self.error.emit(str(exc))
         except Exception as exc:  # pragma: no cover - exibição no GUI
             self.error.emit(str(exc))
 
@@ -316,8 +321,8 @@ class MainWindow(QMainWindow):
         self.worker: DownloadWorker | None = None
         self.boards_metadata: List[BoardMetadata] = []
         self.selected_urls: List[str] = []
-        self.board_items: Dict[str, QListWidgetItem] = {}
-        self.url_to_title: Dict[str, str] = {}
+        self.board_items: dict[str, QListWidgetItem] = {}
+        self.url_to_title: dict[str, str] = {}
 
         # Aplicar estilos
         self.setStyleSheet(MAIN_QSS)
@@ -347,7 +352,9 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(icon)
             
             # Definir também para o QApplication (barra de tarefas)
-            QApplication.instance().setWindowIcon(icon)
+            app_instance = QApplication.instance()
+            if isinstance(app_instance, QApplication):
+                app_instance.setWindowIcon(icon)
     
     def _build_ui(self) -> None:
         central = QWidget()
@@ -435,6 +442,10 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(QLabel("Quadros em paralelo"), 5, 0)
         layout.addWidget(self.boards_workers_spin, 5, 1)
+
+        self.manual_login_check = QCheckBox("Login Manual (perfis privados)")
+        self.manual_login_check.setChecked(False)
+        layout.addWidget(self.manual_login_check, 6, 0, 1, 3)
 
         layout.setColumnStretch(1, 1)
         return group
@@ -528,8 +539,8 @@ class MainWindow(QMainWindow):
         out_root = self.output_edit.text().strip() or str(Path("pins").resolve())
         options = DownloadOptions(
             out_root=out_root,
-            headless=True,
-            manual_login=False,
+            headless=not self.manual_login_check.isChecked(),
+            manual_login=self.manual_login_check.isChecked(),
             scroll_pause=self.scroll_pause_spin.value(),
         )
 
@@ -569,8 +580,8 @@ class MainWindow(QMainWindow):
 
         options = DownloadOptions(
             out_root=out_root,
-            headless=True,
-            manual_login=False,
+            headless=not self.manual_login_check.isChecked(),
+            manual_login=self.manual_login_check.isChecked(),
             max_pins=self.max_pins_spin.value() or None,
             scroll_pause=self.scroll_pause_spin.value(),
             workers=self.workers_spin.value(),
@@ -660,6 +671,8 @@ class MainWindow(QMainWindow):
         norm_url = board_url.strip().rstrip('/').lower()
         for i in range(self.selection_list.count()):
             item = self.selection_list.item(i)
+            if item is None:
+                continue
             stored_url = item.data(Qt.ItemDataRole.UserRole) or ""
             stored_norm = stored_url.strip().rstrip('/').lower()
             
@@ -730,14 +743,16 @@ class MainWindow(QMainWindow):
     def _toggle_select_all(self, state: int) -> None:
         cs = Qt.CheckState.Checked if state == Qt.CheckState.Checked.value else Qt.CheckState.Unchecked
         for i in range(self.selection_list.count()):
-            self.selection_list.item(i).setCheckState(cs)
+            item = self.selection_list.item(i)
+            if item is not None:
+                item.setCheckState(cs)
         self._update_selection_state()
 
     def _update_selection_state(self) -> None:
         self.selected_urls = []
         for i in range(self.selection_list.count()):
             item = self.selection_list.item(i)
-            if item.checkState() == Qt.CheckState.Checked:
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
                 # Recuperar URL dos dados do usuário
                 url = item.data(Qt.ItemDataRole.UserRole)
                 if url:
@@ -769,8 +784,36 @@ class MainWindow(QMainWindow):
         self.worker = None
 
     def on_error(self, message: str) -> None:
-        QMessageBox.critical(self, "Erro durante o download", message)
-        self.status_label.setText("Erro.")
+        # Detectar se é erro de perfil privado para dar tratamento especial
+        is_private = "privado" in message.lower() or "private" in message.lower()
+        
+        if is_private:
+            dlg = QMessageBox(self)
+            dlg.setIcon(QMessageBox.Icon.Warning)
+            dlg.setWindowTitle("Perfil Privado Detectado")
+            dlg.setText(
+                "🔒 O perfil informado é <b>privado</b>.<br><br>"
+                "Para acessar quadros de um perfil privado, você precisa "
+                "fazer login no Pinterest.<br><br>"
+                "Deseja ativar o <b>Login Manual</b> e tentar novamente?"
+            )
+            dlg.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            dlg.setDefaultButton(QMessageBox.StandardButton.Yes)
+            result = dlg.exec()
+            
+            if result == QMessageBox.StandardButton.Yes:
+                self.manual_login_check.setChecked(True)
+                self.status_label.setText("Login Manual ativado. Clique em 'Listar Quadros' novamente.")
+                self.info_selection_label.setText("Perfil privado — Login Manual necessário.")
+            else:
+                self.status_label.setText("Perfil privado. Ative 'Login Manual' para acessar.")
+                self.info_selection_label.setText("Perfil privado — nenhum quadro acessível.")
+        else:
+            QMessageBox.critical(self, "Erro durante o download", message)
+            self.status_label.setText("Erro.")
+        
         self.start_button.setEnabled(True)
         self.list_boards_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
