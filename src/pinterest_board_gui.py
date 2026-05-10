@@ -334,7 +334,7 @@ class MainWindow(QMainWindow):
     # --- UI helpers ---
     def _set_window_icon(self) -> None:
         """Define o ícone da aplicação."""
-        icon_path = Path(__file__).parent / "icon.svg"
+        icon_path = Path(__file__).parent.parent / "assets" / "icon.svg"
         
         if icon_path.exists():
             # Renderizar SVG para QPixmap
