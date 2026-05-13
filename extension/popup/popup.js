@@ -113,36 +113,24 @@
 
     ui.pageDot.className = "status-dot active";
 
-    switch (type) {
-      case "profile":
-        ui.pageText.textContent = `Perfil: @${info.username}`;
-        ui.btnDiscover.style.display = "flex";
-        ui.btnCollect.style.display = "none";
-        setStatus("Clique em 'Listar Quadros' para descobrir os boards.");
-        break;
-
-      case "board":
-        ui.pageText.textContent = `Board: ${info.boardName}`;
-        ui.btnDiscover.style.display = "none";
-        ui.btnCollect.style.display = "flex";
-        // Also allow collecting for a single board directly
-        ui.downloadControls.style.display = "flex";
-        ui.btnDownload.textContent = "⬇️ Baixar Este Board";
-        ui.btnDownload.disabled = false;
-        setStatus("Pronto para coletar pins deste board.");
-        break;
-
-      case "pin":
-        ui.pageText.textContent = `Pin individual`;
-        ui.pageDot.className = "status-dot warning";
-        setStatus("Navegue para um perfil ou board para usar o downloader.");
-        break;
-
-      default:
-        ui.pageText.textContent = `Página: ${type}`;
-        ui.pageDot.className = "status-dot warning";
-        setStatus("Navegue para um perfil ou board.");
-        break;
+    if (type === "profile") {
+      ui.pageText.textContent = `Perfil: @${info.username}`;
+      ui.btnDiscover.style.display = "flex";
+      ui.btnCollect.style.display = "none";
+      ui.downloadControls.style.display = "none";
+      setStatus("Clique em 'Listar Quadros' para descobrir os boards.");
+    } else {
+      let displayName = info.boardName ? `Board: ${info.boardName}` : `Página: ${type}`;
+      ui.pageText.textContent = displayName;
+      
+      ui.btnDiscover.style.display = "none";
+      ui.btnCollect.style.display = "none"; // Hide secondary collect button to avoid confusion, keep main Download button
+      
+      ui.downloadControls.style.display = "flex";
+      ui.btnDownload.innerHTML = '<span class="btn-icon">⬇️</span> Baixar Esta Página';
+      ui.btnDownload.disabled = false;
+      
+      setStatus("Pronto para coletar pins desta página.");
     }
   }
 
@@ -322,11 +310,11 @@
     // Determine what to download
     let boardsToProcess = [];
 
-    if (pageInfo.pageType === "board") {
-      // Single board mode
+    if (pageInfo.pageType !== "profile") {
+      // Single board mode (current page treated as board)
       boardsToProcess = [{
         url: pageInfo.url || currentTab.url,
-        title: pageInfo.boardName,
+        title: pageInfo.boardName || pageInfo.pageType || "Página Atual",
       }];
     } else {
       // Multi-board mode
@@ -359,7 +347,7 @@
 
       try {
         // Navigate to board page if needed
-        if (pageInfo.pageType !== "board" || currentTab.url !== board.url) {
+        if (currentTab.url !== board.url) {
           setStatus(`Navegando para ${board.title}…`);
           await chrome.tabs.update(currentTab.id, { url: board.url });
           await waitForTabLoad(currentTab.id);
