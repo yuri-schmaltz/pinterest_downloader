@@ -25,8 +25,8 @@
 
 ```bash
 # 1. Clonar repositório
-git clone https://github.com/yurix/my-pinterest-downloader.git
-cd my-pinterest-downloader
+git clone https://github.com/yuri-schmaltz/pinterest_downloader.git
+cd pinterest_downloader
 
 # 2. Criar ambiente virtual
 python3 -m venv .venv
@@ -55,8 +55,8 @@ sudo dnf install python3-pip python3-virtualenv
 
 ```powershell
 # 1. Clonar repositório (Git Bash ou PowerShell)
-git clone https://github.com/yurix/my-pinterest-downloader.git
-cd my-pinterest-downloader
+git clone https://github.com/yuri-schmaltz/pinterest_downloader.git
+cd pinterest_downloader
 
 # 2. Criar ambiente virtual
 python -m venv .venv

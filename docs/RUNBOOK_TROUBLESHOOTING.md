@@ -202,5 +202,5 @@ Envie:
 
 ## Contato
 
-- **Issues:** https://github.com/yurix/my-pinterest-downloader/issues
-- **Discussions:** https://github.com/yurix/my-pinterest-downloader/discussions
+- **Issues:** https://github.com/yuri-schmaltz/pinterest_downloader/issues
+- **Discussions:** https://github.com/yuri-schmaltz/pinterest_downloader/discussions

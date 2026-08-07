@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "Yuri Schmaltz", email = "yurix@example.com"}
+    {name = "Yuri Schmaltz", email = "yuri-schmaltz@users.noreply.github.com"}
 ]
 dependencies = [
     "requests>=2.31.0",
@@ -28,8 +28,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yurix/app-pinterest-downloader"
-Repository = "https://github.com/yurix/app-pinterest-downloader.git"
+Homepage = "https://github.com/yuri-schmaltz/pinterest_downloader"
+Repository = "https://github.com/yuri-schmaltz/pinterest_downloader.git"
 
 [tool.black]
 line-length = 120

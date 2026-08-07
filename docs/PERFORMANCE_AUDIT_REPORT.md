@@ -263,7 +263,7 @@ USER_BOARDS_RE = re.compile(r"^https?://(?:www|br)\\.pinterest\\.com/([^/]+)/?$"
 ```
 
 **Como validar:**
-1. Executar: `/home/yurix/Documentos/app-pinterest-downloader/.venv/bin/python -m compileall -q pinterest_board_dl.py`
+1. Executar: `.venv/bin/python -m compileall -q src/pinterest_board_dl.py`
 2. Critério PASS: "Compilado sem erros"
 3. Executar: `grep -n "timeout=" pinterest_board_dl.py | grep -v "TIMEOUT_"` → deve retornar 0 matches após refactor
 
@@ -954,7 +954,7 @@ Se tiver **8h disponíveis**, faça:
 
 Para implementar patches ou validar mudanças, execute:
 ```bash
-cd /home/yurix/Documentos/app-pinterest-downloader
+cd <repo_root>  # ou o caminho onde você clonou o repositório
 git checkout -b feature/performance-optimizations
 # Aplicar patches 1 por 1, commitando cada um
 git commit -m "refactor: centralize timeouts and URLs (PATCH 1-2-3)"

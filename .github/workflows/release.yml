@@ -102,7 +102,7 @@ jobs:
           Section: utils
           Priority: optional
           Architecture: amd64
-          Maintainer: Yuri Schmaltz <yurix@example.com>
+          Maintainer: Yuri Schmaltz <yuri-schmaltz@users.noreply.github.com>
           Description: Pinterest Board Downloader
            Tool to download images from Pinterest boards via CLI or GUI.
           EOT
