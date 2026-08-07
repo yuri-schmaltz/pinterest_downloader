@@ -27,6 +27,10 @@ dev = [
     "pytest>=7.0.0",
 ]
 
+[project.scripts]
+pinterest-board-dl = "pinterest_board_dl:main"
+pinterest-board-gui = "pinterest_board_gui:run"
+
 [project.urls]
 Homepage = "https://github.com/yurix/app-pinterest-downloader"
 Repository = "https://github.com/yurix/app-pinterest-downloader.git"
