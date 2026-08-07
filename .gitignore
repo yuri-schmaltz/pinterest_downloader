@@ -16,6 +16,11 @@ eggs/
 .eggs/
 lib/
 lib64/
+
+# Chrome extension: extension/lib/ holds the helper JS that powers
+# content.js + popup.js (see PR #7 / extension/lib/utils.js). The Python
+# `lib/` ignore above also matches this path by default, so whitelist it.
+!extension/lib/
 parts/
 sdist/
 var/
