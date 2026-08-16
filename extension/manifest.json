@@ -1,50 +1,37 @@
 {
   "manifest_version": 3,
-  "name": "Pinterest Board Downloader",
-  "version": "1.0.0",
-  "description": "Baixe todos os pins de quadros do Pinterest com um clique. Suporta perfis públicos e privados.",
-  "icons": {
-    "16": "icons/icon-16.png",
-    "32": "icons/icon-32.png",
-    "48": "icons/icon-48.png",
-    "128": "icons/icon-128.png"
-  },
-  "action": {
-    "default_popup": "popup/popup.html",
-    "default_icon": {
-      "16": "icons/icon-16.png",
-      "32": "icons/icon-32.png",
-      "48": "icons/icon-48.png",
-      "128": "icons/icon-128.png"
-    },
-    "default_title": "Pinterest Board Downloader"
-  },
+  "name": "Pinterest Pro Downloader",
+  "version": "2.0.0",
+  "description": "Extensão avançada para download de imagens em alta resolução do Pinterest.",
   "permissions": [
     "downloads",
     "activeTab",
-    "storage",
     "scripting"
   ],
   "host_permissions": [
-    "*://*.pinterest.com/*"
+    "https://*.pinterest.com/*",
+    "https://*.pinimg.com/*"
   ],
   "background": {
-    "service_worker": "background/service-worker.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
       "matches": [
-        "*://*.pinterest.com/*"
+        "https://*.pinterest.com/*"
       ],
-      "js": ["lib/utils.js", "content/content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
-  "web_accessible_resources": [
-    {
-      "resources": ["icons/*"],
-      "matches": ["*://*.pinterest.com/*"]
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
-  ]
+  }
 }
