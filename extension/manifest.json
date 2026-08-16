@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Pinterest Pro Downloader",
+  "default_locale": "en",
+  "name": "__MSG_extension_name__",
   "version": "2.0.0",
-  "description": "Extensão avançada para download de imagens em alta resolução do Pinterest.",
+  "description": "__MSG_extension_description__",
   "permissions": [
     "downloads",
     "activeTab",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "https://*.pinterest.com/*",
@@ -21,6 +23,7 @@
         "https://*.pinterest.com/*"
       ],
       "js": [
+        "lib/i18n.js",
         "content.js"
       ],
       "run_at": "document_idle"
@@ -28,6 +31,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
+    "default_title": "__MSG_toolbar_title__",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

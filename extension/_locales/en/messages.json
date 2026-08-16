@@ -1,0 +1,106 @@
+{
+  "extension_name": {
+    "message": "Pinterest Pro Downloader",
+    "description": "The display name of the extension."
+  },
+  "extension_description": {
+    "message": "Advanced extension to download high-resolution images from Pinterest.",
+    "description": "The description of the extension."
+  },
+  "toolbar_label": {
+    "message": "Download Page Images",
+    "description": "Label shown on the floating action button."
+  },
+  "toolbar_aria": {
+    "message": "Download Pinterest images",
+    "description": "ARIA label for accessibility."
+  },
+  "toolbar_title": {
+    "message": "Click to download all visible images (page will auto-scroll)",
+    "description": "Tooltip on the floating action button."
+  },
+  "popup_title": {
+    "message": "Pinterest Downloader",
+    "description": "Heading in the popup."
+  },
+  "popup_button": {
+    "message": "Download Visible Images",
+    "description": "Button label in the popup."
+  },
+  "popup_footer": {
+    "message": "Pro Version $VERSION$",
+    "description": "Footer text.",
+    "placeholders": {
+      "version": { "content": "$1", "example": "2.0.0" }
+    }
+  },
+  "opt_folder": {
+    "message": "Destination folder",
+    "description": "Label for the folder input."
+  },
+  "opt_concurrent": {
+    "message": "Parallel downloads",
+    "description": "Label for the concurrency input."
+  },
+  "status_saved": {
+    "message": "Settings saved",
+    "description": "Confirmation after settings save."
+  },
+  "status_no_tab": {
+    "message": "No active tab.",
+    "description": "Shown when no tab is focused."
+  },
+  "status_wrong_site": {
+    "message": "Navigate to a Pinterest page first.",
+    "description": "Shown when popup is opened on a non-Pinterest tab."
+  },
+  "status_triggering": {
+    "message": "Triggering download…",
+    "description": "Shown while the popup is triggering the harvest."
+  },
+  "status_triggered": {
+    "message": "✓ Started! Watch the page toolbar for progress.",
+    "description": "Shown after the popup successfully triggered the harvest."
+  },
+  "status_loading": {
+    "message": "Loading page…",
+    "description": "Status shown while auto-scrolling."
+  },
+  "status_collecting": {
+    "message": "Collecting images…",
+    "description": "Status shown during harvest."
+  },
+  "status_no_images": {
+    "message": "No Pinterest images found.",
+    "description": "Shown when harvest finds nothing."
+  },
+  "status_scroll_start": {
+    "message": "Scrolling to load all images…",
+    "description": "Toast at start of auto-scroll."
+  },
+  "status_found": {
+    "message": "$COUNT$ images found. Starting downloads…",
+    "description": "Toast after harvest completes.",
+    "placeholders": {
+      "count": { "content": "$1", "example": "47" }
+    }
+  },
+  "status_done": {
+    "message": "✓ $COUNT$ downloads started!",
+    "description": "Success toast.",
+    "placeholders": {
+      "count": { "content": "$1", "example": "47" }
+    }
+  },
+  "status_comm_error": {
+    "message": "Error communicating with the extension.",
+    "description": "Shown when sendMessage fails."
+  },
+  "status_generic_error": {
+    "message": "Error: $MESSAGE$",
+    "description": "Generic error toast.",
+    "placeholders": {
+      "message": { "content": "$1", "example": "Network error" }
+    }
+  }
+}

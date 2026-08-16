@@ -1,0 +1,106 @@
+{
+  "extension_name": {
+    "message": "Pinterest Pro Downloader",
+    "description": "El nombre mostrado de la extensión."
+  },
+  "extension_description": {
+    "message": "Extensión avanzada para descargar imágenes en alta resolución de Pinterest.",
+    "description": "La descripción de la extensión."
+  },
+  "toolbar_label": {
+    "message": "Descargar Imágenes de la Página",
+    "description": "Etiqueta mostrada en el botón flotante."
+  },
+  "toolbar_aria": {
+    "message": "Descargar imágenes de Pinterest",
+    "description": "Etiqueta ARIA para accesibilidad."
+  },
+  "toolbar_title": {
+    "message": "Haz clic para descargar todas las imágenes visibles (la página se desplaza automáticamente)",
+    "description": "Tooltip en el botón flotante."
+  },
+  "popup_title": {
+    "message": "Pinterest Downloader",
+    "description": "Título en el popup."
+  },
+  "popup_button": {
+    "message": "Descargar Imágenes Visibles",
+    "description": "Etiqueta del botón en el popup."
+  },
+  "popup_footer": {
+    "message": "Versión Pro $VERSION$",
+    "description": "Texto del pie.",
+    "placeholders": {
+      "version": { "content": "$1", "example": "2.0.0" }
+    }
+  },
+  "opt_folder": {
+    "message": "Carpeta de destino",
+    "description": "Etiqueta del campo de carpeta."
+  },
+  "opt_concurrent": {
+    "message": "Descargas paralelas",
+    "description": "Etiqueta del campo de concurrencia."
+  },
+  "status_saved": {
+    "message": "Configuración guardada",
+    "description": "Confirmación después de guardar."
+  },
+  "status_no_tab": {
+    "message": "Sin pestaña activa.",
+    "description": "Mostrado cuando no hay pestaña enfocada."
+  },
+  "status_wrong_site": {
+    "message": "Navega primero a una página de Pinterest.",
+    "description": "Mostrado cuando se abre el popup en una pestaña que no es de Pinterest."
+  },
+  "status_triggering": {
+    "message": "Iniciando descarga…",
+    "description": "Mostrado mientras el popup activa la recolección."
+  },
+  "status_triggered": {
+    "message": "✓ ¡Iniciado! Mira el botón en la página para ver el progreso.",
+    "description": "Mostrado después de que el popup active la recolección."
+  },
+  "status_loading": {
+    "message": "Cargando página…",
+    "description": "Estado durante el auto-scroll."
+  },
+  "status_collecting": {
+    "message": "Recolectando imágenes…",
+    "description": "Estado durante la recolección."
+  },
+  "status_no_images": {
+    "message": "No se encontraron imágenes de Pinterest.",
+    "description": "Mostrado cuando la recolección no encuentra nada."
+  },
+  "status_scroll_start": {
+    "message": "Desplazando para cargar todas las imágenes…",
+    "description": "Toast al inicio del auto-scroll."
+  },
+  "status_found": {
+    "message": "$COUNT$ imágenes encontradas. Iniciando descargas…",
+    "description": "Toast después de la recolección.",
+    "placeholders": {
+      "count": { "content": "$1", "example": "47" }
+    }
+  },
+  "status_done": {
+    "message": "✓ ¡$COUNT$ descargas iniciadas!",
+    "description": "Toast de éxito.",
+    "placeholders": {
+      "count": { "content": "$1", "example": "47" }
+    }
+  },
+  "status_comm_error": {
+    "message": "Error al comunicar con la extensión.",
+    "description": "Mostrado cuando sendMessage falla."
+  },
+  "status_generic_error": {
+    "message": "Error: $MESSAGE$",
+    "description": "Toast de error genérico.",
+    "placeholders": {
+      "message": { "content": "$1", "example": "Error de red" }
+    }
+  }
+}

@@ -1,13 +1,33 @@
 (function () {
   'use strict';
 
+  // ===================== Config =====================
+
+  const TOOLBAR_ID = 'pinterest-pro-toolbar';
+  const TOAST_ID = 'pinterest-pro-toast';
+  const BADGE_ID = 'pinterest-pro-badge';
+  const SCROLL_PAUSE_MS = 1200;
+  const SCROLL_STABLE_ROUNDS = 4;
+  const SCROLL_MAX_ITERATIONS = 60;
+
+  const i18n = window.__pbdI18n || { t: (k) => k, getLocale: () => 'en' };
+  const T = (k, ...args) => i18n.t(k, ...args);
+
+  // ===================== State =====================
+
+  let _busy = false;
+  let _lastHarvestCount = 0;
+
   // ===================== Floating Toolbar =====================
 
   function createFloatingToolbar() {
-    if (document.getElementById('pinterest-pro-toolbar')) return;
+    if (document.getElementById(TOOLBAR_ID)) return;
 
     const toolbar = document.createElement('div');
-    toolbar.id = 'pinterest-pro-toolbar';
+    toolbar.id = TOOLBAR_ID;
+    toolbar.setAttribute('role', 'button');
+    toolbar.setAttribute('aria-label', T('toolbar_aria'));
+    toolbar.title = T('toolbar_title');
     toolbar.style.cssText = `
       position: fixed;
       bottom: 20px;
@@ -23,93 +43,234 @@
       font-weight: bold;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       cursor: pointer;
-      transition: transform 0.2s ease, background 0.2s ease;
+      transition: transform 0.2s ease, background 0.2s ease, opacity 0.2s ease;
+      user-select: none;
     `;
 
-    toolbar.innerHTML = `
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-      <span>Baixar Imagens da Página</span>
-    `;
+    // Build DOM explicitly (no innerHTML for SVG — avoids CSP surprises).
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', '20');
+    svg.setAttribute('height', '20');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    const els = [
+      { tag: 'path', attrs: { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' } },
+      { tag: 'polyline', attrs: { points: '7 10 12 15 17 10' } },
+      { tag: 'line', attrs: { x1: '12', y1: '15', x2: '12', y2: '3' } },
+    ];
+    for (const { tag, attrs } of els) {
+      const el = document.createElementNS(svgNS, tag);
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      svg.appendChild(el);
+    }
+    const label = document.createElement('span');
+    label.textContent = T('toolbar_label');
+    toolbar.appendChild(svg);
+    toolbar.appendChild(label);
 
-    toolbar.addEventListener('mouseenter', () => toolbar.style.transform = 'scale(1.05)');
-    toolbar.addEventListener('mouseleave', () => toolbar.style.transform = 'scale(1)');
-    toolbar.addEventListener('click', harvestAndDownloadImages);
+    // Optional badge showing last harvest count.
+    const badge = document.createElement('span');
+    badge.id = BADGE_ID;
+    badge.style.cssText = `
+      background: rgba(255, 255, 255, 0.25);
+      color: #fff;
+      font-size: 11px;
+      font-weight: bold;
+      padding: 2px 7px;
+      border-radius: 10px;
+      min-width: 18px;
+      text-align: center;
+      display: none;
+    `;
+    badge.textContent = '0';
+    toolbar.appendChild(badge);
+
+    toolbar.addEventListener('mouseenter', () => {
+      if (!_busy) toolbar.style.transform = 'scale(1.05)';
+    });
+    toolbar.addEventListener('mouseleave', () => {
+      toolbar.style.transform = 'scale(1)';
+    });
+    toolbar.addEventListener('click', () => {
+      if (_busy) return;
+      harvestAndDownloadImages();
+    });
 
     document.body.appendChild(toolbar);
   }
 
+  function setToolbarBusy(busy, labelKey) {
+    _busy = busy;
+    const t = document.getElementById(TOOLBAR_ID);
+    if (!t) return;
+    t.style.opacity = busy ? '0.75' : '1';
+    t.style.cursor = busy ? 'wait' : 'pointer';
+    t.style.pointerEvents = busy ? 'none' : 'auto';
+    const span = t.querySelector('span:not(#' + BADGE_ID + ')');
+    if (span) span.textContent = labelKey ? T(labelKey) : T('toolbar_label');
+  }
+
+  function setBadge(count) {
+    _lastHarvestCount = count;
+    const badge = document.getElementById(BADGE_ID);
+    if (!badge) return;
+    if (count > 0) {
+      badge.textContent = count > 999 ? '999+' : String(count);
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
   // ===================== URL Conversion & Filtering =====================
 
-  /**
-   * Convert a Pinterest thumbnail URL to its highest-resolution /originals/ variant.
-   * Returns null if the URL is not a Pinterest pin image (e.g. webapp UI assets).
-   *
-   * Validates that the URL looks like an actual pin image — matches one of:
-   *   /<size>x/path  (236x, 474x, 564x, 736x, ...)
-   *   /originals/path
-   *   /rs/<WxH>/path
-   *
-   * Rejects UI assets like /webapp/, /images/, /logos/ even though they're on
-   * s.pinimg.com / i.pinimg.com.
-   */
   function getOriginalImageUrl(imgSrc) {
     if (!imgSrc || typeof imgSrc !== 'string') return null;
     if (!imgSrc.includes('pinimg.com')) return null;
 
-    // Require the URL to look like a pin image path (numeric size, originals, or rs/<dim>).
     const isPinImage = /\/(?:originals|\d+x|rs\/\d+x\d+)\//.test(imgSrc);
     if (!isPinImage) return null;
 
     let url = imgSrc;
-    // Rewrite any size variant (236x, 474x, 564x, 736x, 1200x, ...) to /originals/.
-    // Also normalizes regional subdomains like i1-e.pinimg.com → keep them intact.
     url = url.replace(/\/\d+x\//, '/originals/');
     url = url.replace(/\/rs\/\d+x\d+\//, '/');
     return url;
   }
 
+  /**
+   * Extract a Pinterest Pin ID from a URL.
+   * Pinterest image filenames are derived from a 32-hex-char hash.
+   * Returns a short identifier (12 chars), or null if it can't be extracted.
+   * Falls back to FNV-1a hash of the path tail for non-standard URLs.
+   */
+  function extractPinHash(url) {
+    if (!url) return null;
+    const m = /\/([a-f0-9]{16,32})\./i.exec(url);
+    if (m) return m[1].slice(0, 12);
+    try {
+      const u = new URL(url);
+      const parts = u.pathname.split('/').filter(Boolean);
+      if (parts.length < 2) return null;
+      const tail = parts.slice(-2).join('/');
+      let h = 0x811c9dc5;
+      for (let i = 0; i < tail.length; i++) {
+        h ^= tail.charCodeAt(i);
+        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+      }
+      return h.toString(16).padStart(8, '0').slice(0, 12);
+    } catch {
+      return null;
+    }
+  }
+
+  // ===================== Auto-Scroll =====================
+
+  async function autoScrollForImages(onProgress) {
+    let stableRounds = 0;
+    let lastCount = 0;
+    let lastHeight = 0;
+
+    for (let i = 0; i < SCROLL_MAX_ITERATIONS; i++) {
+      const images = document.querySelectorAll('img').length;
+      const height = (document.scrollingElement || document.documentElement || document.body).scrollHeight;
+      onProgress(images);
+
+      if (images === lastCount && height === lastHeight) {
+        stableRounds++;
+      } else {
+        stableRounds = 0;
+        lastCount = images;
+        lastHeight = height;
+      }
+
+      if (stableRounds >= SCROLL_STABLE_ROUNDS) break;
+
+      window.scrollTo(0, height);
+      await sleep(SCROLL_PAUSE_MS);
+    }
+
+    window.scrollTo(0, 0);
+    onProgress(document.querySelectorAll('img').length);
+  }
+
+  function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+  }
+
   // ===================== Harvest =====================
 
-  function harvestAndDownloadImages() {
-    const images = Array.from(document.querySelectorAll('img'));
-    const validUrls = new Set();
+  async function harvestAndDownloadImages() {
+    setToolbarBusy(true, 'status_loading');
+    showToast(T('status_scroll_start'));
 
-    for (const img of images) {
-      const src = img.src || img.dataset.src;
-      const originalUrl = getOriginalImageUrl(src);
-      if (originalUrl) validUrls.add(originalUrl);
-    }
+    try {
+      await autoScrollForImages(() => { /* could update badge mid-scroll */ });
 
-    const urlsArray = Array.from(validUrls).map(url => ({ url }));
+      setToolbarBusy(true, 'status_collecting');
+      const images = Array.from(document.querySelectorAll('img'));
+      const validUrls = new Set();
 
-    if (urlsArray.length === 0) {
-      showToast('Nenhuma imagem do Pinterest encontrada.', true);
-      return;
-    }
+      for (const img of images) {
+        const src = img.src || img.dataset.src;
+        const originalUrl = getOriginalImageUrl(src);
+        if (originalUrl) validUrls.add(originalUrl);
+      }
 
-    chrome.runtime.sendMessage({
-      action: "downloadImages",
-      urls: urlsArray
-    }, response => {
-      if (chrome.runtime.lastError) {
-        console.warn('[PBD] sendMessage error:', chrome.runtime.lastError.message);
-        showToast('Erro ao comunicar com a extensão.', true);
+      const urlsArray = Array.from(validUrls).map((url, i) => ({
+        url,
+        index: i,
+        pinHash: extractPinHash(url),
+      }));
+
+      if (urlsArray.length === 0) {
+        setBadge(0);
+        showToast(T('status_no_images'), true);
         return;
       }
-      if (response && response.status === "success") {
-        showToast(`Iniciando download de ${response.count} imagens!`);
-      } else {
-        showToast('Erro ao iniciar os downloads.', true);
-      }
-    });
+
+      setBadge(urlsArray.length);
+      showToast(T('status_found', urlsArray.length));
+
+      chrome.runtime.sendMessage({
+        action: 'downloadImages',
+        urls: urlsArray,
+        source: location.hostname,
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.warn('[PBD] sendMessage error:', chrome.runtime.lastError.message);
+          showToast(T('status_comm_error'), true);
+          return;
+        }
+        if (response && response.status === 'success') {
+          showToast(T('status_done', response.count));
+        } else {
+          showToast(T('status_generic_error', (response && response.message) || 'unknown'), true);
+        }
+      });
+    } catch (err) {
+      console.error('[PBD] Harvest error:', err);
+      showToast(T('status_generic_error', err.message), true);
+    } finally {
+      setToolbarBusy(false);
+    }
   }
 
   // ===================== Toast =====================
 
   function showToast(message, isError = false) {
+    const old = document.getElementById(TOAST_ID);
+    if (old) old.remove();
+
     const toast = document.createElement('div');
+    toast.id = TOAST_ID;
+    toast.setAttribute('role', isError ? 'alert' : 'status');
     toast.style.cssText = `
       position: fixed;
       bottom: 80px;
@@ -123,25 +284,38 @@
       box-shadow: 0 4px 10px rgba(0,0,0,0.3);
       max-width: 320px;
       word-wrap: break-word;
+      line-height: 1.4;
     `;
-    toast.innerText = message;
+    toast.textContent = message;
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
+    setTimeout(() => { if (toast.parentNode) toast.remove(); }, 4000);
   }
 
   // ===================== Init & MutationObserver =====================
 
+  let _scheduledReAdd = false;
   const observer = new MutationObserver(() => {
-    if (!document.getElementById('pinterest-pro-toolbar')) {
-      createFloatingToolbar();
+    if (_scheduledReAdd) return;
+    if (!document.getElementById(TOOLBAR_ID)) {
+      _scheduledReAdd = true;
+      requestAnimationFrame(() => {
+        _scheduledReAdd = false;
+        if (!document.getElementById(TOOLBAR_ID)) createFloatingToolbar();
+      });
     }
   });
 
-  observer.observe(document.body, { childList: true, subtree: true });
+  if (document.body) {
+    observer.observe(document.body, { childList: true, subtree: true });
+  } else {
+    document.addEventListener('DOMContentLoaded', () => {
+      observer.observe(document.body, { childList: true, subtree: true });
+    }, { once: true });
+  }
 
-  if (document.readyState === 'complete') {
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
     createFloatingToolbar();
   } else {
-    window.addEventListener('load', createFloatingToolbar);
+    window.addEventListener('load', createFloatingToolbar, { once: true });
   }
 })();
