@@ -6,9 +6,11 @@
   const TOOLBAR_ID = 'pinterest-pro-toolbar';
   const TOAST_ID = 'pinterest-pro-toast';
   const BADGE_ID = 'pinterest-pro-badge';
-  const SCROLL_PAUSE_MS = 1200;
-  const SCROLL_STABLE_ROUNDS = 4;
-  const SCROLL_MAX_ITERATIONS = 60;
+  const SCROLL_PAUSE_MS = 1500;
+  const SCROLL_STABLE_ROUNDS = 6;        // require 6 stable rounds (~9s) before stopping
+  const SCROLL_MIN_ROUNDS = 8;           // always scroll at least 8 times before stopping
+  const SCROLL_MAX_ITERATIONS = 100;     // hard cap = ~150s = 2.5 min
+  const SCROLL_MAX_DURATION_MS = 150000; // 2.5 min wall-clock cap
 
   const i18n = window.__pbdI18n || { t: (k) => k, getLocale: () => 'en' };
   const T = (k, ...args) => i18n.t(k, ...args);
@@ -173,32 +175,88 @@
 
   // ===================== Auto-Scroll =====================
 
+  /**
+   * Count images that are actually pinimg pin images (not lazy stubs,
+   * webapp icons, avatars, etc.).
+   */
+  function countHarvestableImages() {
+    const images = document.querySelectorAll('img');
+    let count = 0;
+    for (const img of images) {
+      const src = img.src || img.dataset.src;
+      if (getOriginalImageUrl(src)) count++;
+    }
+    return count;
+  }
+
+  /**
+   * Get a fingerprint of unique pin URLs currently in the DOM.
+   * Used to detect when new pins load even if scrollHeight doesn't grow
+   * (Pinterest's virtual scroll recycles DOM nodes).
+   */
+  function pinFingerprint() {
+    const set = new Set();
+    for (const img of document.querySelectorAll('img')) {
+      const url = getOriginalImageUrl(img.src || img.dataset.src);
+      if (url) set.add(url);
+    }
+    return Array.from(set).sort().join('|');
+  }
+
   async function autoScrollForImages(onProgress) {
+    const startTime = Date.now();
     let stableRounds = 0;
-    let lastCount = 0;
-    let lastHeight = 0;
+    let lastFingerprint = '';
+    let lastHarvestable = 0;
+    let totalUniquePinsSeen = 0;
+
+    // Step 1: smooth scroll to bottom in increments. Pinterest uses
+    // IntersectionObserver — each scroll event triggers lazy load of
+    // pins entering the viewport.
+    const stepSize = window.innerHeight * 0.8;
+    let currentScroll = 0;
+    let stableIterations = 0;
 
     for (let i = 0; i < SCROLL_MAX_ITERATIONS; i++) {
-      const images = document.querySelectorAll('img').length;
       const height = (document.scrollingElement || document.documentElement || document.body).scrollHeight;
-      onProgress(images);
+      const harvestable = countHarvestableImages();
+      const fp = pinFingerprint();
+      const uniqueCount = fp ? fp.split('|').length : 0;
 
-      if (images === lastCount && height === lastHeight) {
+      if (uniqueCount > totalUniquePinsSeen) {
+        totalUniquePinsSeen = uniqueCount;
+      }
+      onProgress(totalUniquePinsSeen);
+
+      // Check stability — no new unique pins for several iterations
+      if (fp === lastFingerprint && uniqueCount > 0) {
         stableRounds++;
       } else {
         stableRounds = 0;
-        lastCount = images;
-        lastHeight = height;
+        lastFingerprint = fp;
       }
+      lastHarvestable = harvestable;
 
-      if (stableRounds >= SCROLL_STABLE_ROUNDS) break;
+      // Exit conditions:
+      // - We've scrolled past the page AND no new pins for STABLE rounds
+      // - Wall-clock cap
+      const atBottom = currentScroll >= height - window.innerHeight;
+      if (atBottom && stableRounds >= SCROLL_STABLE_ROUNDS && i >= SCROLL_MIN_ROUNDS) break;
+      if (Date.now() - startTime > SCROLL_MAX_DURATION_MS) break;
 
-      window.scrollTo(0, height);
+      // Smooth scroll: advance by stepSize, or jump to bottom if we're close
+      if (currentScroll + stepSize < height) {
+        currentScroll += stepSize;
+      } else {
+        currentScroll = height;
+      }
+      window.scrollTo(0, currentScroll);
       await sleep(SCROLL_PAUSE_MS);
     }
 
+    // Step 2: scroll back to top so user sees the result
     window.scrollTo(0, 0);
-    onProgress(document.querySelectorAll('img').length);
+    onProgress(totalUniquePinsSeen);
   }
 
   function sleep(ms) {
