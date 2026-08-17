@@ -102,5 +102,43 @@
     "placeholders": {
       "message": { "content": "$1", "example": "Error de red" }
     }
+  },
+  "opt_max_pins": {
+    "message": "Cantidad máxima de pins",
+    "description": "Etiqueta del campo de límite de pins."
+  },
+  "opt_max_pins_hint": {
+    "message": "0 = sin límite (descarga todos)",
+    "description": "Pista mostrada debajo del campo de límite."
+  },
+  "status_found_limited": {
+    "message": "Limitado a $COUNT$ de $MAX$ pins. Iniciando descargas…",
+    "description": "Toast mostrado cuando la recolección es limitada por maxPins.",
+    "placeholders": {
+      "count": { "content": "$1", "example": "47" },
+      "max": { "content": "$2", "example": "100" }
+    }
+  },
+  "pick_folder_title": {
+    "message": "Elegir carpeta de destino",
+    "description": "Tooltip del botón de selección de carpeta."
+  },
+  "folder_selected": {
+    "message": "Carpeta definida: $NAME$",
+    "description": "Estado tras seleccionar carpeta correctamente.",
+    "placeholders": {
+      "name": { "content": "$1", "example": "MisTableros" }
+    }
+  },
+  "folder_pick_failed": {
+    "message": "Error al seleccionar carpeta: $MESSAGE$",
+    "description": "Estado cuando falla el selector nativo.",
+    "placeholders": {
+      "message": { "content": "$1", "example": "Permiso denegado" }
+    }
+  },
+  "folder_pick_fallback": {
+    "message": "Escribe el nombre de la carpeta manualmente.",
+    "description": "Mostrado cuando el navegador no tiene selector nativo."
   }
 }

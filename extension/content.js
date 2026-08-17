@@ -17,6 +17,7 @@
 
   let _busy = false;
   let _lastHarvestCount = 0;
+  let _triggerSettings = null;  // settings passed in via popup CustomEvent
 
   // ===================== Floating Toolbar =====================
 
@@ -204,6 +205,32 @@
     return new Promise(r => setTimeout(r, ms));
   }
 
+  // ===================== Settings =====================
+
+  /**
+   * Read user settings from chrome.storage.local. Falls back to defaults if
+   * storage API is unavailable (e.g. when loaded outside the extension context).
+   */
+  async function loadSettings() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get(['maxPins', 'folder', 'maxConcurrent'], (data) => {
+          if (chrome.runtime.lastError) {
+            resolve({ maxPins: 0, folder: 'Pinterest', maxConcurrent: 6 });
+            return;
+          }
+          resolve({
+            maxPins: typeof data.maxPins === 'number' && data.maxPins >= 0 ? data.maxPins : 0,
+            folder: typeof data.folder === 'string' && data.folder ? data.folder : 'Pinterest',
+            maxConcurrent: typeof data.maxConcurrent === 'number' ? data.maxConcurrent : 6,
+          });
+        });
+      } catch {
+        resolve({ maxPins: 0, folder: 'Pinterest', maxConcurrent: 6 });
+      }
+    });
+  }
+
   // ===================== Harvest =====================
 
   async function harvestAndDownloadImages() {
@@ -211,6 +238,14 @@
     showToast(T('status_scroll_start'));
 
     try {
+      // Merge triggerSettings (from popup click) with stored settings.
+      const stored = await loadSettings();
+      const settings = Object.assign({}, stored, _triggerSettings || {});
+      _triggerSettings = null;
+
+      const maxPins = settings.maxPins | 0;
+      const folder = settings.folder || 'Pinterest';
+
       await autoScrollForImages(() => { /* could update badge mid-scroll */ });
 
       setToolbarBusy(true, 'status_collecting');
@@ -223,11 +258,16 @@
         if (originalUrl) validUrls.add(originalUrl);
       }
 
-      const urlsArray = Array.from(validUrls).map((url, i) => ({
+      let urlsArray = Array.from(validUrls).map((url, i) => ({
         url,
         index: i,
         pinHash: extractPinHash(url),
       }));
+
+      // Apply maxPins limit (0 = unlimited).
+      if (maxPins > 0 && urlsArray.length > maxPins) {
+        urlsArray = urlsArray.slice(0, maxPins);
+      }
 
       if (urlsArray.length === 0) {
         setBadge(0);
@@ -236,12 +276,17 @@
       }
 
       setBadge(urlsArray.length);
-      showToast(T('status_found', urlsArray.length));
+      const foundLabel = maxPins > 0
+        ? T('status_found_limited', urlsArray.length, maxPins)
+        : T('status_found', urlsArray.length);
+      showToast(foundLabel);
 
       chrome.runtime.sendMessage({
         action: 'downloadImages',
         urls: urlsArray,
         source: location.hostname,
+        folder: folder,
+        maxConcurrent: settings.maxConcurrent,
       }, (response) => {
         if (chrome.runtime.lastError) {
           console.warn('[PBD] sendMessage error:', chrome.runtime.lastError.message);
@@ -318,4 +363,12 @@
   } else {
     window.addEventListener('load', createFloatingToolbar, { once: true });
   }
+
+  // Listen for trigger events from the popup. The popup dispatches a
+  // CustomEvent with the current settings (maxPins, folder, etc).
+  window.addEventListener('pinterest-pro-trigger', (e) => {
+    if (_busy) return;
+    _triggerSettings = e.detail || null;
+    harvestAndDownloadImages();
+  });
 })();

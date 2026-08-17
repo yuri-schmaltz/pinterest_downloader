@@ -102,5 +102,43 @@
     "placeholders": {
       "message": { "content": "$1", "example": "Erro de rede" }
     }
+  },
+  "opt_max_pins": {
+    "message": "Quantidade máxima de pins",
+    "description": "Rótulo do campo de limite de pins."
+  },
+  "opt_max_pins_hint": {
+    "message": "0 = sem limite (baixa todos)",
+    "description": "Dica exibida abaixo do campo de limite."
+  },
+  "status_found_limited": {
+    "message": "Limitado a $COUNT$ de $MAX$ pins. Iniciando downloads…",
+    "description": "Toast exibido quando a coleta é limitada por maxPins.",
+    "placeholders": {
+      "count": { "content": "$1", "example": "47" },
+      "max": { "content": "$2", "example": "100" }
+    }
+  },
+  "pick_folder_title": {
+    "message": "Escolher pasta de destino",
+    "description": "Tooltip no botão de seleção de pasta."
+  },
+  "folder_selected": {
+    "message": "Pasta definida: $NAME$",
+    "description": "Status após seleção bem-sucedida de pasta.",
+    "placeholders": {
+      "name": { "content": "$1", "example": "MeusQuadros" }
+    }
+  },
+  "folder_pick_failed": {
+    "message": "Falha ao selecionar pasta: $MESSAGE$",
+    "description": "Status quando o seletor nativo falha.",
+    "placeholders": {
+      "message": { "content": "$1", "example": "Permissão negada" }
+    }
+  },
+  "folder_pick_fallback": {
+    "message": "Digite o nome da pasta manualmente.",
+    "description": "Exibido quando o navegador não tem seletor nativo."
   }
 }

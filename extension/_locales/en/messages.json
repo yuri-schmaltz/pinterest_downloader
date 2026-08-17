@@ -102,5 +102,43 @@
     "placeholders": {
       "message": { "content": "$1", "example": "Network error" }
     }
+  },
+  "opt_max_pins": {
+    "message": "Maximum number of pins",
+    "description": "Label for the max pins input."
+  },
+  "opt_max_pins_hint": {
+    "message": "0 = unlimited (downloads all)",
+    "description": "Hint shown below the max pins input."
+  },
+  "status_found_limited": {
+    "message": "Limited to $COUNT$ of $MAX$ pins. Starting downloads…",
+    "description": "Toast shown when harvest is capped by maxPins.",
+    "placeholders": {
+      "count": { "content": "$1", "example": "47" },
+      "max": { "content": "$2", "example": "100" }
+    }
+  },
+  "pick_folder_title": {
+    "message": "Choose destination folder",
+    "description": "Tooltip on the folder picker button."
+  },
+  "folder_selected": {
+    "message": "Folder set to: $NAME$",
+    "description": "Status shown after a successful folder pick.",
+    "placeholders": {
+      "name": { "content": "$1", "example": "MyBoards" }
+    }
+  },
+  "folder_pick_failed": {
+    "message": "Folder pick failed: $MESSAGE$",
+    "description": "Status shown when the native folder picker errors.",
+    "placeholders": {
+      "message": { "content": "$1", "example": "Permission denied" }
+    }
+  },
+  "folder_pick_fallback": {
+    "message": "Type the folder name manually.",
+    "description": "Shown when the browser doesn't support a native folder picker."
   }
 }

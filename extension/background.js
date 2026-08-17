@@ -130,7 +130,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     if (!sourceHost) sourceHost = 'pinterest';
 
+    // Per-request overrides fall back to stored settings.
+    const folderOverride = typeof request.folder === 'string' && request.folder
+      ? request.folder : userSettings.folder;
+    const maxOverride = typeof request.maxConcurrent === 'number'
+      && request.maxConcurrent >= 1 && request.maxConcurrent <= 12
+      ? request.maxConcurrent : userSettings.maxConcurrent;
+    const previousFolder = userSettings.folder;
+    const previousMax = userSettings.maxConcurrent;
+    userSettings.folder = folderOverride;
+    userSettings.maxConcurrent = maxOverride;
+
     if (urls.length === 0) {
+      // Restore previous settings before responding.
+      userSettings.folder = previousFolder;
+      userSettings.maxConcurrent = previousMax;
       sendResponse({ status: 'error', message: 'No valid URLs found.' });
       return false;
     }
@@ -153,6 +167,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
 
     processQueue();
+
+    // Restore userSettings to their stored values so subsequent harvests
+    // don't keep using the popup's per-request override.
+    userSettings.folder = previousFolder;
+    userSettings.maxConcurrent = previousMax;
+
     sendResponse({ status: 'success', count: queued, skipped: skippedDupes });
     return false;
   }

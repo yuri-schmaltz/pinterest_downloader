@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <style>
     body {
-      width: 260px;
+      width: 280px;
       margin: 0;
       padding: 16px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -34,6 +34,17 @@
       background: #888;
       cursor: not-allowed;
     }
+    button.secondary {
+      background: #fff;
+      color: #555;
+      border: 1px solid #ccc;
+      padding: 6px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      transition: background 0.2s;
+    }
+    button.secondary:hover { background: #f0f0f0; }
     .options {
       margin-top: 12px;
       padding: 10px;
@@ -59,7 +70,28 @@
       font-size: 12px;
       font-family: inherit;
     }
-    .options .row { margin-bottom: 8px; }
+    .options .row { margin-bottom: 10px; }
+    .options .row:last-child { margin-bottom: 0; }
+    .options .input-group {
+      display: flex;
+      gap: 4px;
+    }
+    .options .input-group input { flex: 1; }
+    .options .hint {
+      font-size: 10px;
+      color: #888;
+      margin-top: 3px;
+    }
+    .options .preview {
+      font-size: 10px;
+      color: #888;
+      margin-top: 5px;
+      padding: 4px 6px;
+      background: #f5f5f5;
+      border-radius: 3px;
+      word-break: break-all;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
     .footer {
       font-size: 11px;
       color: #777;
@@ -71,6 +103,13 @@
       margin-top: 8px;
       min-height: 14px;
     }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .checkbox-row input[type="checkbox"] { margin: 0; }
+    .checkbox-row label { margin: 0; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -81,11 +120,22 @@
   <div class="options">
     <div class="row">
       <label for="opt-folder" id="label-folder">Pasta de destino</label>
-      <input type="text" id="opt-folder" placeholder="Pinterest" maxlength="100">
+      <div class="input-group">
+        <input type="text" id="opt-folder" placeholder="Pinterest" maxlength="100">
+        <button type="button" id="pick-folder-btn" class="secondary" title="Selecionar pasta">📁</button>
+      </div>
+      <div class="preview" id="folder-preview">Downloads/Pinterest/</div>
     </div>
+
+    <div class="row">
+      <label for="opt-max-pins" id="label-max-pins">Quantidade máxima de pins</label>
+      <input type="number" id="opt-max-pins" min="0" max="9999" step="1" value="0">
+      <div class="hint" id="hint-max-pins">0 = sem limite (baixa todos)</div>
+    </div>
+
     <div class="row">
       <label for="opt-concurrent" id="label-concurrent">Downloads paralelos</label>
-      <input type="number" id="opt-concurrent" min="1" max="12" step="1">
+      <input type="number" id="opt-concurrent" min="1" max="12" step="1" value="6">
     </div>
   </div>
 
