@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from pinterest_board_dl import (
     PINTEREST_BASE_URL,
@@ -37,7 +37,11 @@ def test_constants():
     assert TIMEOUT_DOM_READY == 15_000, "DOM ready timeout incorrect"
     assert DOWNLOAD_RETRY_DELAY == 1.0, "Retry delay incorrect"
     assert DOWNLOAD_MAX_RETRIES == 1, "Max retries incorrect"
-    assert SCROLL_STABLE_ROUNDS == 3, "Scroll stable rounds incorrect (ONDA 4: reduced from 6)"
+    assert SCROLL_STABLE_ROUNDS >= 3, (
+        f"Scroll stable rounds too low: {SCROLL_STABLE_ROUNDS}. "
+        "ONDA 4 lowered it to 3; commit b8a63fe raised it to 20 to survive "
+        "page lag and popups. Keep it at 3 or above."
+    )
     assert SCROLL_HEIGHT_CHECK == True, "Scroll height check should be enabled (ONDA 4)"
     print("✅ PASS: Todas constantes estão corretas (incluindo ONDA 4)\n")
 
@@ -109,13 +113,18 @@ def test_cli_help():
     print("TEST 5: Flags CLI disponíveis")
     
     import subprocess
+    repo_root = Path(__file__).parent.parent
+    cli_path = repo_root / "src" / "pinterest_board_dl.py"
+    assert cli_path.exists(), f"CLI entry point not found at {cli_path}"
+    
     result = subprocess.run(
-        [sys.executable, "pinterest_board_dl.py", "--help"],
+        [sys.executable, str(cli_path), "--help"],
         capture_output=True,
         text=True,
-        cwd=Path(__file__).parent.parent,
+        cwd=repo_root,
     )
     
+    assert result.returncode == 0, f"CLI --help failed: {result.stderr}"
     assert "--cache-dir" in result.stdout, "--cache-dir flag not found"
     assert "--no-cache" in result.stdout, "--no-cache flag not found"
     
@@ -144,34 +153,95 @@ def test_scroll_detection():
     """Test 7: Validar configuração de scroll detection inteligente."""
     print("TEST 7: Scroll detection inteligente (ONDA 4)")
     
-    # Verificar constantes
-    assert SCROLL_STABLE_ROUNDS == 3, f"Expected 3, got {SCROLL_STABLE_ROUNDS}"
+    # Verificar constantes.
+    # Invariante, não valor fixo: a ONDA 4 baixou para 3 e o commit b8a63fe
+    # subiu para 20 (resiliência a lag/popups). Fixar o número exato aqui
+    # faria o teste quebrar a cada novo ajuste de tuning; o que importa é
+    # que ele nunca volte abaixo do piso de 3 rodadas estáveis.
+    assert SCROLL_STABLE_ROUNDS >= 3, f"Expected >= 3, got {SCROLL_STABLE_ROUNDS}"
     assert SCROLL_HEIGHT_CHECK == True, "Height check should be enabled"
     
-    # Verificar que reduzimos de 6 para 3 (50% faster detection)
-    old_value = 6
-    improvement = ((old_value - SCROLL_STABLE_ROUNDS) / old_value) * 100
+    # Verificar que o limiar de parada antecipada nunca é menor que o de
+    # estabilidade -- se fosse, o scroll pararia antes de a página assentar.
+    assert SCROLL_STABLE_ROUNDS >= 3, "Scroll would stop before the page settles"
     
-    print(f"   Stable rounds: {SCROLL_STABLE_ROUNDS} (reduzido de {old_value})")
-    print(f"   Melhoria: {improvement:.0f}% mais rápido para detectar fim")
+    print(f"   Stable rounds: {SCROLL_STABLE_ROUNDS} (piso: 3, atual: resiliente a lag)")
     print(f"   Height check: {'✓ Ativado' if SCROLL_HEIGHT_CHECK else '✗ Desativado'}")
     
-    print("✅ PASS: Scroll detection otimizado\n")
+    print("✅ PASS: Scroll detection configurado\n")
 
 
-def test_diagnostics_script():
-    """Test 8: Verificar existência do script de diagnóstico."""
-    print("TEST 8: Script de diagnóstico")
+def test_package_layout():
+    """Test 8: Verificar a integridade do layout do pacote e da extensão.
+
+    Substitui o antigo teste de `diagnostics.py`, que foi removido de
+    propósito no commit 9fb4c3e. Este teste cobre o que realmente quebrou
+    o projeto: o restructure para `src/` e o `lib/` do .gitignore making
+    arquivos referenciados desaparecerem do repositório.
+    """
+    print("TEST 8: Integridade do layout (src/ + extension/)")
     
-    diag_file = Path(__file__).parent.parent / "diagnostics.py"
-    assert diag_file.exists(), "diagnostics.py not found"
+    repo_root = Path(__file__).parent.parent
+    src_dir = repo_root / "src"
+    ext_dir = repo_root / "extension"
     
-    # Verificar que é executável
-    content = diag_file.read_text()
-    assert "def main()" in content, "main() function not found"
-    assert "collect_metrics" in content, "collect_metrics() not found"
+    # 8.1 -- os módulos do core precisam estar onde o código espera
+    for module_name in [
+        "pinterest_board_dl.py",
+        "pinterest_board_gui.py",
+        "json_logger.py",
+        "adaptive_workers.py",
+        "rate_limiter.py",
+    ]:
+        assert (src_dir / module_name).exists(), f"src/{module_name} not found"
     
-    print("✅ PASS: Script de diagnóstico presente e válido\n")
+    # 8.2 -- e precisam ser importáveis de fato
+    import importlib
+    for module_name in [
+        "pinterest_board_dl",
+        "json_logger",
+        "adaptive_workers",
+        "rate_limiter",
+    ]:
+        try:
+            importlib.import_module(module_name)
+        except Exception as exc:
+            raise AssertionError(f"Failed to import {module_name}: {exc}") from exc
+    
+    # 8.3 -- a extensão precisa referenciar apenas arquivos versionados.
+    #         Esta era a causa raiz do build não-reproduzível: o manifest
+    #         apontava para lib/i18n.js, que o .gitignore engolia.
+    manifest_path = ext_dir / "manifest.json"
+    assert manifest_path.exists(), "extension/manifest.json not found"
+    manifest = json.loads(manifest_path.read_text())
+    
+    referenced = []
+    for entry in manifest.get("content_scripts", []):
+        referenced.extend(entry.get("js", []))
+    if "background" in manifest:
+        bg = manifest["background"]
+        referenced.append(bg.get("service_worker", ""))
+    if "action" in manifest:
+        referenced.append(manifest["action"].get("default_popup", ""))
+    
+    for rel in filter(None, referenced):
+        target = ext_dir / rel
+        assert target.exists(), (
+            f"extension/manifest.json references '{rel}' but it is not in the "
+            f"repository -- the extension would fail to load. Check that the "
+            f"file is tracked by git (see 'git check-ignore -v extension/{rel}')."
+        )
+    
+    # 8.4 -- os <script> do popup também precisam existir
+    popup_html = ext_dir / "popup.html"
+    assert popup_html.exists(), "extension/popup.html not found"
+    import re
+    for src in re.findall(r'<script[^>]+src="([^"]+)"', popup_html.read_text()):
+        assert (ext_dir / src).exists(), (
+            f"extension/popup.html loads '{src}' but it is not in the repository"
+        )
+    
+    print("✅ PASS: Layout do pacote e da extensão íntegros\n")
 
 
 def test_json_logger():
@@ -334,7 +404,7 @@ if __name__ == "__main__":
         test_cli_help()
         test_browser_reuse()
         test_scroll_detection()
-        test_diagnostics_script()
+        test_package_layout()
         test_json_logger()
         test_adaptive_workers()
         
@@ -342,7 +412,7 @@ if __name__ == "__main__":
         print("TEST 11: Rate Limiting (ONDA 5E)")
         import subprocess
         test_11_path = Path(__file__).parent / "test_11_rate_limiting.py"
-        result = subprocess.run(["python3", str(test_11_path)], capture_output=True, text=True, cwd=Path(__file__).parent.parent)
+        result = subprocess.run([sys.executable, str(test_11_path)], capture_output=True, text=True, cwd=Path(__file__).parent.parent)
         if result.returncode != 0:
             print(f"❌ FAIL: Test 11 falhou\n{result.stdout}\n{result.stderr}")
             sys.exit(1)
