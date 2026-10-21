@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import List
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
+from PyQt6.QtCore import QSize, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -25,23 +24,20 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
-    QPushButton,
     QProgressBar,
-    QSizePolicy,
+    QPushButton,
     QSpinBox,
-    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from pinterest_board_dl import (
+    BoardMetadata,
     DownloadOptions,
     PrivateProfileError,
-    download_board,
-    download_user_boards,
-    BoardMetadata,
     collect_board_urls,
+    download_user_boards,
 )
 
 
@@ -184,7 +180,7 @@ class DownloadWorker(QThread):
 
             # Se chegamos aqui, temos boards_to_process (selecionados)
             from pinterest_board_dl import create_session, download_board, sync_playwright
-            
+
             with sync_playwright() as p:
                 browser_shared = p.chromium.launch(headless=self.options.headless)
                 try:
@@ -193,7 +189,7 @@ class DownloadWorker(QThread):
                     for idx, board in enumerate(boards_to_process, 1):
                         if self._cancelled:
                             raise DownloadCancelled()
-                        
+
                         res = download_board(
                             board,
                             self.options,
@@ -207,7 +203,7 @@ class DownloadWorker(QThread):
                         self.overall_progress.emit(idx, len(boards_to_process))
                 finally:
                     browser_shared.close()
-            
+
             self.finished_with_totals.emit(totals[0], totals[1])
         except DownloadCancelled:
             self.cancelled.emit()
@@ -313,6 +309,7 @@ QTextEdit {
 }
 """
 
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -335,27 +332,28 @@ class MainWindow(QMainWindow):
     def _set_window_icon(self) -> None:
         """Define o ícone da aplicação."""
         icon_path = Path(__file__).parent.parent / "assets" / "icon.svg"
-        
+
         if icon_path.exists():
             # Renderizar SVG para QPixmap
             renderer = QSvgRenderer(str(icon_path))
             pixmap = QPixmap(256, 256)
             pixmap.fill(Qt.GlobalColor.transparent)
-            
+
             from PyQt6.QtGui import QPainter
+
             painter = QPainter(pixmap)
             renderer.render(painter)
             painter.end()
-            
+
             # Definir ícone
             icon = QIcon(pixmap)
             self.setWindowIcon(icon)
-            
+
             # Definir também para o QApplication (barra de tarefas)
             app_instance = QApplication.instance()
             if isinstance(app_instance, QApplication):
                 app_instance.setWindowIcon(icon)
-    
+
     def _build_ui(self) -> None:
         central = QWidget()
         main_layout = QHBoxLayout(central)
@@ -420,12 +418,16 @@ class MainWindow(QMainWindow):
         self.workers_spin = QSpinBox()
         self.workers_spin.setRange(1, 64)
         self.workers_spin.setValue(16)
-        self.workers_spin.setToolTip("Número de downloads simultâneos dentro de um mesmo quadro.\nRecomendado: 16-32. Valores muito altos podem causar erros de rede.")
+        self.workers_spin.setToolTip(
+            "Número de downloads simultâneos dentro de um mesmo quadro.\nRecomendado: 16-32. Valores muito altos podem causar erros de rede."
+        )
 
         self.boards_workers_spin = QSpinBox()
         self.boards_workers_spin.setRange(1, 8)
         self.boards_workers_spin.setValue(1)
-        self.boards_workers_spin.setToolTip("Número de quadros baixados ao mesmo tempo.\nRecomendado: 1-2. Aumentar muito consome muita CPU/RAM.")
+        self.boards_workers_spin.setToolTip(
+            "Número de quadros baixados ao mesmo tempo.\nRecomendado: 1-2. Aumentar muito consome muita CPU/RAM."
+        )
 
         layout.addWidget(QLabel("Pasta de saída"), 0, 0)
         layout.addWidget(self.output_edit, 0, 1)
@@ -530,7 +532,7 @@ class MainWindow(QMainWindow):
     def start_discovery(self) -> None:
         if self.worker and self.worker.isRunning():
             return
-        
+
         username = self.user_edit.text().strip()
         if not username:
             QMessageBox.warning(self, "Dados incompletos", "Informe o usuário ou URL do perfil.")
@@ -548,15 +550,11 @@ class MainWindow(QMainWindow):
         self.selection_list.clear()
         self.boards_metadata = []
         self.info_selection_label.setText("Buscando quadros…")
-        
-        self.worker = DownloadWorker(
-            options=options,
-            username_or_url=username,
-            discovery_mode=True
-        )
+
+        self.worker = DownloadWorker(options=options, username_or_url=username, discovery_mode=True)
         self._connect_worker_signals()
         self.worker.start()
-        
+
         self.list_boards_button.setEnabled(False)
         self.start_button.setEnabled(False)
 
@@ -591,14 +589,10 @@ class MainWindow(QMainWindow):
         self.log_edit.clear()
         self.board_progress.reset()
         self.overall_progress.reset()
-        
+
         self.status_label.setText("Iniciando…")
 
-        self.worker = DownloadWorker(
-            options=options,
-            username_or_url=username,
-            selected_boards=self.selected_urls
-        )
+        self.worker = DownloadWorker(options=options, username_or_url=username, selected_boards=self.selected_urls)
         self._connect_worker_signals()
         self.worker.start()
 
@@ -633,34 +627,29 @@ class MainWindow(QMainWindow):
         self.log_edit.append(message)
 
     def on_board_started(self, board_url: str, output_dir: str) -> None:
-        norm_url = board_url.rstrip('/') + '/'
+        norm_url = board_url.rstrip("/") + "/"
         title = self.url_to_title.get(norm_url, board_url)
         self.current_board_label.setText(f"Quadro atual ({title})")
         self.status_label.setText(f"Processando quadro: {title}")
 
     def on_download_started(self, board_url: str, total: int) -> None:
-        norm_url = board_url.rstrip('/') + '/'
         if total <= 0:
             self.board_progress.setMaximum(1)
             self.board_progress.setValue(0)
         else:
             self.board_progress.setMaximum(total)
             self.board_progress.setValue(0)
-            self.board_progress.setValue(0)
 
     def on_download_progress(self, board_url: str, current: int, total: int, downloaded: int) -> None:
-        norm_url = board_url.rstrip('/') + '/'
         self.board_progress.setMaximum(max(total, 1))
         self.board_progress.setValue(min(current, total))
-        self.board_progress.setValue(min(current, total))
 
-    def on_board_finished(self, board_url: str, downloaded: int, total: int, output_dir: str, verified: int = 0, expected: int = 0) -> None:
-        norm_url = board_url.rstrip('/') + '/'
-        norm_url = board_url.rstrip('/') + '/'
-        
+    def on_board_finished(
+        self, board_url: str, downloaded: int, total: int, output_dir: str, verified: int = 0, expected: int = 0
+    ) -> None:
         # Update selection list as well
         self._update_selection_item_count(board_url, verified)
-            
+
         self.board_progress.setValue(self.board_progress.maximum())
 
     def on_pins_collected(self, board_url: str, count: int) -> None:
@@ -668,24 +657,24 @@ class MainWindow(QMainWindow):
         self._update_selection_item_count(board_url, count)
 
     def _update_selection_item_count(self, board_url: str, count: int) -> None:
-        norm_url = board_url.strip().rstrip('/').lower()
+        norm_url = board_url.strip().rstrip("/").lower()
         for i in range(self.selection_list.count()):
             item = self.selection_list.item(i)
             if item is None:
                 continue
             stored_url = item.data(Qt.ItemDataRole.UserRole) or ""
-            stored_norm = stored_url.strip().rstrip('/').lower()
-            
+            stored_norm = stored_url.strip().rstrip("/").lower()
+
             if stored_norm == norm_url:
                 title = self.url_to_title.get(stored_url, board_url)
                 # Ensure title is not just url if we have a better one
                 if title == stored_url and self.url_to_title:
-                   # Try to find original title from board metadata list if needed
-                   for b in self.boards_metadata:
-                       if b['url'] == stored_url:
-                           title = b['title']
-                           break
-                
+                    # Try to find original title from board metadata list if needed
+                    for b in self.boards_metadata:
+                        if b["url"] == stored_url:
+                            title = b["title"]
+                            break
+
                 item.setText(f"{title}\n({count} Pins)")
                 # Force update visual
                 item.setData(Qt.ItemDataRole.DisplayRole, f"{title}\n({count} Pins)")
@@ -695,7 +684,7 @@ class MainWindow(QMainWindow):
         self.boards_metadata = boards
         self.selection_list.clear()
         self.selected_urls = []
-        
+
         if not boards:
             self.info_selection_label.setText("Nenhum quadro encontrado.")
             self.list_boards_button.setEnabled(True)
@@ -703,39 +692,49 @@ class MainWindow(QMainWindow):
             return
 
         import requests
+
         for b in boards:
             # Limpeza do título (remover quebras de linha e espaços extras)
-            title = b['title'].replace('\n', ' ').strip()
-            
+            title = b["title"].replace("\n", " ").strip()
+
             # Limpeza do pin_count (garantir que não tenha caracteres como "," no início)
-            pin_count = b.get('pin_count', '').strip()
-            if pin_count.startswith(','):
+            pin_count = b.get("pin_count", "").strip()
+            if pin_count.startswith(","):
                 pin_count = pin_count[1:].strip()
-            
+
             # Texto do item: Título + (N Pins)
             pin_text = f" ({pin_count})" if pin_count else ""
             item = QListWidgetItem(f"{title}{pin_text}")
-            
+
             # Normalizar URL para garantir mapeamento correto no histórico
-            norm_url = b['url'].rstrip('/') + '/'
-            item.setData(Qt.ItemDataRole.UserRole, norm_url) # Guardar URL internamente
-            self.url_to_title[norm_url] = title # Armazenar para o histórico
+            norm_url = b["url"].rstrip("/") + "/"
+            item.setData(Qt.ItemDataRole.UserRole, norm_url)  # Guardar URL internamente
+            self.url_to_title[norm_url] = title  # Armazenar para o histórico
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
-            
+
             # Thumbnail ampliada (128x128)
-            if b['thumbnail_url']:
+            if b["thumbnail_url"]:
                 try:
-                    resp = requests.get(b['thumbnail_url'], timeout=3)
+                    resp = requests.get(b["thumbnail_url"], timeout=3)
                     if resp.status_code == 200:
                         pix = QPixmap()
                         pix.loadFromData(resp.content)
-                        item.setIcon(QIcon(pix.scaled(160, 160, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)))
+                        item.setIcon(
+                            QIcon(
+                                pix.scaled(
+                                    160,
+                                    160,
+                                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                    Qt.TransformationMode.SmoothTransformation,
+                                )
+                            )
+                        )
                 except Exception:
                     pass
-            
+
             self.selection_list.addItem(item)
-            
+
         self.info_selection_label.setText(f"{len(boards)} quadros encontrados.")
         self.list_boards_button.setEnabled(True)
         self.start_button.setEnabled(False)
@@ -757,7 +756,7 @@ class MainWindow(QMainWindow):
                 url = item.data(Qt.ItemDataRole.UserRole)
                 if url:
                     self.selected_urls.append(url)
-        
+
         sel_count = len(self.selected_urls)
         total_count = len(self.boards_metadata)
         self.info_selection_label.setText(f"{sel_count} selecionados de {total_count}")
@@ -786,7 +785,7 @@ class MainWindow(QMainWindow):
     def on_error(self, message: str) -> None:
         # Detectar se é erro de perfil privado para dar tratamento especial
         is_private = "privado" in message.lower() or "private" in message.lower()
-        
+
         if is_private:
             dlg = QMessageBox(self)
             dlg.setIcon(QMessageBox.Icon.Warning)
@@ -797,12 +796,10 @@ class MainWindow(QMainWindow):
                 "fazer login no Pinterest.<br><br>"
                 "Deseja ativar o <b>Login Manual</b> e tentar novamente?"
             )
-            dlg.setStandardButtons(
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
+            dlg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             dlg.setDefaultButton(QMessageBox.StandardButton.Yes)
             result = dlg.exec()
-            
+
             if result == QMessageBox.StandardButton.Yes:
                 self.manual_login_check.setChecked(True)
                 self.status_label.setText("Login Manual ativado. Clique em 'Listar Quadros' novamente.")
@@ -813,7 +810,7 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.critical(self, "Erro durante o download", message)
             self.status_label.setText("Erro.")
-        
+
         self.start_button.setEnabled(True)
         self.list_boards_button.setEnabled(True)
         self.cancel_button.setEnabled(False)

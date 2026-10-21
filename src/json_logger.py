@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 @dataclass
 class LogEntry:
     """Entrada de log estruturada."""
+
     timestamp: str  # ISO 8601
     phase: str  # "collect_pins", "resolve_images", "download_images", etc
     level: str  # "INFO", "WARN", "ERROR"
@@ -29,10 +30,10 @@ class LogEntry:
 
 class JSONLogger:
     """Logger estruturado que escreve em JSON."""
-    
+
     def __init__(self, output_file: str = "download_log.json", enabled: bool = True):
         """Inicializa logger.
-        
+
         Args:
             output_file: Caminho do arquivo de log JSON
             enabled: Se logging deve estar ativado
@@ -41,34 +42,34 @@ class JSONLogger:
         self.enabled = enabled
         self.entries: List[LogEntry] = []
         self.phase_start_time: Dict[str, float] = {}
-    
+
     def _get_timestamp(self) -> str:
         """Retorna timestamp ISO 8601."""
-        return datetime.utcnow().isoformat(timespec='milliseconds') + 'Z'
-    
+        return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+
     def _log(self, entry: LogEntry) -> None:
         """Registra entry."""
         if not self.enabled:
             return
-        
+
         self.entries.append(entry)
-        
+
         # Também imprimir se for erro ou warning
         if entry.level in ("WARN", "ERROR"):
             symbol = "⚠️ " if entry.level == "WARN" else "❌ "
             print(f"{symbol}[{entry.phase}] {entry.message}", file=sys.stderr)
-    
+
     def start_phase(self, phase: str) -> None:
         """Marca início de uma fase."""
         self.phase_start_time[phase] = time.time()
-    
+
     def end_phase(self, phase: str, count: Optional[int] = None, message: str = "") -> None:
         """Marca fim de uma fase e registra duração."""
         if phase not in self.phase_start_time:
             return
-        
+
         duration_ms = (time.time() - self.phase_start_time[phase]) * 1000
-        
+
         entry = LogEntry(
             timestamp=self._get_timestamp(),
             phase=phase,
@@ -79,7 +80,7 @@ class JSONLogger:
         )
         self._log(entry)
         del self.phase_start_time[phase]
-    
+
     def info(
         self,
         phase: str,
@@ -99,7 +100,7 @@ class JSONLogger:
             metadata=metadata,
         )
         self._log(entry)
-    
+
     def warn(
         self,
         phase: str,
@@ -117,7 +118,7 @@ class JSONLogger:
             metadata=metadata,
         )
         self._log(entry)
-    
+
     def error(
         self,
         phase: str,
@@ -137,28 +138,25 @@ class JSONLogger:
             metadata=metadata,
         )
         self._log(entry)
-    
+
     def save(self) -> None:
         """Salva logs em arquivo JSON."""
         if not self.enabled:
             return
-        
+
         # Converter entries para dicts, removendo None values
         data = {
             "version": "1.0",
             "generated_at": self._get_timestamp(),
             "total_entries": len(self.entries),
-            "logs": [
-                {k: v for k, v in asdict(entry).items() if v is not None}
-                for entry in self.entries
-            ],
+            "logs": [{k: v for k, v in asdict(entry).items() if v is not None} for entry in self.entries],
         }
-        
+
         try:
             self.output_file.write_text(json.dumps(data, indent=2, ensure_ascii=False))
         except Exception as e:
             print(f"⚠️  Erro ao salvar logs: {e}", file=sys.stderr)
-    
+
     def get_phase_duration(self, phase: str) -> Optional[float]:
         """Retorna duração total de uma fase em ms."""
         total = 0.0
@@ -167,9 +165,9 @@ class JSONLogger:
             if entry.phase == phase and entry.duration_ms:
                 total += entry.duration_ms
                 count += 1
-        
+
         return total if count > 0 else None
-    
+
     def get_summary(self) -> Dict[str, Any]:
         """Retorna resumo dos logs."""
         phases = {}
@@ -180,13 +178,13 @@ class JSONLogger:
                     "duration_ms": 0.0,
                     "errors": 0,
                 }
-            
+
             phases[entry.phase]["count"] += 1
             if entry.duration_ms:
                 phases[entry.phase]["duration_ms"] += entry.duration_ms
             if entry.level == "ERROR":
                 phases[entry.phase]["errors"] += 1
-        
+
         return {
             "total_entries": len(self.entries),
             "phases": phases,

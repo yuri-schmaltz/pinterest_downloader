@@ -7,9 +7,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from pinterest_board_dl import parse_pin_count
 
+
 def test_parse_pin_count():
     print("Testing parse_pin_count...")
-    
+
     test_cases = [
         ("10", 10),
         ("10 pins", 10),
@@ -24,11 +25,12 @@ def test_parse_pin_count():
         ("abc", None),
         ("1.000 pins", 1000),
     ]
-    
+
     for input_str, expected in test_cases:
         result = parse_pin_count(input_str)
         assert result == expected, f"Failed for '{input_str}': expected {expected}, got {result}"
         print(f"  ✓ '{input_str}' -> {result}")
+
 
 if __name__ == "__main__":
     try:
