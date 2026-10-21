@@ -22,6 +22,44 @@ echo "    Output:           $DIST"
 echo
 
 # ============================================================
+# Preflight -- fail fast if the extension is incomplete
+# ============================================================
+# The manifest and popup.html reference files by path. If any of them is
+# missing from the checkout, the built package loads in the browser but
+# silently fails at runtime (Chrome refuses to inject a content script
+# whose file does not exist). Better to fail the build here.
+echo "[0/3] Preflight check..."
+python3 - "$EXT" <<'PY'
+import json, re, sys
+from pathlib import Path
+
+ext = Path(sys.argv[1])
+manifest = json.loads((ext / "manifest.json").read_text())
+
+referenced = []
+for entry in manifest.get("content_scripts", []):
+    referenced += entry.get("js", [])
+if "background" in manifest:
+    referenced.append(manifest["background"].get("service_worker", ""))
+if "action" in manifest:
+    referenced.append(manifest["action"].get("default_popup", ""))
+
+popup = ext / "popup.html"
+if popup.exists():
+    referenced += re.findall(r'<script[^>]+src="([^"]+)"', popup.read_text())
+
+missing = [r for r in filter(None, referenced) if not (ext / r).exists()]
+if missing:
+    print("ERROR: the extension references files that do not exist:", file=sys.stderr)
+    for m in missing:
+        print(f"  - extension/{m}", file=sys.stderr)
+    print("Check that they are committed -- 'git check-ignore -v extension/<file>'", file=sys.stderr)
+    raise SystemExit(1)
+
+print(f"    ✓ all {len(referenced)} referenced files present")
+PY
+
+# ============================================================
 # Chrome Web Store package (.zip)
 # ============================================================
 echo "[1/3] Chrome Web Store package..."
@@ -66,18 +104,43 @@ echo "    ✓ $DIST/pinterest-pro-downloader-firefox-v${VERSION}.xpi"
 # ============================================================
 echo "[3/3] Source archive..."
 cd "$ROOT"
-# Include everything except dist/ and __pycache__/
+# Must include the whole application: src/ (the app itself), tests/,
+# extension/ (the browser extension), scripts/, docs/ and assets/.
+# The previous version shipped only extension/ + scripts/, which meant
+# the "source" download contained no application code at all.
 tar -czf "$DIST/pinterest-pro-downloader-source-v${VERSION}.tar.gz" \
     --exclude='dist' \
     --exclude='__pycache__' \
     --exclude='.venv' \
     --exclude='.git' \
     --exclude='node_modules' \
-    extension scripts pyproject.toml requirements.txt README.md LICENSE 2>/dev/null \
-    || tar -czf "$DIST/pinterest-pro-downloader-source-v${VERSION}.tar.gz" \
-       --exclude='dist' \
-       --exclude='__pycache__' \
-       extension
+    --exclude='*.pyc' \
+    src \
+    tests \
+    extension \
+    scripts \
+    docs \
+    assets \
+    .github \
+    pyproject.toml \
+    requirements.txt \
+    README.md \
+    LICENSE \
+    .gitignore
+
+# Fail if the archive ended up without the application source.
+# Note: capture into a variable first. With `set -o pipefail`, piping tar
+# straight into `grep -q` makes grep exit early, which kills tar with
+# SIGPIPE and makes the whole pipeline look like a failure.
+ARCHIVE_CONTENTS="$(tar -tzf "$DIST/pinterest-pro-downloader-source-v${VERSION}.tar.gz")"
+if ! printf '%s\n' "$ARCHIVE_CONTENTS" | grep -q "^src/"; then
+    echo "ERROR: source archive does not contain src/ -- refusing to publish" >&2
+    exit 1
+fi
+if ! printf '%s\n' "$ARCHIVE_CONTENTS" | grep -q "^tests/"; then
+    echo "ERROR: source archive does not contain tests/ -- refusing to publish" >&2
+    exit 1
+fi
 echo "    ✓ $DIST/pinterest-pro-downloader-source-v${VERSION}.tar.gz"
 
 echo

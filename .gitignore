@@ -38,6 +38,10 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+# ...except the build spec itself, which must be versioned. Without this
+# whitelist the release workflow references a file that is not in the repo
+# and every tag build fails at the PyInstaller step.
+!PinterestDownloader.spec
 
 # Installer logs
 pip-log.txt

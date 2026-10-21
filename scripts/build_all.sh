@@ -2,13 +2,14 @@
 set -e
 
 APP_NAME="pinterest-downloader"
-VERSION="2.0.0"
+# Single source of truth for the version: the extension manifest.
+VERSION=$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])")
 
 echo "Cleaning up before build..."
 rm -rf build/ dist/
 
 echo "Building with PyInstaller..."
-pyinstaller PinterestDownloader.spec
+pyinstaller --noconfirm --clean PinterestDownloader.spec
 
 echo "Preparing DEB package..."
 STAGING_DIR="staging_deb"
@@ -31,7 +32,7 @@ Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: amd64
-Maintainer: Yuri Schmaltz <yurix@example.com>
+Maintainer: Yuri Schmaltz <yuri-schmaltz@users.noreply.github.com>
 Description: Pinterest Board Downloader
  Tool to download images from Pinterest boards via CLI or GUI.
 EOT
@@ -47,7 +48,8 @@ Categories=Utility;Network;
 Terminal=false
 EOT
 
-cp icon.svg $STAGING_DIR/usr/share/icons/hicolor/scalable/apps/$APP_NAME.svg
+# The icon lives in assets/, not in the repository root.
+cp assets/icon.svg $STAGING_DIR/usr/share/icons/hicolor/scalable/apps/$APP_NAME.svg
 
 echo "Packaging DEB..."
 dpkg-deb --build $STAGING_DIR ${APP_NAME}_${VERSION}_amd64.deb
