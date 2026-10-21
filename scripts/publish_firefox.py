@@ -25,6 +25,7 @@ Usage:
             --name "Pinterest Pro Downloader" \\
             --summary "Download high-res Pinterest images"
 """
+
 import argparse
 import base64
 import hashlib
@@ -65,8 +66,9 @@ def make_jwt(issuer: str, secret: str) -> str:
     return f"{h}.{p}.{s}"
 
 
-def api_request(method: str, path: str, *, token: str, data: bytes | None = None,
-                content_type: str = "application/json") -> dict:
+def api_request(
+    method: str, path: str, *, token: str, data: bytes | None = None, content_type: str = "application/json"
+) -> dict:
     url = AMO_API_BASE + path
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Authorization", f"JWT {token}")
@@ -88,7 +90,11 @@ def upload_new_version(xpi: Path, addon_id: str, token: str) -> dict:
     data = xpi.read_bytes()
     path = f"/addons/addon/{addon_id}/versions/"
     result = api_request(
-        "POST", path, token=token, data=data, content_type="application/x-xpinstall",
+        "POST",
+        path,
+        token=token,
+        data=data,
+        content_type="application/x-xpinstall",
     )
     print(f"    ✓ Version uploaded: id={result.get('id')} version={result.get('version')}")
     return result
@@ -100,7 +106,10 @@ def create_new_addon(xpi: Path, name: str, summary: str, token: str) -> dict:
     # Step 1: Upload XPI as an upload
     data = xpi.read_bytes()
     upload_result = api_request(
-        "POST", "/addons/upload/", token=token, data=data,
+        "POST",
+        "/addons/upload/",
+        token=token,
+        data=data,
         content_type="application/x-xpinstall",
     )
     upload_uuid = upload_result["uuid"]
@@ -115,7 +124,9 @@ def create_new_addon(xpi: Path, name: str, summary: str, token: str) -> dict:
         "homepage": "https://github.com/yourusername/pinterest-pro-downloader",
     }
     result = api_request(
-        "POST", "/addons/addon/", token=token,
+        "POST",
+        "/addons/addon/",
+        token=token,
         data=json.dumps(payload).encode(),
     )
     print(f"    ✓ Addon created: slug={result.get('slug')} guid={result.get('guid')}")
