@@ -15,6 +15,13 @@ downloads/
 eggs/
 .eggs/
 lib/
+# The `lib/` rule above comes from the standard Python setuptools template and
+# matches ANY directory named "lib" at ANY depth -- including the browser
+# extension's extension/lib/. That directory holds the shared JS helpers that
+# extension/manifest.json and extension/popup.html load, so it must stay
+# versioned. Without this whitelist the extension cannot be rebuilt from a
+# fresh clone (the content script silently fails to load).
+!extension/lib/
 lib64/
 parts/
 sdist/
