@@ -1,205 +1,161 @@
-# 🎯 QUICK REFERENCE — ONDAS 1 & 2
+# 🎯 QUICK REFERENCE
 
-## ⚡ TL;DR
+Referência rápida de comandos e flags do **Pinterest Pro Downloader v2.0.0**.
 
-✅ **2 Ondas Completas | 6 Arquivos | +1.549 Linhas | 5 Testes**
-
-- ✅ Higiene: 100% magic numbers removidos (13 → 0)
-- ✅ Cache: 75% mais rápido em re-runs
-- ✅ Retry: Exponencial + configurável
+> Reescrito em 2026-10-22. A versão anterior era um resumo da "ONDA 1 e 2"
+> (janeiro de 2026) e apontava para `python test_patches.py`, que nunca
+> existiu.
 
 ---
 
-## 🧪 Validação Rápida
+## TL;DR
 
 ```bash
-# Teste sintaxe
-python -m compileall -q pinterest_board_dl.py
+# diagnóstico (1s, offline)
+python scripts/diagnose.py
 
-# Rode todos os testes
-python test_patches.py
+# suíte
+python -m pytest tests/ -q          # 21 passed
 
-# Veja help com novas flags
-python pinterest_board_dl.py --help | grep cache
+# um quadro
+pinterest-board-dl https://www.pinterest.com/usuario/quadro/
+
+# todos os quadros de um usuário
+pinterest-board-dl --user usuario_pinterest
+
+# com tudo ligado
+pinterest-board-dl <URL> --workers 32 --adaptive-workers --rate-limiting --json-log
 ```
 
-**Esperado:** ✅ Sintaxe OK, 5/5 testes PASS, flags visíveis
+---
+
+## Flags da CLI
+
+| Flag | Default | Efeito |
+|---|---|---|
+| `-o, --out DIR` | `./pins` | pasta de saída |
+| `--user NOME` | — | baixa todos os quadros públicos do usuário |
+| `--max-pins N` | sem limite | limita pins por quadro |
+| `--workers N` | 16 | paralelismo de resolução/download |
+| `--boards-workers N` | 1 | paralelismo entre quadros (2–3; cada um abre um Chromium) |
+| `--scroll-pause S` | 1.2 | pausa entre rolagens |
+| `--cache-dir DIR` | `~/.cache/pinterest-downloader` | diretório do cache |
+| `--no-cache` | desligado | ignora o cache de metadados |
+| `--adaptive-workers` | desligado | ajusta workers por CPU/RAM |
+| `--rate-limiting` | desligado | proteção contra HTTP 429 |
+| `--json-log` | desligado | log estruturado |
+| `--log-file F` | `download_log.json` | onde gravar o log JSON |
+| `--headful` | desligado | navegador visível (debug/login) |
+| `--manual-login` | desligado | pausa para login manual |
+
+O argumento posicional aceita **usuário** ou **URL de perfil**. URL de quadro
+(`/user/board/`) é detectada sozinha.
 
 ---
 
-## 📝 Patches Implementados
+## Comandos de desenvolvimento
 
-| Patch | Arquivo | Linhas | Status | Ganho |
-|-------|---------|--------|--------|-------|
-| **1-3** | `pinterest_board_dl.py` | +50 | ✅ | Magic numbers → 0 |
-| **4** | `download_image()` | +25 | ✅ | Retry resiliente |
-| **6** | `resolve_images()` | +40 | ✅ | Cache hits → 75% ↓ |
-| **5** | GUI (SKIP) | - | ⏭️ | Complexo, ONDA 3 |
+```bash
+# testes
+python -m pytest tests/ -v
+python -m pytest tests/test_11_rate_limiting.py -v
+
+# cobertura
+python -m coverage run --source=src -m pytest tests/ -q
+python -m coverage report -m
+python -m coverage html
+
+# lint (idêntico ao CI)
+black --check --line-length 120 src/ tests/ scripts/
+ruff check src/ tests/ scripts/
+mypy src/pinterest_board_dl.py --ignore-missing-imports
+
+# diagnóstico
+python scripts/diagnose.py
+python scripts/diagnose.py --deep
+python scripts/diagnose.py --json
+
+# build da extensão
+bash scripts/build_release.sh          # gera dist/*.zip, *.xpi, *.tar.gz
+
+# build do app desktop
+PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright \
+  pyinstaller --noconfirm --clean PinterestDownloader.spec
+
+# debug manual do scraper (abre o browser, tira screenshot)
+python scripts/debug_pinterest.py --url https://www.pinterest.com/user/board/ --out /tmp/shot.png
+```
 
 ---
 
-## 🆕 Constantes Globais
+## Constantes do núcleo
+
+Definidas em `src/pinterest_board_dl.py`:
 
 ```python
-# URLs
 PINTEREST_BASE_URL = "https://www.pinterest.com"
 
-# Timeouts (segundos ou ms)
-TIMEOUT_HTTP_GET = 25
-TIMEOUT_IMAGE_DOWNLOAD = 60
-TIMEOUT_PAGE_LOAD = 90_000
-TIMEOUT_DOM_READY = 15_000
+TIMEOUT_HTTP_GET = 25              # segundos (requests)
+TIMEOUT_IMAGE_DOWNLOAD = 60        # segundos (requests)
+TIMEOUT_PAGE_LOAD = 90_000         # ms (Playwright)
+TIMEOUT_DOM_READY = 15_000         # ms (Playwright)
 
-# Retry
-DOWNLOAD_RETRY_DELAY = 1.0
-DOWNLOAD_MAX_RETRIES = 1
+DOWNLOAD_RETRY_DELAY = 1.0         # base do backoff exponencial
+DOWNLOAD_MAX_RETRIES = 1           # retries além da tentativa inicial
+
+SCROLL_STABLE_ROUNDS = 20          # rondas estáveis para considerar o fim
+SCROLL_HEIGHT_CHECK = True         # detecta a página pela altura
 ```
+
+> `SCROLL_STABLE_ROUNDS` já foi 6 → 3 → 20. Acompanhe no histórico:
+> `git log -p -S SCROLL_STABLE_ROUNDS src/pinterest_board_dl.py`
 
 ---
 
-## 🆕 Novas Funções
+## Arquivos e diretórios
+
+| Caminho | Conteúdo |
+|---|---|
+| `~/.cache/pinterest-downloader/.pinterest_cache.json` | cache pin → url da imagem |
+| `./rate_limit_stats.json` | estatísticas de 429 (gravado no diretório atual) |
+| `./.worker_metrics.json` | métricas dos adaptive workers (diretório atual) |
+| `./pins/<usuario>/<quadro>/` | imagens baixadas |
+| `./download_log.json` | log estruturado (quando `--json-log`) |
+
+> O cache de metadados vai para o diretório de cache do sistema
+> (`~/.cache` no Linux, `%LOCALAPPDATA%` no Windows) e pode ser redigido com
+> `--cache-dir`. Já os arquivos de estatísticas e métricas usam caminho
+> relativo e saem no **diretório de onde você chamou o comando**.
+
+---
+
+## Estrutura do código
+
+```
+src/pinterest_board_dl.py     núcleo: scraper + CLI
+src/pinterest_board_gui.py    GUI PyQt6
+src/json_logger.py            log estruturado
+src/adaptive_workers.py       workers por CPU/RAM
+src/rate_limiter.py           sliding window + backoff 429
+extension/                    extensão MV3
+tests/                        21 testes
+```
+
+**Flat imports:** os módulos se importam como `from json_logger import ...`,
+então `src/` precisa estar no `sys.path`. Ao criar um teste novo, repita:
 
 ```python
-def load_pin_cache() -> Dict[str, str]
-    """Carrega .pinterest_cache.json"""
-
-def save_pin_cache(cache: Dict[str, str]) -> None
-    """Salva cache em disco"""
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 ```
 
 ---
 
-## 🆕 CLI Flags
+## Links
 
-```bash
---cache-dir DIR       # Onde salvar .pinterest_cache.json
---no-cache            # Desabilitar cache (sempre refetch)
-```
-
-**Exemplo:**
-```bash
-python pinterest_board_dl.py https://... --cache-dir /tmp/cache
-```
-
----
-
-## 📊 Estatísticas de Código
-
-| Métrica | Valor |
-|---------|-------|
-| Constantes adicionadas | 7 |
-| Magic numbers removidos | 13 |
-| URLs hardcoded removidas | 6 |
-| Novas funções | 2 |
-| Testes de smoke | 5 |
-| Arquivos modificados | 6 |
-| Linhas adicionadas | +1.549 |
-
----
-
-## 🔍 Verificações
-
-### Constantes OK?
-```bash
-grep -n "timeout=" pinterest_board_dl.py | grep -v TIMEOUT
-# Esperado: 0 resultados
-```
-
-### URLs hardcoded?
-```bash
-grep "pinterest.com" pinterest_board_dl.py | grep https | grep -v PINTEREST_BASE_URL
-# Esperado: 2-3 (help text e regional URLs, OK)
-```
-
-### Cache criado?
-```bash
-# Após rodar downloader
-ls -la .pinterest_cache.json
-# Esperado: arquivo JSON com pins resolvidos
-```
-
----
-
-## 🚀 Ganhos Esperados
-
-| Cenário | Antes | Depois | Ganho |
-|---------|-------|--------|-------|
-| 1º run (100 pins) | 60s | 60s | 0% (baseline) |
-| 2º run (mesmo board) | 60s | <15s | **75% ↓** |
-| Retry (fallback) | Fixo 1s | 1s, 2s, ... | Resiliente |
-| Code quality | N/A | Linter-ready | pyproject.toml ✓ |
-
----
-
-## 🧪 Test Coverage
-
-```python
-TEST 1: Constantes centralizadas ✅
-TEST 2: Cache de metadados ✅
-TEST 3: DownloadOptions com cache ✅
-TEST 4: Exponential backoff em retries ✅
-TEST 5: Flags CLI disponíveis ✅
-
-RESULTADO: ✅ 5/5 PASS
-```
-
----
-
-## 📚 Documentação
-
-- **PERFORMANCE_AUDIT_REPORT.md**: Análise completa + roadmap
-- **IMPLEMENTATION_SUMMARY.md**: O que foi feito em cada onda
-- **test_patches.py**: Validação automática
-
----
-
-## 🔄 Próximas Ondas
-
-### ONDA 3 (Estrutural) — ~8h
-1. **PATCH 7**: Reusar browser Playwright (30-40% speedup)
-2. **Adaptive workers**: Tuning automático
-3. **Logging estruturado**: JSON logs
-
-### ONDA 4 (Maturidade) — ~6h
-1. Benchmarks CI
-2. Performance budgets
-3. Monitoramento
-
----
-
-## 📝 Commits
-
-```
-431a678 (HEAD) docs: Resumo de implementação ONDA 1 e ONDA 2
-ad9cc87 feat: ONDA 1 e ONDA 2 completas - higiene, otimização e cache
-```
-
----
-
-## 💡 Tips
-
-### Para desabilitar cache em um run:
-```bash
-python pinterest_board_dl.py <url> --no-cache
-```
-
-### Para limpar cache:
-```bash
-rm .pinterest_cache.json
-```
-
-### Para inspecionar cache:
-```bash
-python -m json.tool .pinterest_cache.json | head -20
-```
-
-### Para contar pins em cache:
-```bash
-python -c "import json; print(len(json.loads(open('.pinterest_cache.json').read())))"
-```
-
----
-
-**Tudo pronto para ONDA 3! 🚀**
-
-_11 de janeiro de 2026_
+| Documento | Assunto |
+|---|---|
+| [../PROJECT.md](../PROJECT.md) | features, marcos, contratos de interface |
+| [../PLANO-ESTABILIZACAO.md](../PLANO-ESTABILIZACAO.md) | prioridades P0–P3 |
+| [../TEST_INFRA.md](../TEST_INFRA.md) | cobertura real e limites |
+| [RUNBOOK_INSTALL.md](RUNBOOK_INSTALL.md) | instalação passo a passo |
+| [RUNBOOK_TROUBLESHOOTING.md](RUNBOOK_TROUBLESHOOTING.md) | problemas comuns |

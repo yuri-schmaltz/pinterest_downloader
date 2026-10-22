@@ -1,3 +1,14 @@
+> **Documento histórico — 11 de janeiro de 2026.**
+> Descreve o estado do projeto na época da ONDA 1 a 5. O código evoluiu
+> bastante desde então: o repositório foi reestruturado para `src/`, a suíte
+> de testes foi reescrita e o CI foi corrigido.
+>
+> - Estado atual: [`PROJECT.md`](../PROJECT.md) · [`PLANO-ESTABILIZACAO.md`](../PLANO-ESTABILIZACAO.md) · [`TEST_INFRA.md`](../TEST_INFRA.md)
+> - Comandos quebrados citados abaixo foram atualizados para os equivalents
+>   que existem hoje.
+>
+> ---
+
 # 📊 RELATÓRIO DE AUDITORIA — HIGIENE, LIMPEZA, OTIMIZAÇÃO E PERFORMANCE
 
 **Projeto:** Pinterest Board Downloader  
@@ -554,8 +565,8 @@ if __name__ == "__main__":
 ```
 
 **Como validar:**
-1. Medir: `time python pinterest_board_dl.py --help` → deve ser <0.1s (antes: ~0.23s)
-2. Medir: `time python pinterest_board_gui.py` → deve ser similar ao anterior (GUI ainda precisa carregar)
+1. Medir: `time python src/pinterest_board_dl.py --help` → deve ser <0.1s (antes: ~0.23s)
+2. Medir: `time python src/pinterest_board_gui.py` → deve ser similar ao anterior (GUI ainda precisa carregar)
 3. Critério PASS: Import de CLI não carrega PyQt6
 
 **Risco:** 🟡 Médio (mudança de estrutura de imports)  
@@ -872,9 +883,9 @@ def download_user_boards(
 Antes de considerar "DONE", validar:
 
 ### ✅ Funcionalidade
-- [ ] CLI: `python pinterest_board_dl.py <URL>` funciona
-- [ ] CLI: `python pinterest_board_dl.py --user <username>` funciona
-- [ ] GUI: `python pinterest_board_gui.py` abre sem erros
+- [ ] CLI: `python src/pinterest_board_dl.py <URL>` funciona
+- [ ] CLI: `python src/pinterest_board_dl.py --user <username>` funciona
+- [ ] GUI: `python src/pinterest_board_gui.py` abre sem erros
 - [ ] GUI: Download de 1 board completa com progresso visível
 - [ ] Cancelamento funciona (Ctrl+C no CLI, botão no GUI)
 

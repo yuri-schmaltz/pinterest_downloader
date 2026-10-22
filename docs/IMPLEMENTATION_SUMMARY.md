@@ -1,3 +1,19 @@
+> **Documento histórico — 12 de janeiro de 2026.**
+> Descreve o estado do projeto na época da ONDA 1 a 5E. O código evoluiu
+> bastante desde então: o repositório foi reestruturado para `src/`, a suíte
+> de testes foi reescrita e o CI foi corrigido.
+>
+> - Estado atual: [`PROJECT.md`](../PROJECT.md) · [`PLANO-ESTABILIZACAO.md`](../PLANO-ESTABILIZACAO.md) · [`TEST_INFRA.md`](../TEST_INFRA.md)
+> - Comandos quebrados citados abaixo foram atualizados para os equivalents
+>   que existem hoje.
+> - As seções que descrevem o **workflow de CI** (`test_patches.py`,
+>   `benchmark.py`, `diagnostics.py`) descrevem um workflow que **não existe
+>   mais**: o CI foi reescrito em 2026-10-22 e hoje tem quatro jobs
+>   (test, smoke-import, extension, lint). Veja
+>   `.github/workflows/tests.yml`.
+>
+> ---
+
 # 📋 RESUMO DE IMPLEMENTAÇÃO — ONDAS 1, 2, 3, 4, 5B, 5C, 5D E 5E
 
 **Data:** 12 de janeiro de 2026  
@@ -11,7 +27,7 @@
 ### Patches Implementados
 
 #### **PATCH 1-3: Centralizar Constantes**
-- ✅ Adicionadas constantes de configuração no topo de `pinterest_board_dl.py`:
+- ✅ Adicionadas constantes de configuração no topo de `src/pinterest_board_dl.py`:
   - `PINTEREST_BASE_URL = "https://www.pinterest.com"`
   - `TIMEOUT_HTTP_GET = 25`
   - `TIMEOUT_IMAGE_DOWNLOAD = 60`
@@ -40,7 +56,7 @@
 
 ### Teste de Smoke
 ✅ `python -c "from pinterest_board_dl import *"` — OK  
-✅ `python pinterest_board_dl.py --help` — OK  
+✅ `python src/pinterest_board_dl.py --help` — OK  
 ✅ Constantes verificadas: PASS
 
 ---
@@ -50,7 +66,7 @@
 ### Patches Implementados
 
 #### **PATCH 4: Retry com Exponential Backoff**
-**Arquivo:** `pinterest_board_dl.py`, função `download_image()`
+**Arquivo:** `src/pinterest_board_dl.py`, função `download_image()`
 
 **Antes:**
 ```python
@@ -78,7 +94,7 @@ for attempt in range(max_retries + 1):
 - Melhor para timeouts transitórios
 
 #### **PATCH 6: Cache de Metadados de Pins (JSON)**
-**Arquivo:** `pinterest_board_dl.py`, novas funções + `resolve_images()`
+**Arquivo:** `src/pinterest_board_dl.py`, novas funções + `resolve_images()`
 
 **Novas funções:**
 ```python
@@ -101,8 +117,8 @@ def save_pin_cache(cache: Dict[str, str]) -> None:
 
 **Flags CLI:**
 ```bash
-python pinterest_board_dl.py --cache-dir /tmp/cache  # Localização do cache
-python pinterest_board_dl.py --no-cache  # Desabilitar cache (sempre refetch)
+python src/pinterest_board_dl.py --cache-dir /tmp/cache  # Localização do cache
+python src/pinterest_board_dl.py --no-cache  # Desabilitar cache (sempre refetch)
 ```
 
 **Benefícios:**
@@ -171,7 +187,7 @@ PERFORMANCE_AUDIT_REPORT.md         (+969 linhas)
 ## ✅ Checklist Final (ONDA 1 + ONDA 2)
 
 ### Funcionalidade
-- [x] CLI: `python pinterest_board_dl.py --help` funciona
+- [x] CLI: `python src/pinterest_board_dl.py --help` funciona
 - [x] CLI: Flags `--cache-dir` e `--no-cache` disponíveis
 - [x] Cache: `.pinterest_cache.json` criado após first-run
 - [x] Retry: Novo loop com exponential backoff funciona
@@ -245,7 +261,7 @@ PERFORMANCE_AUDIT_REPORT.md         (+969 linhas)
 
 **Validação:**
 ```bash
-python test_patches.py  # Test 6: ✅ PASS
+python -m pytest tests/ -q  # Test 6: ✅ PASS
 python -m compileall -q pinterest_board_dl.py  # ✅ OK
 ```
 
@@ -277,7 +293,7 @@ if stable_rounds >= 3:  # ✅ 50% mais rápido
 **Arquivo**: `diagnostics.py` (10+ checks automáticos)
 
 ```bash
-python diagnostics.py  # Valida ambiente, código, funcionalidade
+python scripts/diagnose.py  # Valida ambiente, código, funcionalidade
 ```
 
 **Output**: Baseline em JSON + relatório colorido
@@ -390,7 +406,7 @@ Implementar sistema de logging estruturado que rastreia cada fase de download (c
 
 ```bash
 # Ativar logging estruturado
-python pinterest_board_dl.py --user my_username --json-log --log-file my_downloads.json
+python src/pinterest_board_dl.py --user my_username --json-log --log-file my_downloads.json
 
 # Verificar logs após download
 cat my_downloads.json | python -m json.tool
@@ -513,7 +529,7 @@ elif success_rate < 0.80:
 
 ```bash
 # Ativar workers adaptativos
-python pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers
+python src/pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers
 
 # Visualizar métricas coletadas
 cat .worker_metrics.json | python -m json.tool
@@ -648,7 +664,7 @@ max_backoff: 300.0              # Máximo 5 minutos
 - **Thread-safe**: `threading.Lock` para concorrência
 - **Singleton**: `get_rate_limiter()`, `reset_rate_limiter()`
 
-#### **Integração em `pinterest_board_dl.py`**
+#### **Integração em `src/pinterest_board_dl.py`**
 
 **DownloadOptions:**
 ```python

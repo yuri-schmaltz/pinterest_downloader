@@ -1,3 +1,14 @@
+> **Documento histórico — 12 de janeiro de 2026.**
+> Descreve o estado do projeto na época da ONDA 1 a 5E. O código evoluiu
+> bastante desde então: o repositório foi reestruturado para `src/`, a suíte
+> de testes foi reescrita e o CI foi corrigido.
+>
+> - Estado atual: [`PROJECT.md`](../PROJECT.md) · [`PLANO-ESTABILIZACAO.md`](../PLANO-ESTABILIZACAO.md) · [`TEST_INFRA.md`](../TEST_INFRA.md)
+> - Comandos quebrados citados abaixo foram atualizados para os equivalents
+>   que existem hoje.
+>
+> ---
+
 # 🎯 RESUMO VISUAL: TODAS AS ONDAS IMPLEMENTADAS
 
 ## ✅ Status Geral
@@ -177,7 +188,7 @@
 ## 🧪 Testes Completos
 
 ```bash
-python test_patches.py
+python -m pytest tests/ -q
 ```
 
 **Resultado:**
@@ -239,12 +250,12 @@ app-pinterest-downloader/
 
 ### Uso Básico
 ```bash
-python pinterest_board_dl.py <URL>
+python src/pinterest_board_dl.py <URL>
 ```
 
 ### Uso com Todas as Otimizações
 ```bash
-python pinterest_board_dl.py <URL> \
+python src/pinterest_board_dl.py <URL> \
   --workers 32 \
   --adaptive-workers \
   --rate-limiting \
@@ -254,7 +265,7 @@ python pinterest_board_dl.py <URL> \
 
 ### Multi-Board com Todas as Features
 ```bash
-python pinterest_board_dl.py --user <usuario> \
+python src/pinterest_board_dl.py --user <usuario> \
   --boards-workers 2 \
   --workers 32 \
   --adaptive-workers \

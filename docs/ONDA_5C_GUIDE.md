@@ -1,3 +1,14 @@
+> **Documento histórico — 12 de janeiro de 2026.**
+> Descreve o estado do projeto na época da ONDA 5C. O código evoluiu
+> bastante desde então: o repositório foi reestruturado para `src/`, a suíte
+> de testes foi reescrita e o CI foi corrigido.
+>
+> - Estado atual: [`PROJECT.md`](../PROJECT.md) · [`PLANO-ESTABILIZACAO.md`](../PLANO-ESTABILIZACAO.md) · [`TEST_INFRA.md`](../TEST_INFRA.md)
+> - Comandos quebrados citados abaixo foram atualizados para os equivalents
+>   que existem hoje.
+>
+> ---
+
 # 🚀 ONDA 5C: Guia de Uso - Adaptive Workers
 
 ## 🎯 O que é?
@@ -18,13 +29,13 @@ Resultado: máxima performance sem sobrecarregar o sistema.
 
 ```bash
 # Formato básico (recomendado: --workers = max desejado)
-python pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers
+python src/pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers
 
 # Com quadro específico
-python pinterest_board_dl.py https://www.pinterest.com/user/board/ --workers 24 --adaptive-workers
+python src/pinterest_board_dl.py https://www.pinterest.com/user/board/ --workers 24 --adaptive-workers
 
 # Combinar com logging JSON
-python pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers --json-log
+python src/pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers --json-log
 ```
 
 ### Visualizar Métricas Coletadas
@@ -239,7 +250,7 @@ AdaptiveWorkerManager(
 
 ```bash
 # Sem --adaptive-workers: usa fixed --workers value
-python pinterest_board_dl.py --user yuri_schmaltz --workers 16
+python src/pinterest_board_dl.py --user yuri_schmaltz --workers 16
 # Neste caso, sempre 16 workers (sem ajuste)
 ```
 
@@ -275,7 +286,7 @@ efeito: melhor timeout/retry recovery
 
 ```bash
 # Executar teste de funcionalidade (TEST 10)
-python test_patches.py | grep -A 5 "TEST 10"
+python -m pytest tests/ -q | grep -A 5 "TEST 10"
 
 # Deve passar com:
 # ✅ PASS: Adaptive Workers funciona corretamente (ONDA 5C)
@@ -289,7 +300,7 @@ python test_patches.py | grep -A 5 "TEST 10"
 
 ```bash
 # Rodar UMA VEZ com --adaptive-workers
-python pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers
+python src/pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers
 
 # Observar em .worker_metrics.json qual workers foi mais eficiente
 jq '.metrics | group_by(.active_workers) | map({
@@ -303,7 +314,7 @@ jq '.metrics | group_by(.active_workers) | map({
 
 ```bash
 # Terminal 1: começar download
-python pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers
+python src/pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers
 
 # Terminal 2: monitorar ajustes (a cada 1s)
 watch -n 1 'jq ".metrics[-1] | {workers: .active_workers, cpu: .cpu_percent, mem: .memory_percent, success: .success_rate}" .worker_metrics.json'
@@ -313,10 +324,10 @@ watch -n 1 'jq ".metrics[-1] | {workers: .active_workers, cpu: .cpu_percent, mem
 
 ```bash
 # Run 1: Com adaptive
-python pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers --json-log --log-file log_adaptive.json
+python src/pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-workers --json-log --log-file log_adaptive.json
 
 # Run 2: Sem adaptive (usar workers médio do run anterior)
-python pinterest_board_dl.py --user yuri_schmaltz --workers 12 --json-log --log-file log_fixed.json
+python src/pinterest_board_dl.py --user yuri_schmaltz --workers 12 --json-log --log-file log_fixed.json
 
 # Comparar duração das fases
 echo "=== Adaptive ===" && jq '.logs[-1] | {phase, duration_ms}' log_adaptive.json
