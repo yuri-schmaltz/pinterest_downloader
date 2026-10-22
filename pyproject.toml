@@ -10,13 +10,26 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "Yuri Schmaltz", email = "yurix@example.com"}
+    {name = "Yuri Schmaltz", email = "yuri-schmaltz@users.noreply.github.com"}
 ]
 dependencies = [
     "requests>=2.31.0",
     "playwright>=1.45.0",
     "PyQt6>=6.6.0",
     "psutil>=5.9.0",
+]
+keywords = ["pinterest", "downloader", "scraper", "playwright", "pyqt6"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Multimedia :: Graphics",
 ]
 
 [project.optional-dependencies]
@@ -27,9 +40,29 @@ dev = [
     "pytest>=7.0.0",
 ]
 
+[project.scripts]
+pinterest-board-dl = "pinterest_board_dl:main"
+pinterest-board-gui = "pinterest_board_gui:run"
+
 [project.urls]
-Homepage = "https://github.com/yurix/app-pinterest-downloader"
-Repository = "https://github.com/yurix/app-pinterest-downloader.git"
+Homepage = "https://github.com/yuri-schmaltz/pinterest_downloader"
+Repository = "https://github.com/yuri-schmaltz/pinterest_downloader.git"
+Issues = "https://github.com/yuri-schmaltz/pinterest_downloader/issues"
+
+# The application lives in src/ as loose modules, not as a package: the
+# modules import each other flatly ("from json_logger import ..."), so they
+# have to be installed as top-level modules. Without this, setuptools'
+# auto-discovery finds nothing and `pip install .` installs an empty
+# distribution.
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = [
+    "pinterest_board_dl",
+    "pinterest_board_gui",
+    "adaptive_workers",
+    "rate_limiter",
+    "json_logger",
+]
 
 [tool.black]
 line-length = 120
