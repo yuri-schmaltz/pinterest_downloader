@@ -29,8 +29,12 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install PyQt6
+        # Instala o projeto em modo editavel + os extras de dev (pytest,
+        # black, ruff, mypy). Como pytest nao esta em requirements.txt --
+        # ele vive no extra [dev] do pyproject -- usar apenas
+        # 'pip install -r requirements.txt' deixava o job sem pytest.
+        # Instalar o proprio projeto aqui tambem valida o packaging.
+        pip install -e ".[dev]"
 
     - name: Run unit tests
       run: |
@@ -65,8 +69,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install PyQt6
+        pip install -e .
 
     - name: Verify package import (catches missing exports)
       run: |
@@ -191,9 +194,7 @@ jobs:
     - name: Install linting tools
       run: |
         python -m pip install --upgrade pip
-        pip install black ruff mypy
-        pip install -r requirements.txt
-        pip install PyQt6
+        pip install -e ".[dev]"
 
     - name: Check formatting with Black
       run: |
