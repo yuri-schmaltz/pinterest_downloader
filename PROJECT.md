@@ -2,7 +2,7 @@
 
 **Repositório:** `yuri-schmaltz/pinterest_downloader`
 **Licença:** MIT · **Python:** ≥ 3.10 · **Última atualização:** 2026-10-22
-**Estado:** v2.0.0 estável na `main` · correções de estabilização na branch `fix/ci-and-extension-repro`
+**Estado:** v2.0.3 em preparação · branch `fix/ci-and-extension-repro` com as correções de estabilização
 
 ---
 
@@ -73,7 +73,7 @@ e não deve carregar o peso de um interpretador.
 | **v2.0** | 2026-08-16 | Extensão MV3, restructure para `src/`, ONDA 5B–5E |
 | **v2.0.1** | 2026-08-17 | Seletor de pasta + limite de pins na extensão |
 | **v2.0.2** | 2026-08-17 | Tag criada, **build falhou** (ver §6) |
-| **v2.0.3** | *pendente* | Estabilização: build reproduzível, CI verde, packaging correto |
+| **v2.0.3** | *pendente* | Estabilização: build reproduzível, CI verde, packaging correto, i18n da extensão corrigido |
 
 ---
 
