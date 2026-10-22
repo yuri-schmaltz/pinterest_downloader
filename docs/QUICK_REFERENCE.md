@@ -1,6 +1,6 @@
 # 🎯 QUICK REFERENCE
 
-Referência rápida de comandos e flags do **Pinterest Pro Downloader v2.0.0**.
+Referência rápida de comandos e flags do **Pinterest Pro Downloader v2.0.3**.
 
 > Reescrito em 2026-10-22. A versão anterior era um resumo da "ONDA 1 e 2"
 > (janeiro de 2026) e apontava para `python test_patches.py`, que nunca

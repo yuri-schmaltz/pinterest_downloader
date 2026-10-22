@@ -166,6 +166,13 @@ jobs:
             print(f"OK: {z.name} contains lib/i18n.js ({len(names)} entries)")
         PY
 
+    - name: Test the extension i18n
+      run: |
+        # The extension had no tests at all. This covers the translation
+        # layer, which has two code paths: with chrome.i18n (real browser)
+        # and without it (the Portuguese fallback dictionary).
+        node tests/test_extension_i18n.js
+
   lint:
     name: Code Quality (Black, Ruff, MyPy)
     runs-on: ubuntu-latest

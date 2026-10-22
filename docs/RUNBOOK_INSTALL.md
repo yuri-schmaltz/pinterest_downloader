@@ -1,6 +1,6 @@
 # 📖 Runbook: Instalação e Configuração
 
-**App:** Pinterest Board Downloader v2.0.0
+**App:** Pinterest Board Downloader v2.0.3
 **Suporte:** Linux (Ubuntu/Debian/Fedora), Windows 10/11, macOS
 
 > Este runbook foi reescrito em 2026-10-22. A versão anterior apontava para

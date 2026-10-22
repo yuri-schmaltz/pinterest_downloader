@@ -1,6 +1,6 @@
 # 🔧 Runbook: Troubleshooting
 
-**App:** Pinterest Board Downloader v2.0.0
+**App:** Pinterest Board Downloader v2.0.3
 
 > Reescrito em 2026-10-22. A versão anterior mandava rodar
 > `python diagnostics.py`, que foi removido no commit `9fb4c3e`. O substituto
