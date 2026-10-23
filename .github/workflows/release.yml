@@ -61,23 +61,46 @@ jobs:
           # Launch the frozen binary headless. If the PyInstaller bundle is
           # missing a module or the Qt plugins, it dies here rather than in
           # a user's hands.
-          timeout 30 ./dist/pinterest-board-downloader/pinterest-board-downloader \
-            || echo "app exited (expected: it waits for a window)"
+          #
+          # The app is a GUI and never exits on its own, so it is killed
+          # after 20s. A plain '|| echo' would swallow a crash too, so the
+          # output is inspected for import errors.
+          set +e
+          timeout 20 ./dist/pinterest-board-downloader/pinterest-board-downloader > app.out 2> app.err
+          set -e
+          if grep -qE "ImportError|ModuleNotFoundError|Fatal Python error" app.err app.out; then
+            echo "ERROR: the frozen app failed to start"
+            cat app.err app.out
+            exit 1
+          fi
+          echo "OK: the frozen app started without an import error"
 
       - name: Package AppImage
         run: |
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-appimage-x86_64.AppImage
+          # linuxdeploy + appimagetool, com o runtime baixado na mao.
+          # O appimagetool tenta baixar o type2-runtime no momento do build;
+          # quando essa chamada falha (rede) o build inteiro quebra com
+          # "Failed to download runtime file". Baixar antes e passar
+          # --runtime-file deixa essa etapa sem dependencia de rede.
+          curl -sSL -o linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -sSL -o runtime-x86_64 \
+            https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
+          chmod +x linuxdeploy-x86_64.AppImage runtime-x86_64
 
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
           mkdir -p AppDir/usr/share/applications
 
           # PyInstaller builds in onedir mode: the executable lives inside the
-          # dist/ folder, next to its _internal/ libraries. Copy the whole
-          # tree, not just the binary, or the app starts and dies on import.
-          cp -r dist/pinterest-board-downloader AppDir/usr/bin/
+          # dist/ folder, next to its _internal/ libraries. Copy the CONTENTS
+          # of that folder, not the folder itself -- linuxdeploy expects
+          # AppDir/usr/bin/<name> to be the executable FILE. Copying the
+          # directory makes that path a directory and linuxdeploy aborts with
+          # "Invalid magic bytes in file header".
+          # The _internal/ dir must sit next to the binary: the PyInstaller
+          # bootloader resolves it relative to the executable.
+          cp -r dist/pinterest-board-downloader/* AppDir/usr/bin/
 
           cp extension/icons/icon128.png AppDir/usr/share/icons/hicolor/256x256/apps/pinterest-downloader.png
 
@@ -92,12 +115,33 @@ jobs:
           Terminal=false
           EOF
 
-          ./linuxdeploy-x86_64.AppImage \
+          # Deploy das dependencias no AppDir. Sem --output appimage: o
+          # plugin seria so um wrapper em volta do appimagetool, que
+          # chamamos direto na sequencia.
+          ./linuxdeploy-x86_64.AppImage --appimage-extract > /dev/null
+          ./squashfs-root/AppRun \
             --appdir AppDir \
-            --executable AppDir/usr/bin/pinterest-board-downloader/pinterest-board-downloader \
+            --executable AppDir/usr/bin/pinterest-board-downloader \
             --desktop-file AppDir/usr/share/applications/pinterest-downloader.desktop \
-            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/pinterest-downloader.png \
-            --output appimage
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/pinterest-downloader.png
+
+          # Empacota o AppDir no AppImage.
+          ./squashfs-root/plugins/linuxdeploy-plugin-appimage/usr/bin/appimagetool \
+            --runtime-file runtime-x86_64 \
+            AppDir
+
+      - name: Verify the AppImage
+        run: |
+          # Extrai o AppImage e confere que o executavel e o Chromium estao
+          # dentro. Um AppImage sem o navegador so quebra na hora de usar.
+          mkdir -p verify && cd verify
+          ../Pinterest_Downloader-x86_64.AppImage --appimage-extract > /dev/null
+          test -f squashfs-root/usr/bin/pinterest-board-downloader \
+            || { echo "ERROR: executavel ausente no AppImage"; exit 1; }
+          test -d squashfs-root/usr/bin/_internal/browsers \
+            || { echo "ERROR: Chromium nao esta no AppImage"; exit 1; }
+          echo "OK: AppImage contem o executavel e o Chromium"
+          cd .. && rm -rf verify
 
       - name: Rename AppImage
         run: |
@@ -159,7 +203,7 @@ jobs:
             |---|---|---|
             | Linux (AppImage) | `PinterestDownloader-x86_64.AppImage` | Self-contained, includes Chromium |
             | Linux (Debian/Ubuntu) | `pinterest-downloader_amd64.deb` | `sudo dpkg -i *.deb` |
-            | Windows | `pinterest-board-downloader.exe` | Built in the Windows job |
+            | Windows | `pinterest-board-downloader-x64.zip` | Extract and run `pinterest-board-downloader.exe` |
             | Chrome | `pinterest-pro-downloader-chrome-*.zip` | Unpacked via "Load unpacked" |
             | Firefox | `pinterest-pro-downloader-firefox-*.xpi` | Signed add-on required by AMO |
             | Source | `pinterest-pro-downloader-source-*.tar.gz` | Full repository |
@@ -198,9 +242,43 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean PinterestDownloader.spec
 
+      - name: Smoke test the built app
+        run: |
+          # The frozen app must at least start. Onedir puts the libraries in
+          # _internal/, so the .exe alone cannot run -- that is exactly why
+          # the release ships a zip, below.
+          #
+          # It is a GUI app and never exits on its own, so it is started in
+          # the background and killed after 20s. The stderr is inspected for
+          # import errors, because a crash must fail the build.
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $exe = ".\dist\pinterest-board-downloader\pinterest-board-downloader.exe"
+          $errFile = "$env:TEMP\app.err"
+          $proc = Start-Process -FilePath $exe -PassThru -NoNewWindow -RedirectStandardError $errFile
+          if (-not $proc.WaitForExit(20000)) {
+            $proc.Kill()
+            $proc.WaitForExit()
+          }
+          $err = Get-Content $errFile -Raw -ErrorAction SilentlyContinue
+          if ($err -match "ImportError|ModuleNotFoundError|Fatal Python error") {
+            Write-Error "the frozen app failed to start: $err"
+            exit 1
+          }
+          Write-Host "OK: the frozen app started without an import error"
+
+      - name: Package Windows build
+        run: |
+          # PyInstaller builds in onedir mode: the .exe is only the
+          # bootloader (~4 MB) and everything else -- Qt, Playwright and the
+          # bundled Chromium -- lives in _internal/. Uploading just the .exe
+          # ships an app that cannot find its libraries, which is what
+          # v2.0.3 published. Ship the whole tree as a zip instead.
+          Compress-Archive -Path dist/pinterest-board-downloader -DestinationPath pinterest-board-downloader-x64.zip
+          Get-ChildItem pinterest-board-downloader-x64.zip | Select-Object Name, Length
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: dist/pinterest-board-downloader/pinterest-board-downloader.exe
+          files: pinterest-board-downloader-x64.zip
           generate_release_notes: true
