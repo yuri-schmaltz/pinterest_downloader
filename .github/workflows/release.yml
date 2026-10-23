@@ -185,9 +185,29 @@ jobs:
         run: |
           bash scripts/build_release.sh
 
+      - name: Read release notes
+        id: notes
+        run: |
+          # As notas da versao ficam em RELEASE_NOTES.md, na raiz do repo --
+          # atualize esse arquivo a cada release. Se ele nao existir, ou
+          # estiver vazio, o release sai sem a secao, sem falhar: as notas
+          # sao um extra, nao um gate.
+          if [ -s RELEASE_NOTES.md ]; then
+            {
+              echo 'notes<<RELEASE_NOTES_EOF'
+              cat RELEASE_NOTES.md
+              echo 'RELEASE_NOTES_EOF'
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo 'notes=' >> "$GITHUB_OUTPUT"
+            echo "AVISO: RELEASE_NOTES.md ausente ou vazio"
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_NOTES: ${{ steps.notes.outputs.notes }}
         with:
           files: |
             PinterestDownloader-x86_64.AppImage
@@ -199,14 +219,16 @@ jobs:
           body: |
             ## Download
 
-            | Platform | File | Notes |
+            | Plataforma | Arquivo | Observação |
             |---|---|---|
-            | Linux (AppImage) | `PinterestDownloader-x86_64.AppImage` | Self-contained, includes Chromium |
+            | Linux (AppImage) | `PinterestDownloader-x86_64.AppImage` | Autocontido, inclui o Chromium |
             | Linux (Debian/Ubuntu) | `pinterest-downloader_amd64.deb` | `sudo dpkg -i *.deb` |
-            | Windows | `pinterest-board-downloader-x64.zip` | Extract and run `pinterest-board-downloader.exe` |
-            | Chrome | `pinterest-pro-downloader-chrome-*.zip` | Unpacked via "Load unpacked" |
-            | Firefox | `pinterest-pro-downloader-firefox-*.xpi` | Signed add-on required by AMO |
-            | Source | `pinterest-pro-downloader-source-*.tar.gz` | Full repository |
+            | Windows | `pinterest-board-downloader-x64.zip` | Extraia e rode `pinterest-board-downloader.exe` |
+            | Chrome | `pinterest-pro-downloader-chrome-*.zip` | Descompactado, via "Carregar extensão descompactada" |
+            | Firefox | `pinterest-pro-downloader-firefox-*.xpi` | Exige assinatura do AMO |
+            | Source | `pinterest-pro-downloader-source-*.tar.gz` | Repositório completo |
+
+            ${{ env.RELEASE_NOTES }}
 
   build-windows:
     name: Build EXE (Windows)
