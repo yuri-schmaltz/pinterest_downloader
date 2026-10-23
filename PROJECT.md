@@ -1,8 +1,8 @@
 # PROJECT.md — Pinterest Pro Downloader
 
 **Repositório:** `yuri-schmaltz/pinterest_downloader`
-**Licença:** MIT · **Python:** ≥ 3.10 · **Última atualização:** 2026-10-22
-**Estado:** v2.0.3 publicada (2026-10-23) · branch `fix/ci-and-extension-repro` com as correções de estabilização, aguardando merge
+**Licença:** MIT · **Python:** ≥ 3.10 · **Última atualização:** 2026-10-23
+**Estado:** v2.0.4 publicada (2026-10-23) · branch `fix/ci-and-extension-repro` com as correções de estabilização e a primeira suíte de testes real, aguardando merge
 
 ---
 
@@ -74,6 +74,7 @@ e não deve carregar o peso de um interpretador.
 | **v2.0.1** | 2026-08-17 | Seletor de pasta + limite de pins na extensão |
 | **v2.0.2** | 2026-08-17 | Tag criada, **build falhou** (ver §6) |
 | **v2.0.3** | 2026-10-23 | Estabilização: build reproduzível, CI verde, packaging correto, i18n da extensão corrigido |
+| **v2.0.4** | 2026-10-23 | Primeira release **com testes**: 85 testes + 69 checks, cobertura 23 % → 45 %; `lib/pin_utils.js` extraído; 3 bugs de verdade corrigidos |
 
 ---
 
@@ -205,6 +206,7 @@ já causaram bugs reais. A regra `!extension/lib/` existe por isso, e o job
 | `v2.0.1` | sim | idem v2.0.0 (assets nomeados `v2.0.0`) | ⚠️ idem |
 | `v2.0.2` | **draft** | 3 assets | ❌ nunca publicada (build falhou) |
 | `v2.0.3` | **sim** ✅ | AppImage 379 MB · .deb 339 MB · zip Windows 424 MB · zip Chrome · xpi · source 1,1 MB | ✅ **completa e verificada** |
+| `v2.0.4` | **sim** ✅ | AppImage 379 MB · .deb 339 MB · zip Windows 424 MB · zip Chrome · xpi · source 1,1 MB | ✅ **completa e verificada** |
 
 Causa raiz das falhas anteriores: o workflow de release rodava em
 `ubuntu-20.04` (runner descontinuado), referenciava um
@@ -218,6 +220,18 @@ linuxdeploy abortar. **Tudo corrigido e verificado por build real.**
 > (no modo onedir do PyInstaller o executável precisa do `_internal/`).
 > A release foi apagada e a tag recriada no commit corrigido — a versão
 > antiga tinha 0 downloads.
+
+### 6.1 A `v2.0.4`
+
+A `v2.0.4` é a primeira release em que o código é **testado de verdade**:
+85 testes em Python e 69 verificações da extensão, com a cobertura subindo
+de 23 % para 45 %. Ela carrega três correções de bug que só apareceram
+quando os testes existiram (títulos da GUI, `zip` incremental que deixava
+arquivo morto no pacote, `libEGL` faltando na CI) e a extensão com
+`lib/pin_utils.js` extraído para fora do IIFE do `content.js`.
+
+As notas de release ficam em `RELEASE_NOTES.md`, na raiz, e são lidas
+pelo workflow — **atualize esse arquivo a cada release**.
 
 ---
 

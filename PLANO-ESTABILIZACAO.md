@@ -40,11 +40,14 @@ Sem isso não dá para publicar nada confiável.
 | P0.2 | **Fechar os 7 PRs antigos** | abertos há 2,5 meses, baseados na arquitetura v1 | 30 min | ✅ feito, com justificativa em cada |
 | P0.3 | **Gerar e publicar `v2.0.3`** | as três tags anteriores não tinham artefato válido | 1 h | ✅ 6 artefatos, verificados |
 | P0.4 | **Subir a versão para 2.0.3** | `pyproject.toml` e `extension/manifest.json` precisam concordar | 15 min | ✅ ambos em 2.0.3 |
+| P0.5 | **Publicar a `v2.0.4`** | a `v2.0.3` não tem `lib/pin_utils.js` nem os testes | 1 h | ✅ 6 artefatos, verificados |
 
 ### P0.3 — critérios de aceite da release
 
 - [x] `v2.0.3` no `pyproject.toml` **e** no `extension/manifest.json`
 - [x] tag `v2.0.3` criada e workflow disparada
+- [x] `v2.0.4` no `pyproject.toml` **e** no `extension/manifest.json`
+- [x] tag `v2.0.4` criada, workflow disparada e 6 artefatos verificados
 - [x] AppImage gerado (379 MB) **e verificado** (contém o executável e o Chromium; app sobe)
 - [x] `.deb` gerado (339 MB)
 - [x] zip Windows gerado (424 MB) — a árvore onedir completa, não só o `.exe`
