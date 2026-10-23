@@ -205,8 +205,8 @@ já causaram bugs reais. A regra `!extension/lib/` existe por isso, e o job
 | `v2.0.0` | sim | zip Chrome + xpi + source | ⚠️ extensão funcionava; source **sem código** |
 | `v2.0.1` | sim | idem v2.0.0 (assets nomeados `v2.0.0`) | ⚠️ idem |
 | `v2.0.2` | **draft** | 3 assets | ❌ nunca publicada (build falhou) |
-| `v2.0.3` | **sim** ✅ | AppImage 379 MB · .deb 339 MB · zip Windows 424 MB · zip Chrome · xpi · source 1,1 MB | ✅ **completa e verificada** |
-| `v2.0.4` | **sim** ✅ | AppImage 379 MB · .deb 339 MB · zip Windows 424 MB · zip Chrome · xpi · source 1,1 MB | ✅ **completa e verificada** |
+| `v2.0.3` | **removida** | — | 🗑️ apagada: a extensão publicada nela não tinha o `lib/pin_utils.js`. A tag foi mantida, para o link de changelog |
+| `v2.0.4` | **sim** ✅ | AppImage 379 MB · .deb 339 MB · zip Windows 424 MB · zip Chrome · xpi · source 1,1 MB | ✅ **completa e verificada**, buildada a partir da `main` |
 
 Causa raiz das falhas anteriores: o workflow de release rodava em
 `ubuntu-20.04` (runner descontinuado), referenciava um
@@ -232,6 +232,12 @@ arquivo morto no pacote, `libEGL` faltando na CI) e a extensão com
 
 As notas de release ficam em `RELEASE_NOTES.md`, na raiz, e são lidas
 pelo workflow — **atualize esse arquivo a cada release**.
+
+A `v2.0.4` foi tagueada na `main` (merge do PR #10, commit `ef042b0`), e
+não na branch de estabilização: o build do release sai de um commit que
+está na `main`, então o código publicado e o código do repositório são
+garantidamente o mesmo. A primeira tentativa tinha tagueado a branch — o
+conteúdo era idêntico, mas a procedência não era.
 
 ---
 

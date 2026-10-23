@@ -29,18 +29,19 @@ O que já foi resolvido está na branch `fix/ci-and-extension-repro`:
 
 ## P0 — Bloqueia release
 
-> **✅ P0 entregue em 2026-10-23.** A `v2.0.3` foi publicada com 6 artefatos
-> verificados. Os itens abaixo ficam como registro do que era o bloqueio.
+> **✅ P0 entregue em 2026-10-23.** A `v2.0.4` foi publicada com 6 artefatos
+> verificados, buildados a partir da `main`. Os itens abaixo ficam como
+> registro do que era o bloqueio.
 
 Sem isso não dá para publicar nada confiável.
 
 | # | Item | Por que é P0 | Esforço | Estado |
 |---|---|---|---|---|
-| P0.1 | **Merge da branch de estabilização** | contém os fixes; nada disso chega à `main` sem merge | 10 min | ⏳ PR #10 aberto, CI verde |
+| P0.1 | **Merge da branch de estabilização** | contém os fixes; nada disso chega à `main` sem merge | 10 min | ✅ PR #10 mergeado, CI verde na `main` |
 | P0.2 | **Fechar os 7 PRs antigos** | abertos há 2,5 meses, baseados na arquitetura v1 | 30 min | ✅ feito, com justificativa em cada |
-| P0.3 | **Gerar e publicar `v2.0.3`** | as três tags anteriores não tinham artefato válido | 1 h | ✅ 6 artefatos, verificados |
+| P0.3 | **Gerar e publicar `v2.0.3`** | as três tags anteriores não tinham artefato válido | 1 h | ✅ publicada e depois removida (a extensão nela estava defasada) |
 | P0.4 | **Subir a versão para 2.0.3** | `pyproject.toml` e `extension/manifest.json` precisam concordar | 15 min | ✅ ambos em 2.0.3 |
-| P0.5 | **Publicar a `v2.0.4`** | a `v2.0.3` não tem `lib/pin_utils.js` nem os testes | 1 h | ✅ 6 artefatos, verificados |
+| P0.5 | **Publicar a `v2.0.4`** | a `v2.0.3` não tem `lib/pin_utils.js` nem os testes | 1 h | ✅ 6 artefatos, verificados, tagueada na `main` |
 
 ### P0.3 — critérios de aceite da release
 
