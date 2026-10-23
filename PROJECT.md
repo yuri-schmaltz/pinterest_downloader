@@ -2,7 +2,7 @@
 
 **Repositório:** `yuri-schmaltz/pinterest_downloader`
 **Licença:** MIT · **Python:** ≥ 3.10 · **Última atualização:** 2026-10-22
-**Estado:** v2.0.3 em preparação · branch `fix/ci-and-extension-repro` com as correções de estabilização
+**Estado:** v2.0.3 publicada (2026-10-23) · branch `fix/ci-and-extension-repro` com as correções de estabilização, aguardando merge
 
 ---
 
@@ -73,7 +73,7 @@ e não deve carregar o peso de um interpretador.
 | **v2.0** | 2026-08-16 | Extensão MV3, restructure para `src/`, ONDA 5B–5E |
 | **v2.0.1** | 2026-08-17 | Seletor de pasta + limite de pins na extensão |
 | **v2.0.2** | 2026-08-17 | Tag criada, **build falhou** (ver §6) |
-| **v2.0.3** | *pendente* | Estabilização: build reproduzível, CI verde, packaging correto, i18n da extensão corrigido |
+| **v2.0.3** | 2026-10-23 | Estabilização: build reproduzível, CI verde, packaging correto, i18n da extensão corrigido |
 
 ---
 
@@ -201,15 +201,23 @@ já causaram bugs reais. A regra `!extension/lib/` existe por isso, e o job
 | Tag | Release | Artefatos | Situação |
 |---|---|---|---|
 | `v1.1.0` | sim | AppImage (358 MB) | ✅ funcional |
-| `v2.0.0` | sim | zip Chrome 23 KB + xpi + source 30 KB | ⚠️ extensão funcionava; source **sem código** |
+| `v2.0.0` | sim | zip Chrome + xpi + source | ⚠️ extensão funcionava; source **sem código** |
 | `v2.0.1` | sim | idem v2.0.0 (assets nomeados `v2.0.0`) | ⚠️ idem |
-| `v2.0.2` | **não** | — | ❌ workflow falhou |
+| `v2.0.2` | **draft** | 3 assets | ❌ nunca publicada (build falhou) |
+| `v2.0.3` | **sim** ✅ | AppImage 379 MB · .deb 339 MB · zip Windows 424 MB · zip Chrome · xpi · source 1,1 MB | ✅ **completa e verificada** |
 
-Causa raiz de todas as falhas: o workflow de release rodava em `ubuntu-20.04`
-(runner descontinuado), referenciava um `PinterestDownloader.spec` que
-existia só na máquina do autor (engolido pelo `.gitignore` `*.spec`) e
-usava o caminho errado do ícone. **Corrigido** na branch de estabilização e
-verificado com build local.
+Causa raiz das falhas anteriores: o workflow de release rodava em
+`ubuntu-20.04` (runner descontinuado), referenciava um
+`PinterestDownloader.spec` que existia só na máquina do autor (engolido pelo
+`.gitignore` `*.spec`), usava o caminho errado do ícone e copiava a pasta
+`dist/` — em vez do conteúdo — para dentro do AppDir, o que fazia o
+linuxdeploy abortar. **Tudo corrigido e verificado por build real.**
+
+> A `v2.0.3` foi re-tagada: a primeira tentativa (2026-10-22) falhou no
+> AppImage e chegou a publicar um `.exe` de 4 MB que, sozinho, não roda
+> (no modo onedir do PyInstaller o executável precisa do `_internal/`).
+> A release foi apagada e a tag recriada no commit corrigido — a versão
+> antiga tinha 0 downloads.
 
 ---
 

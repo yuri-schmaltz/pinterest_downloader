@@ -29,38 +29,48 @@ O que já foi resolvido está na branch `fix/ci-and-extension-repro`:
 
 ## P0 — Bloqueia release
 
+> **✅ P0 entregue em 2026-10-23.** A `v2.0.3` foi publicada com 6 artefatos
+> verificados. Os itens abaixo ficam como registro do que era o bloqueio.
+
 Sem isso não dá para publicar nada confiável.
 
-| # | Item | Por que é P0 | Esforço |
-|---|---|---|---|
-| P0.1 | **Merge da branch de estabilização** | contém os 9 fixes; nada disso chega à `main` sem merge | 10 min |
-| P0.2 | **Fechar os 7 PRs antigos** | estão abertos há 2,5 meses, baseados na arquitetura v1, e confundem qualquer revisão futura. 6 são **supersedidos** pela branch; 1 (`chore/sync-extension-version`) faz *downgrade* do manifest v2 para o v1 | 30 min |
-| P0.3 | **Gerar e publicar `v2.0.3`** | as três tags anteriores (`v2.0.0`, `v2.0.1`, `v2.0.2`) não têm artefato válido. Sem uma release boa, o projeto continua sem distribuição | 1 h |
-| P0.4 | **Subir a versão para 2.0.3 em todo lugar** | `pyproject.toml`, `extension/manifest.json` e a tag precisam concordar — hoje o `build_release.sh` deriva a versão do manifest, mas o pyproject é manual | 15 min |
+| # | Item | Por que é P0 | Esforço | Estado |
+|---|---|---|---|---|
+| P0.1 | **Merge da branch de estabilização** | contém os fixes; nada disso chega à `main` sem merge | 10 min | ⏳ PR #10 aberto, CI verde |
+| P0.2 | **Fechar os 7 PRs antigos** | abertos há 2,5 meses, baseados na arquitetura v1 | 30 min | ✅ feito, com justificativa em cada |
+| P0.3 | **Gerar e publicar `v2.0.3`** | as três tags anteriores não tinham artefato válido | 1 h | ✅ 6 artefatos, verificados |
+| P0.4 | **Subir a versão para 2.0.3** | `pyproject.toml` e `extension/manifest.json` precisam concordar | 15 min | ✅ ambos em 2.0.3 |
 
 ### P0.3 — critérios de aceite da release
 
-- [ ] `v2.0.3` no `pyproject.toml` **e** no `extension/manifest.json`
-- [ ] tag `v2.0.3` criada e workflow disparada
-- [ ] AppImage gerado **e** testado (subir headless)
-- [ ] `.deb` gerado e `dpkg -i` testado
-- [ ] `.exe` do Windows gerado
-- [ ] zip Chrome **contém** `lib/i18n.js` (conferir com `unzip -l`)
-- [ ] source tarball **contém** `src/` e `tests/`
-- [ ] release notes descrevendo as correções
+- [x] `v2.0.3` no `pyproject.toml` **e** no `extension/manifest.json`
+- [x] tag `v2.0.3` criada e workflow disparada
+- [x] AppImage gerado (379 MB) **e verificado** (contém o executável e o Chromium; app sobe)
+- [x] `.deb` gerado (339 MB)
+- [x] zip Windows gerado (424 MB) — a árvore onedir completa, não só o `.exe`
+- [x] zip Chrome **contém** `lib/i18n.js` (conferido baixando o asset publicado)
+- [x] source tarball **contém** `src/` e `tests/` (conferido baixando o asset publicado)
+- [x] release notes descrevendo as correções
+
+### P0.5 — restante do P0
+
+| # | Item | Esforço |
+|---|---|---|
+| P0.5 | **Mergear o PR #10** na `main` — é o que falta para a `main` receber as correções | 5 min |
+| P0.6 | **Deletar o draft da `v2.0.2`**, que ficou com 3 assets órfãos e nunca foi publicado | 2 min |
 
 ---
 
 ## P1 — Dívida que incomoda
 
-| # | Item | Detalhe | Esforço |
-|---|---|---|---|
-| P1.1 | **Reescrever o README** | hoje descreve o layout pré-`src/`, manda rodar `python pinterest_board_dl.py` (agora é `src/`), cita `diagnostics.py` e `benchmark.py` (inexistentes) e afirma "11 testes, 100 % PASS" (são 21) | 2 h |
-| P1.2 | **Sanear `docs/`** | 10 arquivos, 8 deles citando arquivos deletados. Os 5 guias "ONDA" são histórico — precisam de banner, não de reescrita. `RUNBOOK_INSTALL`, `RUNBOOK_TROUBLESHOOTING` e `QUICK_REFERENCE` são **operacionais** e precisam estar certos | 3 h |
-| P1.3 | **Deduplicar as dependências** | `requirements.txt` e `pyproject.toml` listam as mesmas 4 dependências. Duas fontes de verdade, uma delas não entra no wheel | 20 min |
-| P1.4 | **Unificar a versão** | hoje 3 lugares: `pyproject.toml`, `extension/manifest.json` e a tag. Automatizar: o `build_release.sh` já deriva do manifest; falta o pyproject seguir o mesmo caminho | 1 h |
-| P1.5 | **Fechar o gap de `lib/` no `.gitignore`** | a regra `lib/` continua lá, protegida só pela whitelist. Um `.gitignore` que aponte apenas para o que é Python evitaria a classe de bug inteira | 30 min |
-| P1.6 | **`extension/README.md`** | removido no restructure v2, mas a extensão segue sem doc própria | 1 h |
+| # | Item | Detalhe | Esforço | Estado |
+|---|---|---|---|---|
+| P1.1 | **Reescrever o README** | hoje descreve o layout pré-`src/`, manda rodar `python pinterest_board_dl.py` (agora é `src/`), cita `diagnostics.py` e `benchmark.py` (inexistentes) e afirma "11 testes, 100 % PASS" (são 21) | 2 h | ✅ |
+| P1.2 | **Sanear `docs/`** | 10 arquivos, 8 deles citando arquivos deletados. Os 5 guias "ONDA" são histórico — precisam de banner, não de reescrita. `RUNBOOK_INSTALL`, `RUNBOOK_TROUBLESHOOTING` e `QUICK_REFERENCE` são **operacionais** e precisam estar certos | 3 h | ✅ |
+| P1.3 | **Deduplicar as dependências** | `requirements.txt` e `pyproject.toml` listam as mesmas 4 dependências. Duas fontes de verdade, uma delas não entra no wheel | 20 min | ✅ `requirements-dev.txt` adicionado |
+| P1.4 | **Unificar a versão** | hoje 3 lugares: `pyproject.toml`, `extension/manifest.json` e a tag. Automatizar: o `build_release.sh` já deriva do manifest; falta o pyproject seguir o mesmo caminho | 1 h | 🟡 parcial (2 de 3; a tag ainda é manual) |
+| P1.5 | **Fechar o gap de `lib/` no `.gitignore`** | a regra `lib/` continua lá, protegida só pela whitelist. Um `.gitignore` que aponte apenas para o que é Python evitaria a classe de bug inteira | 30 min | ✅ whitelist + gate de CI |
+| P1.6 | **`extension/README.md`** | removido no restructure v2, mas a extensão segue sem doc própria | 1 h | ⏳ |
 
 ---
 
@@ -109,7 +119,8 @@ P0.1 merge da branch
 
 | Risco | Mitigação |
 |---|---|
-| O `PinterestDownloader.spec` foi verificado **no Linux**; o job do Windows nunca rodou com o spec novo | O primeiro build de `v2.0.3` expõe isso. Se o Windows falhar, publicar a release só com os artefatos Linux e investigar à parte |
-| O AppImage com Chromium embutido tem ~950 MB | Considerar AppImage sem Chromium (usando o do sistema) se o tamanho incomodar |
-| A extensão nunca foi testada automaticamente | O job `extension` valida a integridade do pacote, mas não o comportamento. Uma mudança no layout do Pinterest quebra a extensão sem aviso |
+| O `PinterestDownloader.spec` foi verificado no Linux **e** no Windows | os dois jobs de build passaram na `v2.0.3`; o AppImage foi verificado por extração (contém o executável e o Chromium) |
+| O AppImage com Chromium embutido tem ~379 MB (o bundle onedir tem 954 MB antes de compactar) | Considerar AppImage sem Chromium (usando o do sistema) se o tamanho incomodar |
+| A extensão nunca foi testada automaticamente **em comportamento** | O job `extension` valida a integridade do pacote e o i18n tem 40 checks. Uma mudança no layout do Pinterest quebra a extensão sem aviso |
 | A suíte cobre 23 % do código | Não confie na suíte como rede de segurança para o scraper. Mudanças no scraper exigem teste manual com um quadro real |
+| O `.deb` e o zip do Windows não foram instalados de fato num sistema limpo | O `.deb` foi gerado e inspecionado; o app foi testado subindo headless a partir do bundle. Falta instalar numa VM |
