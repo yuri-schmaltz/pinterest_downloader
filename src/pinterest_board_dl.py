@@ -19,13 +19,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, NamedTuple, TypedDict
 
+import requests
+from playwright.sync_api import sync_playwright
+
+from adaptive_workers import get_adaptive_manager
+from json_logger import get_logger
+from rate_limiter import get_rate_limiter
+
+
 class PrivateProfileError(Exception):
     """Raised when trying to access a private Pinterest profile without login."""
+
     def __init__(self, username: str) -> None:
         self.username = username
         super().__init__(
-            f"O perfil '{username}' é privado. "
-            "Marque a opção 'Login Manual (perfis privados)' e tente novamente."
+            f"O perfil '{username}' é privado. " "Marque a opção 'Login Manual (perfis privados)' e tente novamente."
         )
 
 
@@ -36,6 +44,7 @@ class BoardMetadata(TypedDict):
     pin_count: str
     pin_count_int: int | None
 
+
 class PinMetadata(TypedDict, total=False):
     id: str
     url: str
@@ -43,18 +52,9 @@ class PinMetadata(TypedDict, total=False):
     title: str
     description: str
 
-import requests
-from playwright.sync_api import sync_playwright
-
-from json_logger import get_logger, reset_logger
-from adaptive_workers import get_adaptive_manager, reset_adaptive_manager
-from rate_limiter import get_rate_limiter, reset_rate_limiter, RateLimitConfig
 
 # ---------- Config ----------
-UA = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-)
+UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
 # URLs base
 PINTEREST_BASE_URL = "https://www.pinterest.com"
 
@@ -82,7 +82,7 @@ APP_NAME = "pinterest-downloader"
 
 def get_cache_dir() -> Path:
     """Retorna o diretório de cache apropriado para o SO.
-    
+
     Linux: XDG_CACHE_HOME (~/.cache/pinterest-downloader/)
     Windows: LOCALAPPDATA (C:\\Users\\<user>\\AppData\\Local\\pinterest-downloader\\)
     Fallback: Diretório atual
@@ -101,20 +101,20 @@ def get_cache_dir() -> Path:
             cache_dir = Path(xdg_cache) / APP_NAME
         else:
             cache_dir = Path.home() / ".cache" / APP_NAME
-    
+
     # Ensure directory exists
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
         # Fallback to current directory if creation fails
         cache_dir = Path(".")
-    
+
     return cache_dir
 
 
 def get_config_dir() -> Path:
     """Retorna o diretório de configuração apropriado para o SO.
-    
+
     Linux: XDG_CONFIG_HOME (~/.config/pinterest-downloader/)
     Windows: LOCALAPPDATA (C:\\Users\\<user>\\AppData\\Local\\pinterest-downloader\\)
     Fallback: Diretório atual
@@ -133,14 +133,14 @@ def get_config_dir() -> Path:
             config_dir = Path(xdg_config) / APP_NAME
         else:
             config_dir = Path.home() / ".config" / APP_NAME
-    
+
     # Ensure directory exists
     try:
         config_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
         # Fallback to current directory if creation fails
         config_dir = Path(".")
-    
+
     return config_dir
 
 
@@ -155,7 +155,7 @@ CACHE_FILE = get_cache_file_path()
 
 def load_pin_cache(cache_dir: str | None = None) -> Dict[str, str]:
     """Carrega cache de pin_url -> og:image_url.
-    
+
     Args:
         cache_dir: Diretório personalizado (opcional). Se None, usa XDG/AppData.
     """
@@ -163,10 +163,13 @@ def load_pin_cache(cache_dir: str | None = None) -> Dict[str, str]:
         cache_path = Path(cache_dir) / ".pinterest_cache.json"
     else:
         cache_path = get_cache_file_path()
-    
+
     if cache_path.exists():
         try:
-            return json.loads(cache_path.read_text())
+            data = json.loads(cache_path.read_text())
+            # Um cache corrompido (ou escrito por outra versão) não pode
+            # quebrar o contrato Dict[str, str] do restante do código.
+            return data if isinstance(data, dict) else {}
         except Exception:
             return {}
     return {}
@@ -174,7 +177,7 @@ def load_pin_cache(cache_dir: str | None = None) -> Dict[str, str]:
 
 def save_pin_cache(cache: Dict[str, str], cache_dir: str | None = None) -> None:
     """Salva cache de pins em disco.
-    
+
     Args:
         cache: Dict de pin_url -> og:image_url
         cache_dir: Diretório personalizado (opcional). Se None, usa XDG/AppData.
@@ -183,12 +186,13 @@ def save_pin_cache(cache: Dict[str, str], cache_dir: str | None = None) -> None:
         cache_path = Path(cache_dir) / ".pinterest_cache.json"
     else:
         cache_path = get_cache_file_path()
-    
+
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass  # Falha de cache não deve quebrar fluxo
+
 
 # ---------- Tipos ----------
 
@@ -226,8 +230,8 @@ def safe_name(url: str) -> str:
     m = PIN_LINK_RE.search(url)
     if m:
         return f"{m.group(1)}.jpg"
-    base = urllib.parse.urlsplit(url).path.rsplit('/', 1)[-1].split('?')[0]
-    if not base or '.' not in base:
+    base = urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1].split("?")[0]
+    if not base or "." not in base:
         base = hashlib.sha1(url.encode()).hexdigest() + ".jpg"
     return base
 
@@ -237,11 +241,11 @@ def slugify(name: str) -> str:
     if not isinstance(name, str):
         name = str(name)
     s = urllib.parse.unquote(name)
-    s = unicodedata.normalize('NFC', s)
-    s = s.replace('\u00A0', ' ')
-    s = s.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
-    s = re.sub(r'\s+', ' ', s).strip()
-    s = s.replace('/', '／').replace('\x00', '')
+    s = unicodedata.normalize("NFC", s)
+    s = s.replace("\u00a0", " ")
+    s = s.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    s = s.replace("/", "／").replace("\x00", "")
     return s or "sem_nome"
 
 
@@ -249,36 +253,36 @@ def parse_pin_count(count_str: str) -> int | None:
     """Converte strings de contagem do Pinterest (ex: '1,2 mil', '1.2k', '10 pins') em int."""
     if not count_str:
         return None
-    
+
     # Limpeza básica
     s = count_str.strip().lower()
-    s = s.strip(',')
-    s = s.replace('pins', '').replace('pin', '').strip()
-    
+    s = s.strip(",")
+    s = s.replace("pins", "").replace("pin", "").strip()
+
     if not s:
         return None
-    
+
     try:
         # Lidando com multiplicadores
         multiplier = 1
         has_suffix = False
-        if 'mil' in s or 'k' in s:
+        if "mil" in s or "k" in s:
             multiplier = 1000
-            s = s.replace('mil', '').replace('k', '').strip()
+            s = s.replace("mil", "").replace("k", "").strip()
             has_suffix = True
-        elif 'mi' in s or 'm' in s:
+        elif "mi" in s or "m" in s:
             multiplier = 1000000
-            s = s.replace('mi', '').replace('m', '').strip()
+            s = s.replace("mi", "").replace("m", "").strip()
             has_suffix = True
-            
+
         if has_suffix:
             # Com sufixo, '.' ou ',' são separadores decimais (ex: 1,2 mil = 1.2 * 1000)
-            s = s.replace(',', '.')
+            s = s.replace(",", ".")
         else:
             # Sem sufixo, '.' ou ',' são provavelmente separadores de milhar (ex: 1.000 = 1000)
             # Removemos tudo que não for dígito
-            s = re.sub(r'[.,]', '', s)
-        
+            s = re.sub(r"[.,]", "", s)
+
         # Tentar converter
         val = float(s)
         return int(val * multiplier)
@@ -293,18 +297,18 @@ def normalize_url(url_or_user: str) -> str:
         return ""
     if url.startswith(("http://", "https://")):
         return url
-    
+
     # Se contém '.' no domínio mas s/ protocolo
     if "." in url.split("/")[0]:
         return f"https://{url}"
-        
+
     # Remove '/' extras no início (ex: /pin/...)
     url = url.lstrip("/")
-    
+
     # Se parece um pin path
     if url.startswith("pin/"):
         return f"{PINTEREST_BASE_URL}/{url}"
-        
+
     # Assume ser um username (yuri_schmaltz) ou username/board
     return f"{PINTEREST_BASE_URL}/{url}"
 
@@ -312,7 +316,7 @@ def normalize_url(url_or_user: str) -> str:
 def split_user_board_from_url(board_url: str) -> tuple[str, str]:
     """Retorna (usuario, board) a partir de uma URL."""
     p = urllib.parse.urlsplit(board_url)
-    parts = [x for x in p.path.split('/') if x]
+    parts = [x for x in p.path.split("/") if x]
     user = urllib.parse.unquote(parts[0]) if len(parts) >= 1 else "user"
     board = urllib.parse.unquote(parts[1]) if len(parts) >= 2 else "board"
     return user, board
@@ -324,11 +328,11 @@ def out_dir_for(board_url: str, out_root: str) -> str:
 
 
 def _abs_url(href: str) -> str:
-    if href.startswith('http'):
-        return href.split('?')[0]
-    if href.startswith('/'):
-        return (PINTEREST_BASE_URL + href).split('?')[0]
-    return href.split('?')[0]
+    if href.startswith("http"):
+        return href.split("?")[0]
+    if href.startswith("/"):
+        return (PINTEREST_BASE_URL + href).split("?")[0]
+    return href.split("?")[0]
 
 
 # ---------- Resolução de imagem ----------
@@ -340,7 +344,7 @@ def fetch_pin_media(pin_url: str, session: requests.Session, use_rate_limit: boo
     if use_rate_limit:
         limiter = get_rate_limiter()
         limiter.acquire()
-    
+
     try:
         r = session.get(pin_url, timeout=TIMEOUT_HTTP_GET)
         if r.status_code == 429 and use_rate_limit:
@@ -353,23 +357,23 @@ def fetch_pin_media(pin_url: str, session: requests.Session, use_rate_limit: boo
             limiter.report_success()
     except Exception:
         return None
-    
+
     # 1. Tentar vídeo primeiro (og:video:secure_url)
     m = re.search(r'<meta[^>]+property=["\']og:video:secure_url["\'][^>]+content=["\']([^"\']+)', r.text, re.I)
     if not m:
         m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:video:secure_url["\']', r.text, re.I)
-    
+
     # 2. Fallback para imagem (og:image)
     if not m:
         m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', r.text, re.I)
     if not m:
         m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', r.text, re.I)
-        
+
     if not m:
         return None
-        
+
     url = m.group(1)
-    return url.split('?')[0]
+    return url.split("?")[0]
 
 
 def download_media(
@@ -382,9 +386,8 @@ def download_media(
     """Baixa mídia (imagem ou vídeo) e detecta extensão correta."""
     # Placeholder initial name based on hint or URL
     base_name = safe_name(filename_hint or media_url)
-    dest_path = Path(out_dir) / base_name
-    
-    # Pre-check: se já existir um arquivo com o mesmo "stem" (ex: ID do pin) e tamanho > 0, 
+
+    # Pre-check: se já existir um arquivo com o mesmo "stem" (ex: ID do pin) e tamanho > 0,
     # podemos assumir que já foi baixado (mesmo que a extensão mude depois).
     # Isso evita uma requisição HTTP só para verificar o cabeçalho.
     if os.path.exists(out_dir):
@@ -398,7 +401,7 @@ def download_media(
             with session.get(media_url, stream=True, timeout=TIMEOUT_IMAGE_DOWNLOAD) as r:
                 r.raise_for_status()
                 os.makedirs(out_dir, exist_ok=True)
-                
+
                 # Detectar extensão pelo Content-Type
                 content_type = r.headers.get("Content-Type", "")
                 ext = ".jpg"
@@ -410,21 +413,21 @@ def download_media(
                     ext = ".gif"
                 elif "image/webp" in content_type:
                     ext = ".webp"
-                
+
                 final_filename = base_name if base_name.endswith(ext) else f"{base_name}{ext}"
                 dest = os.path.join(out_dir, final_filename)
-                
+
                 if os.path.exists(dest) and os.path.getsize(dest) > 0:
                     return True
-                    
-                with open(dest, 'wb') as f:
+
+                with open(dest, "wb") as f:
                     for chunk in r.iter_content(chunk_size=1 << 15):
                         if chunk:
                             f.write(chunk)
             return True
         except Exception:
             if attempt < max_retries:
-                delay = DOWNLOAD_RETRY_DELAY * (2 ** attempt)
+                delay = DOWNLOAD_RETRY_DELAY * (2**attempt)
                 time.sleep(delay)
             else:
                 return False
@@ -454,14 +457,18 @@ def _collect_pin_links_with_browser(
 
     def handle_response(response):
         """Intercepta respostas XHR/Fetch para extrair metadados dos pins."""
-        is_resource = "resource/BoardFeedResource/get" in response.url or "resource/UserPinsResource/get" in response.url or "resource/BoardResource/get" in response.url
+        is_resource = (
+            "resource/BoardFeedResource/get" in response.url
+            or "resource/UserPinsResource/get" in response.url
+            or "resource/BoardResource/get" in response.url
+        )
         is_graphql = "/_/graphql/" in response.url
-        
+
         if is_resource or is_graphql:
             try:
                 data = response.json()
                 data_list = []
-                
+
                 if is_resource:
                     if "resource_response" in data:
                         data_list = data["resource_response"].get("data", [])
@@ -470,40 +477,45 @@ def _collect_pin_links_with_browser(
                 elif is_graphql:
                     # GraphQL pode retornar múltiplos objetos ou um feed aninhado
                     def find_pins_graphql(obj):
-                        if not isinstance(obj, (dict, list)): return
-                        if isinstance(obj, list):
-                            for item in obj: find_pins_graphql(item)
+                        if not isinstance(obj, (dict, list)):
                             return
-                        
+                        if isinstance(obj, list):
+                            for item in obj:
+                                find_pins_graphql(item)
+                            return
+
                         # Tentar identificar se é um Pin pelos campos de imagem e ID
                         imgs_dict = obj.get("images", {})
                         # Pinterest novo (GraphQL) usa campos planos como images_736x, images_orig
                         flat_orig = obj.get("images_orig") or obj.get("images_736x") or obj.get("images_474x")
-                        
+
                         pid = str(obj.get("entityId") or obj.get("id") or "")
-                        
+
                         if pid and (imgs_dict or flat_orig):
                             purl = f"{PINTEREST_BASE_URL}/pin/{pid}/"
-                            
+
                             iurl = None
                             if flat_orig:
                                 iurl = flat_orig.get("url")
                             elif imgs_dict:
                                 orig = imgs_dict.get("orig", {}) or imgs_dict.get("736x", {})
                                 iurl = orig.get("url")
-                                
+
                             if iurl:
                                 metadata_cache[purl] = {
-                                    "id": pid, "url": purl, "image_url": iurl,
+                                    "id": pid,
+                                    "url": purl,
+                                    "image_url": iurl,
                                     "title": obj.get("title") or obj.get("gridTitle") or obj.get("grid_title", ""),
-                                    "description": obj.get("description", "")
+                                    "description": obj.get("description", ""),
                                 }
-                        
+
                         for v in obj.values():
-                            if isinstance(v, (dict, list)): find_pins_graphql(v)
+                            if isinstance(v, (dict, list)):
+                                find_pins_graphql(v)
 
                     find_pins_graphql(data)
-                    return # Já processado recursivamente
+                    return  # Já processado recursivamente
 
                 if not isinstance(data_list, list):
                     return
@@ -517,24 +529,26 @@ def _collect_pin_links_with_browser(
                     return
 
                 for pin in data_list:
-                    if not isinstance(pin, dict): continue
+                    if not isinstance(pin, dict):
+                        continue
                     pin_id = str(pin.get("id", ""))
-                    if not pin_id: continue
-                    
+                    if not pin_id:
+                        continue
+
                     pin_url = f"{PINTEREST_BASE_URL}/pin/{pin_id}/"
-                    
+
                     # Pegar melhor imagem disponível
                     images = pin.get("images", {})
                     orig = images.get("orig", {}) or images.get("736x", {})
                     img_url = orig.get("url")
-                    
+
                     if img_url:
                         metadata_cache[pin_url] = {
                             "id": pin_id,
                             "url": pin_url,
                             "image_url": img_url,
                             "title": pin.get("title") or pin.get("grid_title", ""),
-                            "description": pin.get("description", "")
+                            "description": pin.get("description", ""),
                         }
             except Exception:
                 pass
@@ -559,17 +573,19 @@ def _collect_pin_links_with_browser(
         page.wait_for_load_state("networkidle", timeout=10000)
     except Exception:
         pass
-    
+
     try:
         # Aguarda que os primeiros pins sejam carregados na tela
-        page.wait_for_selector('a[href^="/pin/"]', state='visible', timeout=10000)
+        page.wait_for_selector('a[href^="/pin/"]', state="visible", timeout=10000)
     except Exception:
         pass
-        
+
     page.wait_for_timeout(3000)
 
     seen = set()
-    stable_rounds = 0
+    # float, não int: o scroll dá "crédito parcial" (+0.5) quando a altura da
+    # página muda mas a contagem de pins não (linha do stable_rounds += 0.5).
+    stable_rounds: float = 0
     last_count = 0
     last_height = 0
 
@@ -579,12 +595,14 @@ def _collect_pin_links_with_browser(
             # Pressionar ESC periodicamente para fechar modais flutuantes
             if stable_rounds > 2:
                 page.keyboard.press("Escape")
-            
+
             # Clicar em botões de fechar se visíveis (comum no Pinterest)
-            page.evaluate('() => { '
-                          '  const closes = Array.from(document.querySelectorAll(\'[aria-label="Close"], [aria-label="Fechar"], button\')); '
-                          '  closes.forEach(c => { if(c.innerText === "✕" || c.innerText === "X") c.click(); }); '
-                          '}')
+            page.evaluate(
+                "() => { "
+                '  const closes = Array.from(document.querySelectorAll(\'[aria-label="Close"], [aria-label="Fechar"], button\')); '
+                '  closes.forEach(c => { if(c.innerText === "✕" || c.innerText === "X") c.click(); }); '
+                "}"
+            )
         except Exception:
             pass
 
@@ -595,9 +613,9 @@ def _collect_pin_links_with_browser(
         for h in hrefs:
             if not h:
                 continue
-            u = _abs_url(h.split('?')[0])
+            u = _abs_url(h.split("?")[0])
             u = u.replace("://br.pinterest.com/", "://www.pinterest.com/")
-            if u.startswith(f'{PINTEREST_BASE_URL}/pin/'):
+            if u.startswith(f"{PINTEREST_BASE_URL}/pin/"):
                 seen.add(u)
 
         if max_pins and len(seen) >= max_pins:
@@ -609,42 +627,37 @@ def _collect_pin_links_with_browser(
                 # Verificar se chegamos na seção "Mais como esse" para evitar poluição
                 # Apenas se NÃO estamos encontrando novos pins (para evitar falso positivo durante carregamento)
                 current_count = len(seen)
-                
+
                 # Detecção de "Mais como esse" (More like this)
                 has_more_like_this = page.evaluate(
-                    '(() => { '
-                    '  const text = document.body.innerText; '
+                    "(() => { "
+                    "  const text = document.body.innerText; "
                     '  return text.includes("Mais como esse") || text.includes("More like this"); '
-                    '})()'
-                )
-                
-                # Critério de parada: (Altura estável OU "Mais como esse" visível) E (Nenhum pin novo encontrado)
-                current_height = page.evaluate(
-                    '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
-                    'return el ? el.scrollHeight : 0; })()'
-                )
-                
-                is_bottom = page.evaluate(
-                    '(() => { '
-                    '  return (window.innerHeight + window.scrollY) >= (document.body.offsetHeight - 800);'
-                    '})()'
+                    "})()"
                 )
 
-                if current_count == last_count:
-                    # Se não houve progresso e parece ser o fim/recomendações
-                    if has_more_like_this and is_bottom:
-                        stable_rounds += 2 # Acelerar parada se detectou recomendações no fundo
-                    elif current_height == last_height:
-                        stable_rounds += 1
-                    else:
-                        # Altura mudou mas pins não? Pode estar carregando outras coisas
-                        stable_rounds += 0.5 
-                else:
-                    # Houve progresso! Resetar rounds
-                    stable_rounds = 0
-                    last_height = current_height
-                    last_count = current_count
-                    
+                # Critério de parada: (Altura estável OU "Mais como esse" visível) E (Nenhum pin novo encontrado)
+                current_height = page.evaluate(
+                    "(() => { const el = document.scrollingElement || document.documentElement || document.body; "
+                    "return el ? el.scrollHeight : 0; })()"
+                )
+
+                is_bottom = page.evaluate(
+                    "(() => { "
+                    "  return (window.innerHeight + window.scrollY) >= (document.body.offsetHeight - 800);"
+                    "})()"
+                )
+
+                stable_rounds, last_count, last_height = _compute_scroll_stability(
+                    stable_rounds,
+                    last_count,
+                    last_height,
+                    current_count,
+                    current_height,
+                    has_more_like_this,
+                    is_bottom,
+                )
+
             except Exception:
                 # Fallback para detecção simples por contagem
                 if len(seen) == last_count:
@@ -666,19 +679,20 @@ def _collect_pin_links_with_browser(
             if target_pin_count and len(seen) < target_pin_count:
                 # Se ainda faltam muitos e não vimos "Mais como esse", ser mais insistente
                 if not has_more_like_this and stable_rounds < (SCROLL_STABLE_ROUNDS * 2):
-                    stable_rounds -= 1 # Dar mais chances
+                    stable_rounds -= 1  # Dar mais chances
                     page.wait_for_timeout(2000)
                     continue
             break
 
         try:
             page.evaluate(
-                '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
-                'if (!el) return; window.scrollTo(0, el.scrollHeight); })()'
+                "(() => { const el = document.scrollingElement || document.documentElement || document.body; "
+                "if (!el) return; window.scrollTo(0, el.scrollHeight); })()"
             )
             # Aguarda um pouco mais em boards grandes para o Pinterest respirar
             wait_time = 500
-            if stable_rounds > 5: wait_time = 1000 # Ser mais paciente se estiver "travado"
+            if stable_rounds > 5:
+                wait_time = 1000  # Ser mais paciente se estiver "travado"
             page.wait_for_timeout(wait_time)
         except Exception:
             break
@@ -687,17 +701,22 @@ def _collect_pin_links_with_browser(
 
     # Tentar extrair metadados da página inicial (PWS_DATA)
     try:
-        pws_data_raw = page.evaluate('() => { var el = document.getElementById("__PWS_DATA__") || document.querySelector("script[id=\'__PWS_DATA__\']"); return el ? el.innerText : null; }')
+        pws_data_raw = page.evaluate(
+            '() => { var el = document.getElementById("__PWS_DATA__") || document.querySelector("script[id=\'__PWS_DATA__\']"); return el ? el.innerText : null; }'
+        )
         if pws_data_raw:
             print("DEBUG: __PWS_DATA__ encontrado no HTML.")
             pws_json = json.loads(pws_data_raw)
+
             # Navegar na estrutura complexa do PWS_DATA para achar pins
             def extract_from_dict(d):
-                if not isinstance(d, (dict, list)): return
-                if isinstance(d, list):
-                    for item in d: extract_from_dict(item)
+                if not isinstance(d, (dict, list)):
                     return
-                
+                if isinstance(d, list):
+                    for item in d:
+                        extract_from_dict(item)
+                    return
+
                 pid = str(d.get("entityId") or d.get("id") or "")
                 imgs_dict = d.get("images", {})
                 flat_orig = d.get("images_orig") or d.get("images_736x") or d.get("images_474x")
@@ -710,15 +729,18 @@ def _collect_pin_links_with_browser(
                     elif imgs_dict:
                         orig = imgs_dict.get("orig", {}) or imgs_dict.get("736x", {})
                         iurl = orig.get("url")
-                    
+
                     if iurl and purl not in metadata_cache:
                         metadata_cache[purl] = {
-                            "id": pid, "url": purl, "image_url": iurl,
-                            "title": d.get("title") or d.get("gridTitle") or d.get("grid_title", "")
+                            "id": pid,
+                            "url": purl,
+                            "image_url": iurl,
+                            "title": d.get("title") or d.get("gridTitle") or d.get("grid_title", ""),
                         }
-                
+
                 for v in d.values():
-                    if isinstance(v, (dict, list)): extract_from_dict(v)
+                    if isinstance(v, (dict, list)):
+                        extract_from_dict(v)
 
             extract_from_dict(pws_json)
     except Exception:
@@ -729,14 +751,138 @@ def _collect_pin_links_with_browser(
 
     return list(seen)[:max_pins] if max_pins else list(seen)
 
+
 # Singleton para armazenar metadados interceptados durante a sessão de coleta
 _intercepted_metadata: Dict[str, PinMetadata] = {}
+
 
 def get_intercepted_metadata() -> Dict[str, PinMetadata]:
     return _intercepted_metadata
 
+
 def clear_intercepted_metadata() -> None:
     _intercepted_metadata.clear()
+
+
+def _compute_scroll_stability(
+    stable_rounds: float,
+    last_count: int,
+    last_height: int,
+    current_count: int,
+    current_height: int,
+    has_more_like_this: bool,
+    is_bottom: bool,
+) -> tuple[float, int, int]:
+    """Atualiza o contador de estabilidade usado para decidir quando parar o scroll.
+
+    Extraído de _collect_pin_links_with_browser para ser testável sem
+    browser: a decisão é aritmética pura sobre o estado observado.
+
+    Regras:
+    - houve progresso (mais pins) -> zera o contador e memoriza o novo estado
+    - sem progresso, com "Mais como esse" visível no fim da página -> conta 2
+      (indício forte de que chegou ao fim)
+    - sem progresso e altura igual -> conta 1
+    - sem progresso e altura diferente -> conta 0,5 (crédito parcial: a página
+      pode estar carregando outra coisa, ainda não é o fim)
+
+    Retorna (stable_rounds, last_count, last_height).
+    """
+    if current_count == last_count:
+        if has_more_like_this and is_bottom:
+            stable_rounds += 2
+        elif current_height == last_height:
+            stable_rounds += 1
+        else:
+            stable_rounds += 0.5
+    else:
+        # Houve progresso! Resetar rounds
+        stable_rounds = 0
+        last_height = current_height
+        last_count = current_count
+    return stable_rounds, last_count, last_height
+
+
+def _extract_boards_from_page(page, username: str, exclude: set[str]) -> List[BoardMetadata]:
+    """Extrai os quadros do usuário da página já carregada.
+
+    Separado de collect_board_urls para permitir teste com HTML local: a
+    função depende apenas do DOM da página, não de onde ela veio. É o que
+    permite testar a extração sem tocar a rede.
+    """
+    boards_data = page.evaluate(
+        rf"""(username) => {{
+            const results = [];
+            const exclude = {list(exclude)};
+            const els = document.querySelectorAll('a[href]');
+
+            els.forEach(el => {{
+                const href = el.getAttribute("href");
+                if (!href) return;
+
+                // Extrair partes do path: /<user>/<board>/
+                const parts = href.split('/').filter(Boolean);
+                if (parts.length === 2 && parts[0].toLowerCase() === username.toLowerCase()) {{
+                    const board = parts[1];
+                    if (exclude.includes(board.toLowerCase()) || board.startsWith('_')) return;
+
+                    const fullUrl = "https://www.pinterest.com/" + parts[0] + "/" + parts[1] + "/";
+
+                    // Tentar encontrar número de pins de forma mais precisa
+                    let pins = "";
+                    try {{
+                        // Pegar o container de texto do board card
+                        const text = el.innerText;
+                        // Regex mais restrita: ignorar o título (que vem antes de quebras de linha ou espaços duplos)
+                        // e ignorar sufixos de tempo (1d, 2h, etc)
+                        const lines = text.split('\n').filter(l => l.trim());
+                        for (const line of lines) {{
+                            const match = line.match(/^([\d,.]+\s*(?:mil|mi|k|m|pins|pin))\s*$/i);
+                            if (match) {{
+                                pins = match[1].trim();
+                                break;
+                            }}
+                        }}
+
+                        // Fallback se não achou em linhas separadas
+                        if (!pins) {{
+                            const match = text.match(/([\d,.]+\s*(?:mil|mi|k|m|pins|pin))\s*(?:Pins|Pin)?/i);
+                            if (match) pins = match[1].trim();
+                        }}
+                    }} catch(e) {{}}
+
+                    // Tentar encontrar título usando data-test-id se possível
+                    let title = board;
+                    try {{
+                        const titleEl = el.querySelector('h2, [data-test-id="board-card-title"]');
+                        if (titleEl) {{
+                            title = titleEl.innerText.trim();
+                        }} else {{
+                            // Fallback: primeira linha do texto
+                            const firstLine = el.innerText.split('\n')[0].trim();
+                            if (firstLine && !firstLine.match(/^\d/)) title = firstLine;
+                        }}
+                    }} catch(e) {{}}
+
+                    // Tentar encontrar thumbnail
+                    let thumb = "";
+                    const img = el.querySelector('img');
+                    if (img) thumb = img.getAttribute('src') || "";
+
+                    results.push({{url: fullUrl, title: title, thumbnail_url: thumb, pin_count: pins}});
+                }}
+            }});
+            return results;
+        }}""",
+        username,
+    )
+
+    results: List[BoardMetadata] = []
+    for b in boards_data:
+        # Pre-parse pin count to int
+        b["pin_count_int"] = parse_pin_count(b["pin_count"])
+        results.append(b)
+    return results
 
 
 def collect_pin_links(
@@ -750,7 +896,7 @@ def collect_pin_links(
     target_pin_count: int | None = None,
 ) -> List[str]:
     """Abre o quadro, rola a página e coleta URLs de Pins.
-    
+
     Se browser for fornecido, reusa-o. Caso contrário, cria um temporário.
     """
     if browser is not None:
@@ -759,8 +905,13 @@ def collect_pin_links(
         page = ctx.new_page()
         try:
             return _collect_pin_links_with_browser(
-                page, board_url, manual_login, scroll_pause, max_pins, manual_login_handler,
-                target_pin_count=target_pin_count
+                page,
+                board_url,
+                manual_login,
+                scroll_pause,
+                max_pins,
+                manual_login_handler,
+                target_pin_count=target_pin_count,
             )
         finally:
             ctx.close()
@@ -772,8 +923,13 @@ def collect_pin_links(
             page = ctx.new_page()
             try:
                 return _collect_pin_links_with_browser(
-                    page, board_url, manual_login, scroll_pause, max_pins, manual_login_handler,
-                    target_pin_count=target_pin_count
+                    page,
+                    board_url,
+                    manual_login,
+                    scroll_pause,
+                    max_pins,
+                    manual_login_handler,
+                    target_pin_count=target_pin_count,
                 )
             finally:
                 browser_temp.close()
@@ -785,17 +941,17 @@ def collect_board_urls(
     scroll_pause: float,
     manual_login: bool = False,
     manual_login_handler: Callable[[], None] | None = None,
-    browser=None
+    browser=None,
 ) -> List[BoardMetadata]:
     """Coleta URLs e metadados de todos os quadros públicos do usuário.
-    
+
     Se browser for fornecido, reusa-o. Caso contrário, cria um temporário.
     """
     m = USER_BOARDS_RE.match(username_or_url.strip())
     if m:
         username = m.group(1)
     else:
-        username = username_or_url.strip().strip('/')
+        username = username_or_url.strip().strip("/")
 
     candidates = [
         f"{PINTEREST_BASE_URL}/{username}/boards/",
@@ -821,11 +977,11 @@ def collect_board_urls(
         """Helper interno para coletar boards usando page fornecido."""
         seen_urls = set()
         results: List[BoardMetadata] = []
-        
+
         for i, url in enumerate(candidates):
             try:
                 page.goto(url, wait_until="load", timeout=TIMEOUT_PAGE_LOAD)
-                
+
                 if manual_login and i == 0:
                     if manual_login_handler:
                         manual_login_handler()
@@ -839,18 +995,19 @@ def collect_board_urls(
                             input()
                         except KeyboardInterrupt:
                             import sys
+
                             sys.exit(1)
 
                 page.wait_for_timeout(1500)
 
                 # Detectar perfil privado antes de tentar coletar
                 is_private = page.evaluate(
-                    '(() => {'
+                    "(() => {"
                     '  const text = document.body.innerText || "";'
                     '  return text.includes("This profile is private") || '
                     '         text.includes("Este perfil é privado") || '
                     '         text.includes("profile is private");'
-                    '})()'
+                    "})()"
                 )
                 if is_private and not manual_login:
                     raise PrivateProfileError(username)
@@ -861,86 +1018,19 @@ def collect_board_urls(
 
                 for _ in range(200):
                     # Extrair objetos com metadados via JS
-                    boards_data = page.evaluate(
-                        fr"""(username) => {{
-                            const results = [];
-                            const exclude = {list(exclude)};
-                            const els = document.querySelectorAll('a[href]');
-                            
-                            els.forEach(el => {{
-                                const href = el.getAttribute("href");
-                                if (!href) return;
-                                
-                                // Extrair partes do path: /<user>/<board>/
-                                const parts = href.split('/').filter(Boolean);
-                                if (parts.length === 2 && parts[0].toLowerCase() === username.toLowerCase()) {{
-                                    const board = parts[1];
-                                    if (exclude.includes(board.toLowerCase()) || board.startsWith('_')) return;
-                                    
-                                    const fullUrl = "https://www.pinterest.com/" + parts[0] + "/" + parts[1] + "/";
-                                    
-                                    // Tentar encontrar número de pins de forma mais precisa
-                                    let pins = "";
-                                    try {{
-                                        // Pegar o container de texto do board card
-                                        const text = el.innerText;
-                                        // Regex mais restrita: ignorar o título (que vem antes de quebras de linha ou espaços duplos)
-                                        // e ignorar sufixos de tempo (1d, 2h, etc)
-                                        const lines = text.split('\n').filter(l => l.trim());
-                                        for (const line of lines) {{
-                                            const match = line.match(/^([\d,.]+\s*(?:mil|mi|k|m|pins|pin))\s*$/i);
-                                            if (match) {{
-                                                pins = match[1].trim();
-                                                break;
-                                            }}
-                                        }}
-                                        
-                                        // Fallback se não achou em linhas separadas
-                                        if (!pins) {{
-                                            const match = text.match(/([\d,.]+\s*(?:mil|mi|k|m|pins|pin))\s*(?:Pins|Pin)?/i);
-                                            if (match) pins = match[1].trim();
-                                        }}
-                                    }} catch(e) {{}}
-                                    
-                                    // Tentar encontrar título usando data-test-id se possível
-                                    let title = board;
-                                    try {{
-                                        const titleEl = el.querySelector('h2, [data-test-id="board-card-title"]');
-                                        if (titleEl) {{
-                                            title = titleEl.innerText.trim();
-                                        }} else {{
-                                            // Fallback: primeira linha do texto
-                                            const firstLine = el.innerText.split('\n')[0].trim();
-                                            if (firstLine && !firstLine.match(/^\d/)) title = firstLine;
-                                        }}
-                                    }} catch(e) {{}}
-                                    
-                                    // Tentar encontrar thumbnail
-                                    let thumb = "";
-                                    const img = el.querySelector('img');
-                                    if (img) thumb = img.getAttribute('src') || "";
-                                    
-                                    results.push({{url: fullUrl, title: title, thumbnail_url: thumb, pin_count: pins}});
-                                }}
-                            }});
-                            return results;
-                        }}""",
-                        username
-                    )
-                    
+                    boards_data = _extract_boards_from_page(page, username, exclude)
+
                     for b in boards_data:
-                        if b['url'] not in seen_urls:
-                            seen_urls.add(b['url'])
-                            # Pre-parse pin count to int
-                            b['pin_count_int'] = parse_pin_count(b['pin_count'])
+                        if b["url"] not in seen_urls:
+                            seen_urls.add(b["url"])
                             results.append(b)
 
                     # Scroll detection inteligente
                     if SCROLL_HEIGHT_CHECK:
                         try:
                             current_height = page.evaluate(
-                                '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
-                                'return el ? el.scrollHeight : 0; })()'
+                                "(() => { const el = document.scrollingElement || document.documentElement || document.body; "
+                                "return el ? el.scrollHeight : 0; })()"
                             )
                             if current_height == last_height and len(results) == last_count:
                                 stable_rounds += 1
@@ -966,8 +1056,8 @@ def collect_board_urls(
 
                     try:
                         page.evaluate(
-                            '(() => { const el = document.scrollingElement || document.documentElement || document.body; '
-                            'if (!el) return; window.scrollTo(0, el.scrollHeight); })()'
+                            "(() => { const el = document.scrollingElement || document.documentElement || document.body; "
+                            "if (!el) return; window.scrollTo(0, el.scrollHeight); })()"
                         )
                     except Exception:
                         break
@@ -1022,7 +1112,7 @@ def resolve_images(
 ) -> Dict[str, str]:
     emit = emit or (lambda *_: None)
     logger = get_logger()
-    
+
     # Initialize adaptive manager if enabled
     if adaptive:
         manager = get_adaptive_manager(min_workers=4, max_workers=workers)
@@ -1041,7 +1131,7 @@ def resolve_images(
     # Carregar cache existente
     cache = load_pin_cache() if use_cache else {}
     intercepted = get_intercepted_metadata()
-    
+
     out: Dict[str, str] = {}
     to_fetch: List[str] = []
 
@@ -1055,13 +1145,20 @@ def resolve_images(
             to_fetch.append(link)
 
     processed = len(out)
-    cache_hits = len(out) - len([l for l in out if l in intercepted])
-    intercept_hits = len([l for l in out if l in intercepted])
+    cache_hits = len(out) - len([link for link in out if link in intercepted])
+    intercept_hits = len([link for link in out if link in intercepted])
 
     # Se tudo está em cache ou interceptado, retornar rápido
     if not to_fetch:
-        emit("resolve_complete", {"found": len(out), "total": total_links, "from_cache": cache_hits, "intercepted": intercept_hits})
-        logger.end_phase("resolve_images", count=len(out), message=f"Todos os {len(out)} pins resolvidos (Intercept: {intercept_hits}, Cache: {cache_hits})")
+        emit(
+            "resolve_complete",
+            {"found": len(out), "total": total_links, "from_cache": cache_hits, "intercepted": intercept_hits},
+        )
+        logger.end_phase(
+            "resolve_images",
+            count=len(out),
+            message=f"Todos os {len(out)} pins resolvidos (Intercept: {intercept_hits}, Cache: {cache_hits})",
+        )
         return out
 
     def work(link: str) -> tuple[str, str | None]:
@@ -1070,16 +1167,16 @@ def resolve_images(
         if not img:
             mobile = link.replace("www.pinterest.com", "br.pinterest.com")
             img = fetch_pin_media(mobile, session, use_rate_limit=rate_limiting)
-        
+
         latency_ms = (time.time() - start_time) * 1000
-        
+
         # Record metrics if adaptive
         if manager:
             if img:
                 manager.record_success(latency_ms)
             else:
                 manager.record_failure()
-        
+
         return link, img
 
     with ThreadPoolExecutor(max_workers=actual_workers) as ex:
@@ -1088,28 +1185,34 @@ def resolve_images(
             if img:
                 out[link] = img
                 cache[link] = img  # Atualizar cache com novo resultado
-            
+
             # Adjust workers every 10 operations (if adaptive)
             if manager and idx % 10 == 0:
                 new_workers = manager.adjust_workers()
                 if new_workers != actual_workers:
                     actual_workers = new_workers
                     logger.info("resolve_images", f"Workers ajustados para {new_workers}", count=new_workers)
-            
+
             emit("resolve_progress", {"current": processed, "total": total_links})
 
     # Salvar cache atualizado em disco
     if use_cache:
         save_pin_cache(cache)
-    
+
     # Save adaptive metrics if enabled
     if manager:
         manager.save_metrics()
         summary = manager.get_summary()
-        logger.info("resolve_images", f"Adaptive: {summary['current_workers']} workers final, {summary['success_rate']:.1%} success", count=summary['current_workers'])
+        logger.info(
+            "resolve_images",
+            f"Adaptive: {summary['current_workers']} workers final, {summary['success_rate']:.1%} success",
+            count=summary["current_workers"],
+        )
 
     resolved_count = len(out)
-    logger.end_phase("resolve_images", count=resolved_count, message=f"Resolvidas {resolved_count} imagens (cache: {cache_hits})")
+    logger.end_phase(
+        "resolve_images", count=resolved_count, message=f"Resolvidas {resolved_count} imagens (cache: {cache_hits})"
+    )
     emit("resolve_complete", {"found": len(out), "total": total_links, "from_cache": cache_hits})
     return out
 
@@ -1123,21 +1226,22 @@ def download_board(
     browser_shared=None,
 ) -> BoardDownloadResult:
     target_pin_count = None
+    _board_url_str: str
     if isinstance(board_url, str):
-        _board_url_str: str = board_url
+        _board_url_str = board_url
     else:
-        target_pin_count = board_url.get('pin_count_int')
-        _board_url_str: str = board_url['url']
+        target_pin_count = board_url.get("pin_count_int")
+        _board_url_str = board_url["url"]
 
     actual_board_url = normalize_url(_board_url_str)
     emit = status_cb or (lambda *_: None)
     logger = get_logger()
     session = session or create_session()
-    
+
     # ONDA 7: Garantir que o cache de interceptação comece limpo para este board
     # (Ou acumulativo se for multi-board? Pinterest costuma misturar se não limpar)
     # Vamos manter acumulativo dentro de download_user_boards mas limpar aqui para single-board CLI
-    if browser_shared is None: 
+    if browser_shared is None:
         clear_intercepted_metadata()
 
     # Log phase start
@@ -1150,6 +1254,7 @@ def download_board(
     emit("board_start", {"board_url": display_url, "output_dir": target_dir})
     emit("log", {"message": f"[BOARD] {display_url}"})
     emit("log", {"message": "  [1/3] Coletando links dos pins…"})
+
     def handle_manual_login() -> None:
         emit(
             "manual_login_required",
@@ -1193,7 +1298,7 @@ def download_board(
                 "output_dir": target_dir,
             },
         )
-        emit("log", {"message": f"  Concluído: 0/0 pins (pulado)"})
+        emit("log", {"message": "  Concluído: 0/0 pins (pulado)"})
         logger.warn("download_board", "Nenhum pin encontrado", board_url=actual_board_url)
         logger.end_phase("download_board", count=0, message="Nenhum pin encontrado")
         return BoardDownloadResult(actual_board_url, 0, 0, target_dir)
@@ -1201,9 +1306,19 @@ def download_board(
     emit("pins_collected", {"board_url": actual_board_url, "count": len(pin_links)})
     emit(
         "log",
-        {"message": f"  [2/3] Resolvendo imagem grande de {len(pin_links)} pins (paralelo, cache={'ativado' if options.use_cache else 'desativado'})…"},
+        {
+            "message": f"  [2/3] Resolvendo imagem grande de {len(pin_links)} pins (paralelo, cache={'ativado' if options.use_cache else 'desativado'})…"
+        },
     )
-    pin_img = resolve_images(pin_links, session=session, workers=options.workers, emit=emit, use_cache=options.use_cache, adaptive=options.adaptive_workers, rate_limiting=options.rate_limiting)
+    pin_img = resolve_images(
+        pin_links,
+        session=session,
+        workers=options.workers,
+        emit=emit,
+        use_cache=options.use_cache,
+        adaptive=options.adaptive_workers,
+        rate_limiting=options.rate_limiting,
+    )
 
     if not pin_img:
         emit("log", {"message": "  Não foi possível resolver nenhuma imagem. Pulando."})
@@ -1250,12 +1365,12 @@ def download_board(
             )
 
     # ONDA 6: Verificação robusta pós-download
-    emit("log", {"message": f"  [EXTRA] Verificando integridade no disco…"})
+    emit("log", {"message": "  [EXTRA] Verificando integridade no disco…"})
     verified_ok = 0
     missing_pins_links = []
-    
+
     # Criar mapeamento de Pin URL -> esperado nome de arquivo (sem extensão)
-    for link, img_url in pin_img.items():
+    for link, _img_url in pin_img.items():
         stem = Path(safe_name(link)).stem
         found = False
         if os.path.exists(target_dir):
@@ -1271,17 +1386,28 @@ def download_board(
     if missing_pins_links:
         emit("log", {"message": f"  Retentativa direcionada para {len(missing_pins_links)} pins ausentes…"})
         # Tentar resolver novamente apenas os ausentes (sem cache para garantir)
-        miss_pin_img = resolve_images(missing_pins_links, session=session, workers=options.workers, emit=emit, use_cache=False, rate_limiting=options.rate_limiting)
+        miss_pin_img = resolve_images(
+            missing_pins_links,
+            session=session,
+            workers=options.workers,
+            emit=emit,
+            use_cache=False,
+            rate_limiting=options.rate_limiting,
+        )
         with ThreadPoolExecutor(max_workers=options.workers) as ex:
-            futs = [ex.submit(download_media, iurl, target_dir, session, filename_hint=l) for l, iurl in miss_pin_img.items()]
+            futs = [
+                ex.submit(download_media, iurl, target_dir, session, filename_hint=link)
+                for link, iurl in miss_pin_img.items()
+            ]
             for fut in as_completed(futs):
-                if fut.result(): verified_ok += 1
+                if fut.result():
+                    verified_ok += 1
 
     # Status final de verificação
     status_msg = f"  Verificação: {verified_ok}/{total} pins efetivados no disco."
     if target_pin_count and verified_ok < target_pin_count:
         status_msg += f" (Esperado: {target_pin_count})"
-        
+
     emit("log", {"message": status_msg})
 
     emit("log", {"message": f"  Concluído: {verified_ok}/{total}"})
@@ -1311,16 +1437,16 @@ def download_user_boards(
     display_name = urllib.parse.unquote(username_or_url)
     emit = status_cb or (lambda *_: None)
     logger = get_logger()
-    
+
     # Log phase start
     logger.start_phase("download_user_boards")
     logger.info("download_user_boards", f"Iniciando downloads do usuário: {display_name}", board_url=username_or_url)
     emit("log", {"message": f"[USER] {display_name}"})
-    
+
     # Criar browser uma única vez para todas as operações
     with sync_playwright() as p:
         browser_shared = p.chromium.launch(headless=options.headless)
-        clear_intercepted_metadata() # Limpar antes de começar batch
+        clear_intercepted_metadata()  # Limpar antes de começar batch
         try:
             emit("log", {"message": "Coletando quadros públicos do usuário…"})
             boards = collect_board_urls(
@@ -1338,7 +1464,12 @@ def download_user_boards(
 
             emit("boards_found", {"boards": boards})
             emit("log", {"message": f"Encontrados {len(boards)} quadros. Iniciando downloads…"})
-            logger.info("download_user_boards", f"Encontrados {len(boards)} quadros", board_url=username_or_url, count=len(boards))
+            logger.info(
+                "download_user_boards",
+                f"Encontrados {len(boards)} quadros",
+                board_url=username_or_url,
+                count=len(boards),
+            )
 
             results: Dict[str, BoardDownloadResult] = {}
 
@@ -1377,12 +1508,16 @@ def download_user_boards(
                         completed += 1
                         emit("overall_progress", {"current": completed, "total": len(boards)})
 
-            ordered_results = [results[b['url']] for b in boards if b['url'] in results]
+            ordered_results = [results[b["url"]] for b in boards if b["url"] in results]
             emit("user_complete", {"boards": boards, "results": ordered_results})
-            
+
             # Log phase end
             total_downloaded = sum(r.downloaded for r in ordered_results)
-            logger.end_phase("download_user_boards", count=total_downloaded, message=f"Baixadas {total_downloaded} imagens de {len(ordered_results)} quadros")
+            logger.end_phase(
+                "download_user_boards",
+                count=total_downloaded,
+                message=f"Baixadas {total_downloaded} imagens de {len(ordered_results)} quadros",
+            )
             return ordered_results
         finally:
             browser_shared.close()
@@ -1397,9 +1532,7 @@ def _cli_status_printer(stage: str, data: Dict) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(
-        description="Baixa imagens de TODOS os quadros públicos de um usuário do Pinterest."
-    )
+    ap = argparse.ArgumentParser(description="Baixa imagens de TODOS os quadros públicos de um usuário do Pinterest.")
     ap.add_argument(
         "user",
         help="Usuário do Pinterest para baixar todos os quadros (ou URL do perfil)",
@@ -1502,17 +1635,17 @@ def main() -> None:
         logger = get_logger()
         logger.save()
         print(f"\nLogs JSON salvos em: {args.log_file}")
-    
+
     # Save rate limiting stats if enabled
     if args.rate_limiting:
         limiter = get_rate_limiter()
         stats = limiter.get_stats()
-        print(f"\n==> RATE LIMITING:")
+        print("\n==> RATE LIMITING:")
         print(f"  Total requests: {stats['total_requests']}")
         print(f"  429 errors: {stats['total_429s']}")
         print(f"  Backoff time: {stats['backoff_seconds']:.1f}s")
         limiter.save_stats("rate_limit_stats.json")
-        print(f"  Stats salvas em: rate_limit_stats.json")
+        print("  Stats salvas em: rate_limit_stats.json")
 
 
 if __name__ == "__main__":

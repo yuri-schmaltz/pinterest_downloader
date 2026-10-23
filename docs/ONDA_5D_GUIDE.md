@@ -1,3 +1,18 @@
+> **Documento histórico — 12 de janeiro de 2026.**
+> Descreve o estado do projeto na época da ONDA 5D. O código evoluiu
+> bastante desde então: o repositório foi reestruturado para `src/`, a suíte
+> de testes foi reescrita e o CI foi corrigido.
+>
+> - Estado atual: [`PROJECT.md`](../PROJECT.md) · [`PLANO-ESTABILIZACAO.md`](../PLANO-ESTABILIZACAO.md) · [`TEST_INFRA.md`](../TEST_INFRA.md)
+> - Comandos quebrados citados abaixo foram atualizados para os equivalents
+>   que existem hoje.
+> - ⚠️ Este guia descreve o workflow de CI **antigo** (job de benchmark com
+>   `diagnostics.py` e `diagnostics_baseline.json`). O job de benchmark foi
+>   removido — o arquivo de baseline nunca existiu no repositório e o job
+>   falhava em todo push. O CI atual tem quatro jobs, sem benchmark.
+>
+> ---
+
 # 🚀 ONDA 5D: CI Benchmarks com GitHub Actions
 
 ## 📋 Sumário Executivo
@@ -280,7 +295,7 @@ Editar `.github/workflows/tests.yml`:
 ls -l diagnostics.py
 
 # Rodar testes manualmente
-python3 test_patches.py
+python -m pytest tests/ -q
 
 # Verificar git history
 git log --oneline -5
@@ -295,7 +310,7 @@ cat requirements.txt | grep -E "psutil|playwright"
 # Testar localmente com mesma versão Python
 python3 --version
 python3 -m pip install -r requirements.txt
-python3 test_patches.py
+python -m pytest tests/ -q
 ```
 
 ---

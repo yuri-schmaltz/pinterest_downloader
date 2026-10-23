@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<!--
+  Fixture para o teste de integracao da extensao.
+
+  Reproduz o essencial de uma pagina do Pinterest: um grid de pins com
+  imagens em varias resolucoes do mesmo pin, mais alguns avatares/icones
+  que a extensao NAO deve coletar.
+-->
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Pagina de pins</title>
+  <style>
+    body { margin: 0; }
+    img { width: 100px; height: 100px; object-fit: cover; }
+  </style>
+</head>
+<body>
+  <div id="grid">
+    <img src="https://i.pinimg.com/736x/ab/abcdef0123456789abcd.jpg" alt="pin 1">
+    <img src="https://i.pinimg.com/236x/ab/abcdef0123456789abcd.jpg" alt="pin 1 pequena">
+    <img src="https://i.pinimg.com/736x/cd/9876543210fedcba9876.jpg" alt="pin 2">
+    <img src="https://i.pinimg.com/originals/ef/11223344556677889900.jpg" alt="pin 3">
+
+    <!-- Nao sao pins: avatar, icone e imagem de outro host. -->
+    <img src="https://i.pinimg.com/user.jpg" alt="avatar">
+    <img src="https://s.pinimg.com/favicon.ico" alt="icone">
+    <img src="https://example.com/externa.jpg" alt="externa">
+  </div>
+</body>
+</html>

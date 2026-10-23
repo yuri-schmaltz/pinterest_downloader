@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!--
+  Fixture sintética de um quadro do Pinterest.
+
+  Não é HTML real do Pinterest: é uma página mínimo que reproduz o
+  contrato de DOM que o scraper espera (ver src/pinterest_board_dl.py):
+
+    - links de pin em <a href="/pin/ID">
+    - bloco <script id="__PWS_DATA__"> com os metadados dos pins
+    - a seção "Mais como esse", que o scraper usa como sinal de fim de página
+
+  Serve para testar a coleta de verdade, com um browser real, sem tocar a
+  rede. Se o scraper mudar o que espera do DOM, este fixture tem de mudar
+  junto -- e o teste avisa.
+-->
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Quadro de teste</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .card { aspect-ratio: 3/4; background: #eee; }
+  </style>
+</head>
+<body>
+  <div class="grid" id="grid">
+    <a href="/pin/1001/"><div class="card"></div></a>
+    <a href="/pin/1002/"><div class="card"></div></a>
+    <a href="/pin/1003"><div class="card"></div></a>
+    <a href="/pin/1004/"><div class="card"></div></a>
+    <a href="/pin/1005/"><div class="card"></div></a>
+    <a href="/pin/1006"><div class="card"></div></a>
+    <a href="/pin/1007/"><div class="card"></div></a>
+    <a href="/pin/1008"/><div class="card"></div></a>
+  </div>
+
+  <!-- Link que não é pin: não pode entrar na coleta. -->
+  <a href="/usuario/quadro/">voltar ao perfil</a>
+
+  <p>Mais como esse</p>
+
+  <script id="__PWS_DATA__" type="application/json">
+  {
+    "resourceResponses": [
+      {
+        "response": {
+          "data": [
+            {
+              "entityId": "1001",
+              "images": {
+                "orig": { "url": "https://i.pinimg.com/originals/1001.jpg" },
+                "736x": { "url": "https://i.pinimg.com/736x/1001.jpg" }
+              },
+              "gridTitle": "Primeiro pin"
+            },
+            {
+              "entityId": "1002",
+              "images": {
+                "orig": { "url": "https://i.pinimg.com/originals/1002.jpg" }
+              },
+              "gridTitle": "Segundo pin"
+            }
+          ]
+        }
+      }
+    ]
+  }
+  </script>
+</body>
+</html>

@@ -4,12 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 jobs:
   build:
-    name: Build AppImage
-    runs-on: ubuntu-20.04  # Use older ubuntu for better glibc compatibility
-
+    name: Build AppImage + DEB (Linux)
+    runs-on: ubuntu-22.04  # ubuntu-20.04 was retired by GitHub; every tag build failed there
     permissions:
       contents: write  # Needed for creating releases
 
@@ -17,16 +17,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
           cache: 'pip'
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-venv
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libxkbcommon0 libxkbcommon-x11-0 libdbus-1-3 \
+            libxcb-icccm4 libxcb-cursor0 libxcb-render-util0 \
+            libxcb-xinerama0 libxcb-xkb1 libxcb-shape0 \
+            xvfb fuse libfuse2 desktop-file-utils
 
       - name: Install dependencies
         run: |
@@ -34,29 +38,72 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build with PyInstaller
+      - name: Download Chromium for bundling
+        env:
+          # The app bundles the browser so it works on machines without
+          # Playwright installed. The runtime hook in
+          # hooks/playwright_browsers.py points the frozen app at it.
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/browsers
         run: |
-          pyinstaller PinterestDownloader.spec
+          mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
+          python -m playwright install chromium
+
+      - name: Build with PyInstaller
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/browsers
+        run: |
+          pyinstaller --noconfirm --clean PinterestDownloader.spec
+
+      - name: Smoke test the built app
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          # Launch the frozen binary headless. If the PyInstaller bundle is
+          # missing a module or the Qt plugins, it dies here rather than in
+          # a user's hands.
+          #
+          # The app is a GUI and never exits on its own, so it is killed
+          # after 20s. A plain '|| echo' would swallow a crash too, so the
+          # output is inspected for import errors.
+          set +e
+          timeout 20 ./dist/pinterest-board-downloader/pinterest-board-downloader > app.out 2> app.err
+          set -e
+          if grep -qE "ImportError|ModuleNotFoundError|Fatal Python error" app.err app.out; then
+            echo "ERROR: the frozen app failed to start"
+            cat app.err app.out
+            exit 1
+          fi
+          echo "OK: the frozen app started without an import error"
 
       - name: Package AppImage
         run: |
-          # Download linuxdeploy and plugin
-          wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          wget https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage
-          
-          chmod +x linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-plugin-appimage-x86_64.AppImage
-          
-          # Setup AppDir
+          # linuxdeploy + appimagetool, com o runtime baixado na mao.
+          # O appimagetool tenta baixar o type2-runtime no momento do build;
+          # quando essa chamada falha (rede) o build inteiro quebra com
+          # "Failed to download runtime file". Baixar antes e passar
+          # --runtime-file deixa essa etapa sem dependencia de rede.
+          curl -sSL -o linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -sSL -o runtime-x86_64 \
+            https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
+          chmod +x linuxdeploy-x86_64.AppImage runtime-x86_64
+
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
           mkdir -p AppDir/usr/share/applications
-          
-          # Copy binaries and assets
-          cp dist/pinterest-board-downloader AppDir/usr/bin/
-          cp icon.svg AppDir/usr/share/icons/hicolor/256x256/apps/pinterest-downloader.svg
-          
-          # Create desktop file
+
+          # PyInstaller builds in onedir mode: the executable lives inside the
+          # dist/ folder, next to its _internal/ libraries. Copy the CONTENTS
+          # of that folder, not the folder itself -- linuxdeploy expects
+          # AppDir/usr/bin/<name> to be the executable FILE. Copying the
+          # directory makes that path a directory and linuxdeploy aborts with
+          # "Invalid magic bytes in file header".
+          # The _internal/ dir must sit next to the binary: the PyInstaller
+          # bootloader resolves it relative to the executable.
+          cp -r dist/pinterest-board-downloader/* AppDir/usr/bin/
+
+          cp extension/icons/icon128.png AppDir/usr/share/icons/hicolor/256x256/apps/pinterest-downloader.png
+
           cat > AppDir/usr/share/applications/pinterest-downloader.desktop <<EOF
           [Desktop Entry]
           Type=Application
@@ -67,23 +114,34 @@ jobs:
           Categories=Utility;Network;
           Terminal=false
           EOF
-          
-          # Build AppImage - explicitly using python3.10 site-packages if needed, 
-          # but PyInstaller usually bundles everything.
-          # We just need linuxdeploy to wrap the binary.
-          
-          # Since PyInstaller already bundled libs, we point linuxdeploy to the AppDir
-          # and tell it where the executable is.
-          
-          # Note: The PyInstaller binary is practically standalone.
-          # We use linuxdeploy mainly to create the AppImage structure easily.
-          
-          ./linuxdeploy-x86_64.AppImage \
+
+          # Deploy das dependencias no AppDir. Sem --output appimage: o
+          # plugin seria so um wrapper em volta do appimagetool, que
+          # chamamos direto na sequencia.
+          ./linuxdeploy-x86_64.AppImage --appimage-extract > /dev/null
+          ./squashfs-root/AppRun \
             --appdir AppDir \
             --executable AppDir/usr/bin/pinterest-board-downloader \
             --desktop-file AppDir/usr/share/applications/pinterest-downloader.desktop \
-            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/pinterest-downloader.svg \
-            --output appimage
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/pinterest-downloader.png
+
+          # Empacota o AppDir no AppImage.
+          ./squashfs-root/plugins/linuxdeploy-plugin-appimage/usr/bin/appimagetool \
+            --runtime-file runtime-x86_64 \
+            AppDir
+
+      - name: Verify the AppImage
+        run: |
+          # Extrai o AppImage e confere que o executavel e o Chromium estao
+          # dentro. Um AppImage sem o navegador so quebra na hora de usar.
+          mkdir -p verify && cd verify
+          ../Pinterest_Downloader-x86_64.AppImage --appimage-extract > /dev/null
+          test -f squashfs-root/usr/bin/pinterest-board-downloader \
+            || { echo "ERROR: executavel ausente no AppImage"; exit 1; }
+          test -d squashfs-root/usr/bin/_internal/browsers \
+            || { echo "ERROR: Chromium nao esta no AppImage"; exit 1; }
+          echo "OK: AppImage contem o executavel e o Chromium"
+          cd .. && rm -rf verify
 
       - name: Rename AppImage
         run: |
@@ -95,38 +153,82 @@ jobs:
           mkdir -p staging_deb/usr/share/applications
           mkdir -p staging_deb/usr/share/icons/hicolor/scalable/apps
           mkdir -p staging_deb/DEBIAN
-          cp -r dist/pinterest-downloader/* staging_deb/usr/bin/
+
+          cp -r dist/pinterest-board-downloader/* staging_deb/usr/bin/
+
           cat > staging_deb/DEBIAN/control <<EOT
           Package: pinterest-downloader
-          Version: \${GITHUB_REF#refs/tags/v}
+          Version: ${GITHUB_REF#refs/tags/v}
           Section: utils
           Priority: optional
           Architecture: amd64
-          Maintainer: Yuri Schmaltz <yurix@example.com>
+          Maintainer: Yuri Schmaltz <yuri-schmaltz@users.noreply.github.com>
           Description: Pinterest Board Downloader
            Tool to download images from Pinterest boards via CLI or GUI.
           EOT
+
           cat > staging_deb/usr/share/applications/pinterest-downloader.desktop <<EOT
           [Desktop Entry]
           Type=Application
           Name=Pinterest Downloader
           Comment=Download images from Pinterest boards
-          Exec=pinterest-downloader
+          Exec=pinterest-board-downloader
           Icon=pinterest-downloader
           Categories=Utility;Network;
           Terminal=false
           EOT
-          cp icon.svg staging_deb/usr/share/icons/hicolor/scalable/apps/pinterest-downloader.svg
+
+          cp assets/icon.svg staging_deb/usr/share/icons/hicolor/scalable/apps/pinterest-downloader.svg
           sudo dpkg-deb --build staging_deb pinterest-downloader_amd64.deb
+
+      - name: Build extension packages
+        run: |
+          bash scripts/build_release.sh
+
+      - name: Read release notes
+        id: notes
+        run: |
+          # As notas da versao ficam em RELEASE_NOTES.md, na raiz do repo --
+          # atualize esse arquivo a cada release. Se ele nao existir, ou
+          # estiver vazio, o release sai sem a secao, sem falhar: as notas
+          # sao um extra, nao um gate.
+          if [ -s RELEASE_NOTES.md ]; then
+            {
+              echo 'notes<<RELEASE_NOTES_EOF'
+              cat RELEASE_NOTES.md
+              echo 'RELEASE_NOTES_EOF'
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo 'notes=' >> "$GITHUB_OUTPUT"
+            echo "AVISO: RELEASE_NOTES.md ausente ou vazio"
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_NOTES: ${{ steps.notes.outputs.notes }}
         with:
           files: |
             PinterestDownloader-x86_64.AppImage
             pinterest-downloader_amd64.deb
+            dist/pinterest-pro-downloader-chrome-*.zip
+            dist/pinterest-pro-downloader-firefox-*.xpi
+            dist/pinterest-pro-downloader-source-*.tar.gz
           generate_release_notes: true
+          body: |
+            ## Download
+
+            | Plataforma | Arquivo | Observação |
+            |---|---|---|
+            | Linux (AppImage) | `PinterestDownloader-x86_64.AppImage` | Autocontido, inclui o Chromium |
+            | Linux (Debian/Ubuntu) | `pinterest-downloader_amd64.deb` | `sudo dpkg -i *.deb` |
+            | Windows | `pinterest-board-downloader-x64.zip` | Extraia e rode `pinterest-board-downloader.exe` |
+            | Chrome | `pinterest-pro-downloader-chrome-*.zip` | Descompactado, via "Carregar extensão descompactada" |
+            | Firefox | `pinterest-pro-downloader-firefox-*.xpi` | Exige assinatura do AMO |
+            | Source | `pinterest-pro-downloader-source-*.tar.gz` | Repositório completo |
+
+            ${{ env.RELEASE_NOTES }}
 
   build-windows:
     name: Build EXE (Windows)
@@ -137,10 +239,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
           cache: 'pip'
 
       - name: Install dependencies
@@ -149,13 +251,56 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build with PyInstaller
+      - name: Download Chromium for bundling
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/browsers
         run: |
-          pyinstaller PinterestDownloader.spec
+          New-Item -ItemType Directory -Force -Path "$env:PLAYWRIGHT_BROWSERS_PATH" | Out-Null
+          python -m playwright install chromium
+
+      - name: Build with PyInstaller
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/browsers
+        run: |
+          pyinstaller --noconfirm --clean PinterestDownloader.spec
+
+      - name: Smoke test the built app
+        run: |
+          # The frozen app must at least start. Onedir puts the libraries in
+          # _internal/, so the .exe alone cannot run -- that is exactly why
+          # the release ships a zip, below.
+          #
+          # It is a GUI app and never exits on its own, so it is started in
+          # the background and killed after 20s. The stderr is inspected for
+          # import errors, because a crash must fail the build.
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $exe = ".\dist\pinterest-board-downloader\pinterest-board-downloader.exe"
+          $errFile = "$env:TEMP\app.err"
+          $proc = Start-Process -FilePath $exe -PassThru -NoNewWindow -RedirectStandardError $errFile
+          if (-not $proc.WaitForExit(20000)) {
+            $proc.Kill()
+            $proc.WaitForExit()
+          }
+          $err = Get-Content $errFile -Raw -ErrorAction SilentlyContinue
+          if ($err -match "ImportError|ModuleNotFoundError|Fatal Python error") {
+            Write-Error "the frozen app failed to start: $err"
+            exit 1
+          }
+          Write-Host "OK: the frozen app started without an import error"
+
+      - name: Package Windows build
+        run: |
+          # PyInstaller builds in onedir mode: the .exe is only the
+          # bootloader (~4 MB) and everything else -- Qt, Playwright and the
+          # bundled Chromium -- lives in _internal/. Uploading just the .exe
+          # ships an app that cannot find its libraries, which is what
+          # v2.0.3 published. Ship the whole tree as a zip instead.
+          Compress-Archive -Path dist/pinterest-board-downloader -DestinationPath pinterest-board-downloader-x64.zip
+          Get-ChildItem pinterest-board-downloader-x64.zip | Select-Object Name, Length
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: dist/pinterest-downloader/pinterest-downloader.exe
+          files: pinterest-board-downloader-x64.zip
           generate_release_notes: true

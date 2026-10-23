@@ -26,6 +26,7 @@ Usage:
 
     # First submission (no existing item-id): use Chrome Web Store dashboard instead
 """
+
 import argparse
 import json
 import os
@@ -43,12 +44,14 @@ CWS_PUBLISH_URL = "https://www.googleapis.com/chromewebstore/v1.1/items/{action}
 def get_access_token(client_id: str, client_secret: str, refresh_token: str) -> str:
     """Exchange a refresh token for a short-lived access token."""
     url = "https://oauth2.googleapis.com/token"
-    data = urllib.parse.urlencode({
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "refresh_token": refresh_token,
-        "grant_type": "refresh_token",
-    }).encode()
+    data = urllib.parse.urlencode(
+        {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        }
+    ).encode()
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
     try:
@@ -102,10 +105,13 @@ def publish_to_channel(action: str, access_token: str) -> dict:
 def main():
     p = argparse.ArgumentParser(description="Publish to Chrome Web Store")
     p.add_argument("--zip", required=True, type=Path, help="Path to .zip file")
-    p.add_argument("--item-id", required=True,
-                   help="Existing CWS item ID (get from developer dashboard)")
-    p.add_argument("--channel", choices=["publish", "trustedTester"], default="trustedTester",
-                   help="Target channel. trustedTester recommended first.")
+    p.add_argument("--item-id", required=True, help="Existing CWS item ID (get from developer dashboard)")
+    p.add_argument(
+        "--channel",
+        choices=["publish", "trustedTester"],
+        default="trustedTester",
+        help="Target channel. trustedTester recommended first.",
+    )
     args = p.parse_args()
 
     if not args.zip.exists():

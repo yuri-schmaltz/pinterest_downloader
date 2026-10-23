@@ -1,3 +1,14 @@
+> **Documento histórico — 12 de janeiro de 2026.**
+> Descreve o estado do projeto na época da ONDA 5E. O código evoluiu
+> bastante desde então: o repositório foi reestruturado para `src/`, a suíte
+> de testes foi reescrita e o CI foi corrigido.
+>
+> - Estado atual: [`PROJECT.md`](../PROJECT.md) · [`PLANO-ESTABILIZACAO.md`](../PLANO-ESTABILIZACAO.md) · [`TEST_INFRA.md`](../TEST_INFRA.md)
+> - Comandos quebrados citados abaixo foram atualizados para os equivalents
+>   que existem hoje.
+>
+> ---
+
 # 🚦 ONDA 5E: Rate Limiting Inteligente
 
 ## 📋 Sumário Executivo
@@ -8,7 +19,7 @@
 
 **Arquivos:**
 - `rate_limiter.py` — Módulo completo de rate limiting
-- `pinterest_board_dl.py` — Integração com `--rate-limiting`
+- `src/pinterest_board_dl.py` — Integração com `--rate-limiting`
 - `test_11_rate_limiting.py` — 10 testes de validação
 
 ---
@@ -58,7 +69,7 @@ save_stats(filename) -> None
     """Salva estatísticas em JSON."""
 ```
 
-### 2. Integração em `pinterest_board_dl.py`
+### 2. Integração em `src/pinterest_board_dl.py`
 
 #### **DownloadOptions (Novo Campo)**
 ```python
@@ -103,7 +114,7 @@ def resolve_images(..., rate_limiting: bool = False):
 
 #### **CLI Flag**
 ```bash
-python pinterest_board_dl.py <URL> --rate-limiting
+python src/pinterest_board_dl.py <URL> --rate-limiting
 ```
 
 ---
@@ -113,10 +124,10 @@ python pinterest_board_dl.py <URL> --rate-limiting
 ### Ativar Rate Limiting
 ```bash
 # Baixar com rate limiting
-python pinterest_board_dl.py https://www.pinterest.com/user/board/ --rate-limiting
+python src/pinterest_board_dl.py https://www.pinterest.com/user/board/ --rate-limiting
 
 # Combinar com adaptive workers
-python pinterest_board_dl.py <URL> --adaptive-workers --rate-limiting
+python src/pinterest_board_dl.py <URL> --adaptive-workers --rate-limiting
 ```
 
 ### Ver Estatísticas
@@ -341,22 +352,22 @@ jq 'if .in_backoff then "🔴 EM BACKOFF" else "✅ NORMAL" end' rate_limit_stat
 ### Caso 1: Download Grande (1000+ pins)
 ```bash
 # Sem rate limiting: pode resultar em 429s
-python pinterest_board_dl.py <URL> --workers 32
+python src/pinterest_board_dl.py <URL> --workers 32
 
 # Com rate limiting: protegido
-python pinterest_board_dl.py <URL> --workers 32 --rate-limiting
+python src/pinterest_board_dl.py <URL> --workers 32 --rate-limiting
 ```
 
 ### Caso 2: Múltiplos Quadros
 ```bash
 # Rate limiting global protege todos os quadros
-python pinterest_board_dl.py --user <usuario> --rate-limiting
+python src/pinterest_board_dl.py --user <usuario> --rate-limiting
 ```
 
 ### Caso 3: Debugging de 429s
 ```bash
 # Rodar com rate limiting e ver stats
-python pinterest_board_dl.py <URL> --rate-limiting
+python src/pinterest_board_dl.py <URL> --rate-limiting
 
 # Analisar stats
 jq '.' rate_limit_stats.json
@@ -377,7 +388,7 @@ jq '{total_429s, total_requests}' rate_limit_stats.json
 
 # Soluções:
 # 1. Diminuir workers
-python pinterest_board_dl.py <URL> --rate-limiting --workers 8
+python src/pinterest_board_dl.py <URL> --rate-limiting --workers 8
 
 # 2. Config mais conservadora (editar rate_limiter.py)
 # max_requests_per_second = 3.0  # Mais lento

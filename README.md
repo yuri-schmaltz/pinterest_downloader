@@ -1,78 +1,88 @@
-# app-pinterest-dl
+# Pinterest Pro Downloader
 
-Ferramenta para baixar imagens de quadros do Pinterest, seja via linha de comando ou com uma interface gráfica em PyQt6.
+Baixa imagens de quadros do Pinterest. Três produtos independentes, mesmo objetivo:
+
+- 🐍 **CLI** — linha de comando, para script e servidor
+- 🖼️ **GUI** — desktop PyQt6, com seleção visual de quadros e progresso
+- 🌐 **Extensão** — Chrome/Firefox (MV3), baixa o que está visível na página
+
+A CLI e a GUI são Python (Playwright + requests). A extensão é JavaScript
+puro e não precisa de Python — são caminhos de uso separados, escolha o que
+cabe no seu fluxo.
+
+📄 [PROJECT.md](PROJECT.md) tem o inventário completo, os contratos de
+interface e a estrutura. [PLANO-ESTABILIZACAO.md](PLANO-ESTABILIZACAO.md) tem
+o que ainda falta.
+
+---
 
 ## ✨ Recursos
 
-- Download de um quadro específico ou de todos os quadros públicos de um usuário.
-- Resolução automática da melhor imagem disponível para cada pin.
-- Execução paralela configurável para acelerar a coleta e o download.
-- Interface gráfica (PyQt6) com acompanhamento de progresso, histórico de quadros e cancelamento seguro.
-- Suporte a login manual quando necessário (quadro privado/somente logados).
-- **🚀 Cache inteligente** (80-90% cache hits, -70% tempo em re-downloads)
-- **⚙️ Adaptive Workers** (ajuste dinâmico de paralelismo baseado em CPU/RAM)
-- **🚦 Rate Limiting** (proteção contra HTTP 429, <1% de erros)
-- **📝 JSON Logging** (logs estruturados com timestamps para análise)
-- **🔍 Diagnostics** (script de diagnóstico automático)
-- **🤖 CI/CD** (testes automatizados no GitHub Actions)
+- Download de um quadro específico ou de todos os quadros públicos de um usuário
+- Resolução automática da melhor imagem disponível para cada pin
+- Execução paralela configurável
+- Suporte a login manual (quadros privados / só para logados)
+- 🚀 **Cache inteligente** de metadados — re-download quase instantâneo
+- ⚙️ **Adaptive workers** — paralelismo ajustado por CPU/RAM
+- 🚦 **Rate limiting** — proteção contra HTTP 429 com backoff exponencial
+- 📝 **JSON logging** — logs estruturados para análise
+
+---
 
 ## Requisitos
 
-- Python 3.10+
-- [Playwright](https://playwright.dev/python/) e o navegador Chromium instalado (`playwright install chromium`).
-- Dependências listadas em `requirements.txt`.
+- Python 3.10 ou superior
+- [Playwright](https://playwright.dev/python/) + Chromium
+- Linux, Windows ou macOS
 
-Instale os requisitos com:
+---
+
+## Instalação
 
 ```bash
-python -m pip install -r requirements.txt
+# 1. Clone
+git clone https://github.com/yuri-schmaltz/pinterest_downloader.git
+cd pinterest_downloader
+
+# 2. Ambiente virtual (recomendado)
+python3 -m venv .venv
+source .venv/bin/activate          # Linux/macOS
+# .\.venv\Scripts\Activate.ps1     # Windows PowerShell
+
+# 3. Dependências
+pip install -r requirements.txt
 python -m playwright install chromium
+
+# 4. Instalar o projeto (opcional, habilita os comandos pinterest-board-dl / pinterest-board-gui)
+pip install -e .
 ```
 
-> **Dica:** em ambientes sem interface gráfica disponível, utilize a flag `--headful` apenas quando realmente precisar depurar/login.
+Sem o passo 4, use `python src/pinterest_board_dl.py` direto — funciona igual.
 
-## Estrutura do repositório
-
-```
-.
-├── pinterest_board_dl.py      # Núcleo reutilizável + CLI
-├── pinterest_board_gui.py     # Interface gráfica em PyQt6
-├── requirements.txt           # Dependências Python
-├── README.md                  # Este guia
-└── LICENSE
-```
-
-## Uso pela linha de comando
+### Verificar a instalação
 
 ```bash
-python pinterest_board_dl.py https://www.pinterest.com/<usuario>/<quadro>/
+python scripts/diagnose.py
 ```
 
-Para baixar todos os quadros públicos de um usuário:
+Checa Python, dependências, import dos módulos, presença do Chromium,
+permissão de escrita no cache e integridade da extensão — em ~1 segundo,
+sem abrir navegador e sem tocar a rede. Use `--deep` para também subir o
+Chromium, e `--json` para saída machine-readable.
+
+---
+
+## Uso — CLI
 
 ```bash
-python pinterest_board_dl.py --user usuario_pinterest
-```
+# um quadro
+pinterest-board-dl https://www.pinterest.com/usuario/quadro/
 
-Opções úteis:
+# todos os quadros públicos de um usuário
+pinterest-board-dl --user usuario_pinterest
 
-- `-o/--out`: define a pasta de saída (default: `./pins`).
-- `--headful`: abre o navegador visível durante a coleta.
-- `--manual-login`: pausa para que você faça login antes de coletar os pins.
-- `--max-pins`: limita a quantidade de pins baixados por quadro.
-- `--workers`: controla o paralelismo interno (resolução/download).
-- `--boards-workers`: controla o número de quadros processados em paralelo.
-- `--cache-dir`: diretório para cache de metadados (default: `.`).
-- `--no-cache`: desabilita cache de metadados.
-- `--adaptive-workers`: ativa ajuste dinâmico de workers baseado em CPU/RAM.
-- `--rate-limiting`: ativa limitação inteligente de requisições (proteção contra 429).
-- `--json-log`: habilita logging estruturado em JSON.
-- `--log-file`: arquivo para salvar logs JSON (default: `download_log.json`).
-
-### 🚀 Exemplo Completo (Todas as Otimizações)
-
-```bash
-python pinterest_board_dl.py <URL> \
+# com as otimizações todas
+pinterest-board-dl <URL> \
   --workers 32 \
   --adaptive-workers \
   --rate-limiting \
@@ -80,51 +90,139 @@ python pinterest_board_dl.py <URL> \
   --log-file my_download.json
 ```
 
-## Uso pela interface gráfica
+| Flag | Efeito |
+|---|---|
+| `-o, --out DIR` | pasta de saída (default `./pins`) |
+| `--user NOME` | baixa todos os quadros públicos do usuário |
+| `--max-pins N` | limita a quantidade de pins por quadro |
+| `--workers N` | paralelismo de resolução/download (default 16) |
+| `--boards-workers N` | paralelismo entre quadros (2–3, cada um abre um Chromium) |
+| `--scroll-pause S` | pausa entre rolagens (default 1.2) |
+| `--cache-dir DIR` | diretório do cache (default: `~/.cache/pinterest-downloader`) |
+| `--no-cache` | desliga o cache de metadados |
+| `--adaptive-workers` | ajusta workers por CPU/RAM |
+| `--rate-limiting` | ativa proteção contra 429 |
+| `--json-log` / `--log-file F` | logging estruturado |
+| `--headful` | abre o navegador visível (debug / login) |
+| `--manual-login` | pausa para você fazer login antes de coletar |
+
+Lista completa: `pinterest-board-dl --help`.
+
+---
+
+## Uso — GUI
 
 ```bash
-python pinterest_board_gui.py
+pinterest-board-gui          # instalado via pip install -e .
+# ou
+python src/pinterest_board_gui.py
 ```
 
-A janela principal possui duas abas:
+A janela tem **duas colunas**:
 
-1. **Quadro único** – informe a URL completa do quadro que deseja baixar.
-2. **Todos os quadros do usuário** – informe o usuário ou URL do perfil.
+- **Esquerda** — campo de usuário/URL do perfil, botão *Listar Quadros*,
+  opções de download, painel de progresso e log detalhado
+- **Direita** — *Seleção de Quadros*: os quadros encontrados aparecem em
+  grade, com miniatura, título e contagem de pins. Marque os que quiser
+  (checkbox) e clique em *Iniciar download*
 
-Configure as opções na seção "Opções de download" e clique em **Iniciar download**. O painel de progresso mostra o andamento do quadro atual, o total de quadros processados e o histórico dos quadros concluídos. O log detalhado exibe mensagens e eventuais avisos.
+Fluxo: informo o usuário → *Listar Quadros* → marco os quadros →
+*Iniciar download*. O modo "quadro único" (uma URL de quadro direto) existe
+**apenas na CLI**.
 
-Se "Pausar para login manual" estiver ativado, quando necessário o aplicativo exibirá um aviso solicitando o login na janela aberta pelo Playwright; após concluir o login clique em **Continuar** para retomar o download.
+> Em máquina sem display, a GUI não abre. O modo `offscreen` existe para
+> testes: `QT_QPA_PLATFORM=offscreen python src/pinterest_board_gui.py`.
 
-O botão **Cancelar** solicita o término do processo atual de forma segura.
+---
+
+## Uso — extensão do navegador
+
+1. Baixe o `.zip` da página de releases (ou o `.xpi` para Firefox)
+2. Chrome: `chrome://extensions` → **Modo do desenvolvedor** → **Carregar
+   sem compactação** → selecione a pasta descompactada
+3. Firefox: about:debugging → **Extensão temporária** → carregar o `.xpi`
+
+A extensão injeta um botão flutuante na página do Pinterest; um clique
+rola a página, coleta as imagens e baixa as melhores resoluções.
+
+A extensão usa i18n (`en`, `es`, `pt_BR`). O `lib/i18n.js` é carregado
+**antes** do `content.js` — a ordem no manifest importa.
+
+---
 
 ## Desenvolvimento
 
-- O módulo `pinterest_board_dl.py` agora concentra toda a lógica em funções reutilizáveis (`download_board`, `download_user_boards`, etc.), permitindo integrações em outros projetos.
-- Para executar testes: `pytest tests/` (11 testes, 100% PASS)
-- Para diagnóstico: `python diagnostics.py`
-- Para benchmark local: `python benchmark.py`
+```bash
+# suíte
+python -m pytest tests/ -v
 
-## 📚 Documentação Completa
+# lint (o mesmo do CI)
+black --check --line-length 120 src/ tests/ scripts/
+ruff check src/ tests/ scripts/
+mypy src/pinterest_board_dl.py --ignore-missing-imports
 
-### Guias de Uso
-- **[RUNBOOK_INSTALL.md](docs/RUNBOOK_INSTALL.md)** — Instalação e configuração (Linux/Windows)
-- **[RUNBOOK_TROUBLESHOOTING.md](docs/RUNBOOK_TROUBLESHOOTING.md)** — Resolução de problemas comuns
+# cobertura
+python -m coverage run --source=src -m pytest tests/ -q
+python -m coverage report -m
 
-### Guias Técnicos
-- **[IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md)** — Resumo técnico de todas as implementações
-- **[ONDAS_COMPLETAS.md](docs/ONDAS_COMPLETAS.md)** — Resumo visual com métricas e benefícios
-- **[ONDA_5B_GUIDE.md](docs/ONDA_5B_GUIDE.md)** — Guia de JSON logging com exemplos jq
-- **[ONDA_5C_GUIDE.md](docs/ONDA_5C_GUIDE.md)** — Guia de adaptive workers e métricas
-- **[ONDA_5D_GUIDE.md](docs/ONDA_5D_GUIDE.md)** — Guia de CI/CD e benchmarks
-- **[ONDA_5E_GUIDE.md](docs/ONDA_5E_GUIDE.md)** — Guia de rate limiting e proteção 429
+# diagnóstico do ambiente
+python scripts/diagnose.py --deep
 
-## 📊 Performance
+# empacotar a extensão
+bash scripts/build_release.sh
 
-| Métrica | Antes | Depois | Ganho |
-|---------|-------|--------|-------|
-| Startup (multi-board) | 15s/board | <1s/board | **93%** ⚡ |
-| Cache hits | 0% | 80-90% | **90%** 💾 |
-| CPU utilization | 25% | 70-90% | **180%** 🚀 |
-| 429 errors | 15% | <1% | **93%** 🛡️ |
+# build do app desktop (precisa do Chromium no bundle)
+PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright \
+  pyinstaller --noconfirm --clean PinterestDownloader.spec
+```
 
-Contribuições são bem-vindas!
+### Estrutura
+
+```
+src/          aplicação Python (módulos soltos — flat imports)
+extension/    extensão MV3
+tests/        21 testes
+scripts/      diagnóstico, build, publicação
+docs/         runbooks e histórico
+```
+
+Os módulos em `src/` importam uns aos outros de forma "plana"
+(`from json_logger import ...`), então `src/` precisa estar no `sys.path`.
+Os testes cuidam disso em três lugares — `tests/conftest.py`,
+`pythonpath` no `pyproject.toml` e o `sys.path.insert` de cada arquivo.
+Se você criar um teste novo, **repita o `sys.path.insert`**: foi
+justamente essa migração para `src/` que zerou a suíte inteira.
+
+---
+
+## Instaladores
+
+| Plataforma | Arquivo | Como instalar |
+|---|---|---|
+| Linux | `PinterestDownloader-x86_64.AppImage` | `chmod +x` e executar |
+| Linux | `pinterest-downloader_amd64.deb` | `sudo dpkg -i *.deb` |
+| Windows | `pinterest-board-downloader.exe` | executar |
+| Chrome | `pinterest-pro-downloader-chrome-*.zip` | carregar sem compactação |
+| Firefox | `pinterest-pro-downloader-firefox-*.xpi` | add-on temporário |
+
+O AppImage já traz o Chromium embutido (~950 MB). O `.deb` e o `.exe` **não**
+— nesses, rode `python -m playwright install chromium` uma vez.
+
+---
+
+## Documentação
+
+| Documento | Assunto |
+|---|---|
+| [PROJECT.md](PROJECT.md) | inventário de features, marcos, contratos de interface |
+| [PLANO-ESTABILIZACAO.md](PLANO-ESTABILIZACAO.md) | prioridades P0–P3 e riscos |
+| [TEST_INFRA.md](TEST_INFRA.md) | cobertura real (23 %) e limites declarados |
+| [docs/RUNBOOK_INSTALL.md](docs/RUNBOOK_INSTALL.md) | instalação passo a passo |
+| [docs/RUNBOOK_TROUBLESHOOTING.md](docs/RUNBOOK_TROUBLESHOOTING.md) | problemas comuns |
+| [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) | referência rápida de comandos |
+
+---
+
+## Licença
+
+MIT — veja [LICENSE](LICENSE).

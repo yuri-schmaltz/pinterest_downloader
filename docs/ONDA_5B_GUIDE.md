@@ -1,3 +1,14 @@
+> **Documento histórico — 12 de janeiro de 2026.**
+> Descreve o estado do projeto na época da ONDA 5B. O código evoluiu
+> bastante desde então: o repositório foi reestruturado para `src/`, a suíte
+> de testes foi reescrita e o CI foi corrigido.
+>
+> - Estado atual: [`PROJECT.md`](../PROJECT.md) · [`PLANO-ESTABILIZACAO.md`](../PLANO-ESTABILIZACAO.md) · [`TEST_INFRA.md`](../TEST_INFRA.md)
+> - Comandos quebrados citados abaixo foram atualizados para os equivalents
+>   que existem hoje.
+>
+> ---
+
 # 📊 ONDA 5B: Guia de Uso - Logging Estruturado em JSON
 
 ## 🎯 O que é?
@@ -12,13 +23,13 @@ Sistema de logging estruturado que registra cada fase de download com **timestam
 
 ```bash
 # Formato básico
-python pinterest_board_dl.py --user yuri_schmaltz --json-log
+python src/pinterest_board_dl.py --user yuri_schmaltz --json-log
 
 # Com arquivo customizado
-python pinterest_board_dl.py --board https://www.pinterest.com/user/board/ --json-log --log-file my_log.json
+python src/pinterest_board_dl.py --board https://www.pinterest.com/user/board/ --json-log --log-file my_log.json
 
 # Quadro específico com logging
-python pinterest_board_dl.py https://www.pinterest.com/user/board/ --json-log
+python src/pinterest_board_dl.py https://www.pinterest.com/user/board/ --json-log
 ```
 
 ### Visualizar Logs
@@ -185,18 +196,18 @@ jq '.logs[] | select(.phase == "download_board") | .count | add' download_log.js
 
 ### Desabilitar logging (padrão)
 ```bash
-python pinterest_board_dl.py --user yuri_schmaltz
+python src/pinterest_board_dl.py --user yuri_schmaltz
 # Nenhum arquivo JSON será criado
 ```
 
 ### Habilitar com arquivo customizado
 ```bash
-python pinterest_board_dl.py --user yuri_schmaltz --json-log --log-file /tmp/pins_$(date +%s).json
+python src/pinterest_board_dl.py --user yuri_schmaltz --json-log --log-file /tmp/pins_$(date +%s).json
 ```
 
 ### Combinar com outras flags
 ```bash
-python pinterest_board_dl.py \
+python src/pinterest_board_dl.py \
   --user yuri_schmaltz \
   --out ./downloads \
   --workers 24 \
@@ -240,7 +251,7 @@ reset_logger()
 
 ```bash
 # Executar teste de funcionalidade (TEST 9)
-python test_patches.py
+python -m pytest tests/ -q
 
 # Deve passar com:
 # ✅ PASS: JSON Logger funciona corretamente (ONDA 5B)

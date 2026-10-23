@@ -133,75 +133,12 @@
   }
 
   // ===================== URL Conversion & Filtering =====================
+  // As funcoes de URL morao em lib/pin_utils.js (carregado antes deste
+  // arquivo pelo manifest) para que possam ser testadas isoladamente.
+  // Ver tests/test_extension_pins.js.
 
-  function getOriginalImageUrl(imgSrc) {
-    if (!imgSrc || typeof imgSrc !== 'string') return null;
-    if (!imgSrc.includes('pinimg.com')) return null;
-
-    const isPinImage = /\/(?:originals|\d+x|rs\/\d+x\d+)\//.test(imgSrc);
-    if (!isPinImage) return null;
-
-    let url = imgSrc;
-    url = url.replace(/\/\d+x\//, '/originals/');
-    url = url.replace(/\/rs\/\d+x\d+\//, '/');
-    return url;
-  }
-
-  /**
-   * Extract a Pinterest Pin ID from a URL.
-   * Pinterest image filenames are derived from a 32-hex-char hash.
-   * Returns a short identifier (12 chars), or null if it can't be extracted.
-   * Falls back to FNV-1a hash of the path tail for non-standard URLs.
-   */
-  function extractPinHash(url) {
-    if (!url) return null;
-    const m = /\/([a-f0-9]{16,32})\./i.exec(url);
-    if (m) return m[1].slice(0, 12);
-    try {
-      const u = new URL(url);
-      const parts = u.pathname.split('/').filter(Boolean);
-      if (parts.length < 2) return null;
-      const tail = parts.slice(-2).join('/');
-      let h = 0x811c9dc5;
-      for (let i = 0; i < tail.length; i++) {
-        h ^= tail.charCodeAt(i);
-        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
-      }
-      return h.toString(16).padStart(8, '0').slice(0, 12);
-    } catch {
-      return null;
-    }
-  }
-
-  // ===================== Auto-Scroll =====================
-
-  /**
-   * Count images that are actually pinimg pin images (not lazy stubs,
-   * webapp icons, avatars, etc.).
-   */
-  function countHarvestableImages() {
-    const images = document.querySelectorAll('img');
-    let count = 0;
-    for (const img of images) {
-      const src = img.src || img.dataset.src;
-      if (getOriginalImageUrl(src)) count++;
-    }
-    return count;
-  }
-
-  /**
-   * Get a fingerprint of unique pin URLs currently in the DOM.
-   * Used to detect when new pins load even if scrollHeight doesn't grow
-   * (Pinterest's virtual scroll recycles DOM nodes).
-   */
-  function pinFingerprint() {
-    const set = new Set();
-    for (const img of document.querySelectorAll('img')) {
-      const url = getOriginalImageUrl(img.src || img.dataset.src);
-      if (url) set.add(url);
-    }
-    return Array.from(set).sort().join('|');
-  }
+  const { getOriginalImageUrl, extractPinHash, countHarvestableImages, pinFingerprint } =
+    window.__pbdPinUtils || {};
 
   async function autoScrollForImages(onProgress) {
     const startTime = Date.now();

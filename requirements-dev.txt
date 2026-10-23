@@ -1,0 +1,16 @@
+# Dependências de desenvolvimento.
+#
+# As dependências de runtime estão em requirements.txt (e em
+# [project.dependencies] no pyproject.toml, que é a fonte autoritativa).
+# Para instalar o projeto e as ferramentas de desenvolvimento juntas:
+#
+#     pip install -e ".[dev]"
+#
+# Este arquivo existe para quem prefere requirements.txt ao padrão PEP 621.
+
+-r requirements.txt
+
+pytest>=7.0.0
+black>=23.0.0
+ruff>=0.1.0
+mypy>=1.0.0
