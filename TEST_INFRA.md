@@ -1,7 +1,7 @@
 # TEST_INFRA.md — Cobertura real e limites declarados
 
-**Data da medição:** 2026-10-22 · **Commit:** `c2c07a5` (branch `fix/ci-and-extension-repro`)
-**Comando:** `python -m coverage run --source=src -m pytest tests/ -q && python -m coverage report -m`
+**Data da medição:** 2026-10-23 · **Branch:** `fix/ci-and-extension-repro`
+**Comando:** `QT_QPA_PLATFORM=offscreen python -m coverage run --source=src -m pytest tests/ -q && python -m coverage report -m`
 
 > Este documento declara **o que a suíte cobre e o que ela não cobre**.
 > Números aqui são medidos, não estimados. Se a medição divergir, a medição
@@ -11,29 +11,50 @@
 
 ## 1. Panorama
 
-| Métrica | Valor |
-|---|---|
-| Testes coletados | **21** |
-| Testes passando | **21** (100%) |
-| Falhas / erros de coleta | 0 |
-| Tempo de execução | ~3 s |
-| Dependências externas (rede/browser) | **nenhuma** |
-| Cobertura total (`src/`) | **23 %** |
+| Métrica | Antes (2026-10-22) | Agora (2026-10-23) |
+|---|---|---|
+| Testes coletados | 21 | **85** (+ 69 checks em Node) |
+| Testes passando | 21 | **85** (100 %) |
+| Falhas / erros de coleta | 0 | 0 |
+| Tempo de execução | ~3 s | ~26 s |
+| Dependências externas (rede) | nenhuma | **nenhuma** |
+| Browser | não usava | Chromium local, via `file://` |
+| Cobertura total (`src/`) | 23 % | **45 %** |
 
-A cobertura total é baixa. Isso é honesto e está detalhado na §3.
+Os 26 s são quase todos o browser: a coleta de pins espera a página
+assentar antes de rolar, e cada coleta custa alguns segundos. Não há
+acesso à rede em nenhum teste.
 
 ---
 
 ## 2. Cobertura por módulo (medida)
 
-| Módulo | Statements | Cobertura | Leitura |
-|---|---|---|---|
-| `src/rate_limiter.py` | 105 | **86 %** | ✅ bem coberto |
-| `src/json_logger.py` | 85 | **85 %** | ✅ bem coberto |
-| `src/adaptive_workers.py` | 109 | **74 %** | 🟡 bom |
-| `src/pinterest_board_dl.py` | 783 | **16 %** | 🔴 núcleo do scraper, quase sem cobertura |
-| `src/pinterest_board_gui.py` | 491 | **0 %** | 🔴 GUI intocada |
-| **TOTAL** | **1 573** | **23 %** | |
+| Módulo | Statements | Antes | Agora | Leitura |
+|---|---|---|---|---|
+| `src/rate_limiter.py` | 105 | 86 % | **86 %** | ✅ bem coberto |
+| `src/json_logger.py` | 85 | 85 % | **85 %** | ✅ bem coberto |
+| `src/adaptive_workers.py` | 109 | 74 % | **74 %** | 🟡 bom |
+| `src/pinterest_board_dl.py` | 792 | 16 % | **21 %** | 🟡 o núcleo ainda é o elo fraco |
+| `src/pinterest_board_gui.py` | 491 | **0 %** | **61 %** | ✅ era o pior buraco |
+| **TOTAL** | **1 582** | 23 % | **45 %** | |
+
+### 2.1 O que mudou desde a medição anterior
+
+| Entrega | Efeito |
+|---|---|
+| `tests/test_scraper.py` (22 testes) | fixtures de HTML local + Chromium real: a coleta de pins e a extração de quadros passaram a ser testadas de verdade |
+| `tests/test_gui.py` (29 testes) | a GUI saiu de 0 % para 61 % |
+| `tests/test_extension_integration.py` (13 testes) | os scripts da extensão carregados numa página real, num browser real |
+| `tests/test_extension_pins.js` (29 checks) | a transformação de URL dos pins, que decide qual imagem o usuário baixa |
+| `tests/test_extension_i18n.js` (40 checks) | as traduções, nos dois caminhos (com e sem `chrome.i18n`) |
+| `_compute_scroll_stability` e `_extract_boards_from_page` extraídos | a aritmética do scroll virou função pura testável; a extração de quadros deixou de estar presa dentro de um closure |
+
+### 2.2 O que a GUI ainda não cobre
+
+Ficou de fora: o ciclo de download de verdade (a thread que chama o
+scraper), o diálogo de login manual e o *worker* em background. O resto da
+apresentação — lista de quadros, seleção, progresso, tratamento de erro —
+está coberto.
 
 ### 2.1 O que o número de 16 % em `pinterest_board_dl.py` significa
 
@@ -61,6 +82,19 @@ módulo não importar (ver §5).
 ---
 
 ## 3. Inventário dos 21 testes
+
+### 3.0 Mapa dos arquivos de teste
+
+| Arquivo | Testes | Depende de | Cobre |
+|---|---|---|---|
+| `tests/test_11_rate_limiting.py` | 10 | — | rate limiter (ONDA 5E) |
+| `tests/test_core_features.py` | 10 | — | constantes, cache, contrato, layout do pacote |
+| `tests/test_robustness.py` | 1 | — | parser de contagem de pins |
+| `tests/test_scraper.py` | 22 | **Chromium** | coleta de pins e extração de quadros |
+| `tests/test_gui.py` | 29 | **Qt (offscreen)** | apresentação da GUI |
+| `tests/test_extension_integration.py` | 13 | **Chromium** | scripts da extensão numa página real |
+| `tests/test_extension_i18n.js` | 40 checks | Node | traduções (dois caminhos) |
+| `tests/test_extension_pins.js` | 29 checks | Node | transformação de URL dos pins |
 
 ### 3.1 `tests/test_11_rate_limiting.py` — 10 testes (ONDA 5E)
 
@@ -92,7 +126,50 @@ módulo não importar (ver §5).
 | `test_json_logger` | ciclo completo do logger estruturado (ONDA 5B) |
 | `test_adaptive_workers` | métricas, ajuste e persistência (ONDA 5C) |
 
-### 3.3 `tests/test_robustness.py` — 1 teste
+### 3.3 `tests/test_scraper.py` — 22 testes
+
+O primeiro teste do scraper de verdade. Usa fixtures de HTML local
+(`tests/fixtures/`) servidos por `file://` num Chromium real — sem rede.
+
+| Grupo | Cobre |
+|---|---|
+| `TestScrollStability` (7) | a aritmética de quando parar o scroll: progresso zera o contador, altura estável conta 1, altura mudou conta 0,5, "Mais como esse" no fim da página conta 2, e o estado só éAdvance quando houve progresso |
+| `TestCollectPinLinks` (4) | a coleta real: acha os 8 pins da fixture, ignora links que não são pin, respeita `max_pins`, devolve URLs absolutas do Pinterest |
+| `TestExtractBoards` (11) | a extração real: acha os quadros, exclui as abas de navegação, exclui slugs com `_`, ignora outros usuários, lê título (com e sem `<h2>`), thumbnail e contagem de pins, e o `pin_count_int` bate com o `parse_pin_count` |
+
+**As fixtures são o contrato.** Elas reproduzem o DOM que o scraper espera
+(`<a href="/pin/ID">`, `__PWS_DATA__`, `h2` para título, a linha de contagem
+de pins, os slugs de navegação). Se o scraper mudar o que espera do DOM, a
+fixture tem de mudar junto — e o teste avisa.
+
+### 3.4 `tests/test_gui.py` — 29 testes
+
+A GUI saiu de 0 % para 61 %. Roda com o platform plugin `offscreen`, sem
+display e sem `xvfb`.
+
+| Grupo | Cobre |
+|---|---|
+| `TestMainWindow` (3) | a janela constrói, tem as duas colunas, e o botão iniciar começa desabilitado |
+| `TestBoardList` (8) | a lista de quadros: quantidade, título + contagem, normalização da URL, limpeza de quebras de linha e espaços extras, lista vazia desabilita o início |
+| `TestProgressSlots` (10) | os slots de progresso: barra com o total, total zero, valor limitado ao máximo, conclusão, contagem de pins, erro e cancelamento |
+| `TestSelectionState` (5) | a seleção: começa desmarcada, marcar habilita o início, desmarcar desabilita, `selected_urls` acompanha os checkboxes |
+
+> O `on_error` abre um `QMessageBox` **modal** — em modo offscreen isso
+> trava o teste para sempre. O teste substitui o diálogo por um duble.
+
+### 3.5 `tests/test_extension_integration.py` — 13 testes
+
+Os scripts reais da extensão (`lib/i18n.js` → `lib/pin_utils.js` →
+`content.js`), carregados na ordem do manifest, numa página de fixture, num
+Chromium real.
+
+| Grupo | Cobre |
+|---|---|
+| `TestManifestContract` (4) | o manifest é válido, todo arquivo referenciado existe, e os helpers são carregados **antes** do `content.js` |
+| `TestScriptsLoad` (4) | as APIs são expostas, o content script roda sem erro, a barra é traduzida, e não há erro de JS na página |
+| `TestHarvesting` (5) | a contagem de imagens de pin, o fingerprint deduplicado, a normalização para `/originals/`, e a ausência de avatar/ícone/host externo |
+
+### 3.6 `tests/test_robustness.py` — 1 teste
 
 | Teste | Cobre |
 |---|---|
@@ -149,18 +226,23 @@ O que **esta suíte não garante** — leia antes de confiar em algo:
 
 1. **Nenhum teste toca a rede.** Nenhuma requisição ao Pinterest é feita.
    Uma mudança no layout do Pinterest pode quebrar o scraper sem quebrar
-   nenhum teste.
-2. **Nenhum teste abre o navegador.** O caminho de scroll, popups, lazy-load
-   e login manual é **não testado**.
-3. **A GUI não é exercitada.** Só se garante que o módulo importa.
-4. **Não há teste de integração.** Não há teste que rode a CLI contra um
-   quadro real nem que verifique arquivo baixado.
-5. **Não há medição de performance no CI.** As tabelas de "93 % mais rápido"
+   nenhum teste — as fixtures são sintéticas, não HTML real capturado.
+2. **O browser é real, a página não é.** O scroll, os popups e o lazy-load
+   são exercitados contra uma fixture estática. O caminho contra o Pinterest
+   de verdade continua **não testado**.
+3. **O download real não é testado.** Nenhum teste baixa um arquivo, verifica
+   o conteúdo salvo ou confere a contagem final de pins.
+4. **A GUI não é testada de ponta a ponta.** A apresentação é coberta; o
+   ciclo de download (thread, worker, login manual) não é.
+5. **A extensão não é testada no navegador real com a extensão carregada.**
+   Os scripts são carregados via `add_script_tag`, o que não exercita o
+   `chrome.*` de verdade.
+6. **Não há medição de performance no CI.** As tabelas de "93 % mais rápido"
    nos docs são de medições manuais antigas, não de um benchmark que rode
    hoje.
-6. **Sem mutation testing.** Não sabemos se os testes falhariam se o código
+7. **Sem mutation testing.** Não sabemos se os testes falhariam se o código
    quebrasse de forma sutil.
-7. **`test_scroll_detection` fixa um piso, não o valor.** `SCROLL_STABLE_ROUNDS`
+8. **`test_scroll_detection` fixa um piso, não o valor.** `SCROLL_STABLE_ROUNDS`
    pode mudar sem quebrar o teste — de propósito, para que ajuste de tuning
    não quebre o pipeline.
 
@@ -169,8 +251,10 @@ O que **esta suíte não garante** — leia antes de confiar em algo:
 ## 7. Como rodar
 
 ```bash
-# suíte completa
-python -m pytest tests/ -v
+# suíte completa (precisa do Chromium para os testes do scraper
+# e do platform offscreen para os da GUI)
+python -m playwright install chromium
+QT_QPA_PLATFORM=offscreen python -m pytest tests/ -v
 
 # um arquivo
 python -m pytest tests/test_11_rate_limiting.py -v
@@ -179,6 +263,13 @@ python -m pytest tests/test_11_rate_limiting.py -v
 python -m coverage run --source=src -m pytest tests/ -q
 python -m coverage report -m
 python -m coverage html        # abre htmlcov/index.html
+
+# testes da extensão (Node puro, sem dependências)
+node tests/test_extension_i18n.js
+node tests/test_extension_pins.js
+
+# teste de integração da extensão (Chromium)
+python -m pytest tests/test_extension_integration.py -v
 
 # diagnóstico do ambiente (offline)
 python scripts/diagnose.py
@@ -216,9 +307,9 @@ Prioridade para as próximas rodadas:
 
 | # | Item | Por quê | Esforço |
 |---|---|---|---|
-| 1 | Testes de integração com HTML salvo do Pinterest | cobre scroll, popups e parsing sem depender de rede | 1–2 dias |
-| 2 | `pytest-qt` + `xvfb` para a GUI | hoje 0 % de cobertura | 2–3 dias |
-| 3 | Fixture de HTML real do Pinterest em `tests/fixtures/` | base para o item 1 | 2 h |
-| 4 | Testes do `content.js` (extensão) com jsdom | a extensão não tem nenhum teste | 1 dia |
-| 5 | Mutation testing (`mutmut`) | medir a força real da suíte | 4 h |
-| 6 | Benchmark automatizado | as métricas de performance nos docs estão desatualizadas | 1 dia |
+| 1 | **Capturar HTML real do Pinterest** e usar como fixture | hoje as fixtures são sintéticas: um layout novo do Pinterest não é detectado | 2 h |
+| 2 | Teste de download real (baixa um pin, confere o arquivo) | o download é a única parte sem nenhum teste | 1 dia |
+| 3 | Exercitar a extensão carregada de verdade (Playwright com extensão) | hoje os scripts são injetados à mão, o `chrome.*` não é real | 1–2 dias |
+| 4 | Mutation testing (`mutmut`) | medir a força real da suíte | 4 h |
+| 5 | Benchmark automatizado | as métricas de performance nos docs estão desatualizadas | 1 dia |
+| 6 | Cobrir o `download_media` e o `resolve_images` | 21 % do núcleo ainda é o maior buraco | 1 dia |

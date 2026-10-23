@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<!--
+  Fixture sintética de um perfil do Pinterest.
+
+  Reproduz o contrato de DOM que collect_board_urls espera:
+
+    - <a href="/<usuario>/<quadro>/> com exatamente 2 partes no path
+    - título em <h2> (ou [data-test-id="board-card-title"])
+    - contagem de pins numa linha isolada, casando com
+      /^([\d,.]+\s*(?:mil|mi|k|m|pins|pin))\s*$/i
+    - thumbnail em <img src="...">
+    - slugs de navegação (boards, pins, created...) que devem ser excluídos
+    - slugs começados com "_" que também devem ser excluídos
+-->
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Perfil de teste</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; }
+    .board { display: inline-block; width: 200px; margin: 8px; }
+    .board img { width: 100%; height: 120px; background: #ddd; }
+  </style>
+</head>
+<body>
+  <!-- Navegação: não são quadros. -->
+  <nav>
+    <a href="/usuario/boards/">Quadros</a>
+    <a href="/usuario/pins/">Pins</a>
+    <a href="/usuario/created/">Criados</a>
+    <a href="/usuario/followers/">Seguidores</a>
+  </nav>
+
+  <div id="boards">
+    <a class="board" href="/usuario/decoracao/">
+      <img src="https://i.pinimg.com/thumbs/decoracao.jpg" alt="">
+      <h2>Decoração</h2>
+      <div>1,2 mil pins</div>
+    </a>
+
+    <a class="board" href="/usuario/culinaria/">
+      <img src="https://i.pinimg.com/thumbs/culinaria.jpg" alt="">
+      <h2>Culinária</h2>
+      <div>340 pins</div>
+    </a>
+
+    <a class="board" href="/usuario/fotografia/">
+      <img src="https://i.pinimg.com/thumbs/fotografia.jpg" alt="">
+      <h2>Fotografia</h2>
+      <div>15 pins</div>
+    </a>
+
+    <!-- Sem <h2>: o título vem da primeira linha do texto. -->
+    <a class="board" href="/usuario/viagens/">
+      <img src="https://i.pinimg.com/thumbs/viagens.jpg" alt="">
+      <div>Viagens</div>
+      <div>88 pins</div>
+    </a>
+
+    <!-- Slug começando com "_": excluído por regra. -->
+    <a class="board" href="/usuario/_criados/">
+      <h2>Criados</h2>
+      <div>10 pins</div>
+    </a>
+
+    <!-- outro usuário: não deve entrar. -->
+    <a class="board" href="/outro_usuario/quadro/">
+      <h2>Quadro de outro</h2>
+      <div>5 pins</div>
+    </a>
+  </div>
+</body>
+</html>

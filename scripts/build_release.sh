@@ -64,6 +64,11 @@ PY
 # ============================================================
 echo "[1/3] Chrome Web Store package..."
 cd "$EXT"
+# 'zip' ATUALIZA um arquivo existente em vez de recria-lo: o que foi
+# apagado da origem continua no pacote para sempre. Como o nome do
+# artefato inclui a versao, um rebuild da mesma versao reaproveitaria o
+# pacote velho. Por isso os arquivos sao removidos antes.
+rm -f "$DIST/pinterest-pro-downloader-chrome-v${VERSION}.zip"
 zip -r "$DIST/pinterest-pro-downloader-chrome-v${VERSION}.zip" \
     manifest.json \
     background.js \
@@ -85,6 +90,7 @@ echo "[2/3] Firefox Add-ons package..."
 # Firefox MV3 add-ons are distributed as .xpi (which is a ZIP file).
 # Note: we keep both background.js (chrome.* API). Firefox 121+ accepts this.
 cd "$EXT"
+rm -f "$DIST/pinterest-pro-downloader-firefox-v${VERSION}.xpi"
 zip -r "$DIST/pinterest-pro-downloader-firefox-v${VERSION}.xpi" \
     manifest.json \
     background.js \
@@ -104,6 +110,8 @@ echo "    ✓ $DIST/pinterest-pro-downloader-firefox-v${VERSION}.xpi"
 # ============================================================
 echo "[3/3] Source archive..."
 cd "$ROOT"
+# Mesmo cuidado do zip: o tarball tambem e atualizado no lugar.
+rm -f "$DIST/pinterest-pro-downloader-source-v${VERSION}.tar.gz"
 # Must include the whole application: src/ (the app itself), tests/,
 # extension/ (the browser extension), scripts/, docs/ and assets/.
 # The previous version shipped only extension/ + scripts/, which meant

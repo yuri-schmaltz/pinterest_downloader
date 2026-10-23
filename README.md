@@ -118,10 +118,17 @@ pinterest-board-gui          # instalado via pip install -e .
 python src/pinterest_board_gui.py
 ```
 
-Duas abas: **quadro único** (URL completa) e **todos os quadros do usuário**
-(usuário ou URL do perfil). O painel mostra o quadro atual, o total
-processado e o histórico. Com "Pausar para login manual" marcado, aparece um
-aviso para você fazer login na janela do Playwright e clicar em **Continuar**.
+A janela tem **duas colunas**:
+
+- **Esquerda** — campo de usuário/URL do perfil, botão *Listar Quadros*,
+  opções de download, painel de progresso e log detalhado
+- **Direita** — *Seleção de Quadros*: os quadros encontrados aparecem em
+  grade, com miniatura, título e contagem de pins. Marque os que quiser
+  (checkbox) e clique em *Iniciar download*
+
+Fluxo: informo o usuário → *Listar Quadros* → marco os quadros →
+*Iniciar download*. O modo "quadro único" (uma URL de quadro direto) existe
+**apenas na CLI**.
 
 > Em máquina sem display, a GUI não abre. O modo `offscreen` existe para
 > testes: `QT_QPA_PLATFORM=offscreen python src/pinterest_board_gui.py`.

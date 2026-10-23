@@ -70,7 +70,8 @@ Sem isso não dá para publicar nada confiável.
 | P1.3 | **Deduplicar as dependências** | `requirements.txt` e `pyproject.toml` listam as mesmas 4 dependências. Duas fontes de verdade, uma delas não entra no wheel | 20 min | ✅ `requirements-dev.txt` adicionado |
 | P1.4 | **Unificar a versão** | hoje 3 lugares: `pyproject.toml`, `extension/manifest.json` e a tag. Automatizar: o `build_release.sh` já deriva do manifest; falta o pyproject seguir o mesmo caminho | 1 h | 🟡 parcial (2 de 3; a tag ainda é manual) |
 | P1.5 | **Fechar o gap de `lib/` no `.gitignore`** | a regra `lib/` continua lá, protegida só pela whitelist. Um `.gitignore` que aponte apenas para o que é Python evitaria a classe de bug inteira | 30 min | ✅ whitelist + gate de CI |
-| P1.6 | **`extension/README.md`** | removido no restructure v2, mas a extensão segue sem doc própria | 1 h | ⏳ |
+| P1.6 | **`extension/README.md`** | removido no restructure v2, mas a extensão segue sem doc própria | 1 h | ✅ escrito, com checklist de publicação |
+| P1.7 | **Unificar a versão** | 3 fontes: pyproject, manifest, tag. A v2.0.1 publicou assets nomeados `v2.0.0` | 1 h | ✅ `scripts/sync_version.py` + job `version` no CI |
 
 ---
 
@@ -78,10 +79,10 @@ Sem isso não dá para publicar nada confiável.
 
 | # | Item | Detalhe | Esforço |
 |---|---|---|---|
-| P2.1 | **Cobertura do scraper (16 % → 50 %)** | fixtures de HTML salvo do Pinterest; cobre scroll, parsing, popups sem depender de rede | 1–2 dias |
-| P2.2 | **Testes da GUI (0 % → 30 %)** | `pytest-qt` + `xvfb` | 2–3 dias |
-| P2.3 | **Testes da extensão** | a extensão não tem nenhum teste; jsdom ou Playwright com extensão carregada | 1–2 dias |
-| P2.4 | **Refatorar as 8 funções complexas** | `C901` está no ignore do ruff. A mais complexa (`_collect_pin_links_with_browser`) tem complexidade 63. Extrair o scroll-stability para um módulo próprio é o corte natural | 2–3 dias |
+| P2.1 | **Cobertura do scraper (16 % → 21 %)** | fixtures de HTML local + Chromium real: coleta de pins e extração de quadros | ✅ feito (falta HTML real capturado) |
+| P2.2 | **Testes da GUI (0 % → 61 %)** | `pytest-qt` + platform `offscreen`, sem `xvfb` | ✅ feito (falta o ciclo de download) |
+| P2.3 | **Testes da extensão** | a extensão não tinha nenhum teste | ✅ 82 checks em Node + 13 de integração |
+| P2.4 | **Refatorar as 8 funções complexas** | `C901` está no ignore do ruff. A mais complexa tinha 63; a extração do scroll-stability já a levou a 60. Extrair o `handle_response` (25) e o `resolve_images` (16) é o próximo corte natural | 2–3 dias |
 | P2.5 | **Benchmark automatizado** | as tabelas de performance nos docs (93 %, 90 %, 180 %) são de medições manuais de 2025 e não são reproduzíveis | 1 dia |
 | P2.6 | **`--version` na CLI** | o runbook antigo mandava `python pinterest_board_dl.py --version`, mas a flag não existe | 15 min |
 

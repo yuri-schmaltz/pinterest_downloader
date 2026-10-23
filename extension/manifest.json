@@ -24,6 +24,7 @@
       ],
       "js": [
         "lib/i18n.js",
+        "lib/pin_utils.js",
         "content.js"
       ],
       "run_at": "document_idle"

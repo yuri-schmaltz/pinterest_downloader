@@ -694,8 +694,10 @@ class MainWindow(QMainWindow):
         import requests
 
         for b in boards:
-            # Limpeza do título (remover quebras de linha e espaços extras)
-            title = b["title"].replace("\n", " ").strip()
+            # Limpeza do título (remover quebras de linha e espaços extras).
+            # O Pinterest devolve títulos com "\n" e espaços duplicados;
+            # " ".join(split()) colapsa qualquer sequência de espaço em uma.
+            title = " ".join(b["title"].split())
 
             # Limpeza do pin_count (garantir que não tenha caracteres como "," no início)
             pin_count = b.get("pin_count", "").strip()

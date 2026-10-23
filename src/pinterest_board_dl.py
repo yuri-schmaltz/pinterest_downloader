@@ -648,20 +648,15 @@ def _collect_pin_links_with_browser(
                     "})()"
                 )
 
-                if current_count == last_count:
-                    # Se não houve progresso e parece ser o fim/recomendações
-                    if has_more_like_this and is_bottom:
-                        stable_rounds += 2  # Acelerar parada se detectou recomendações no fundo
-                    elif current_height == last_height:
-                        stable_rounds += 1
-                    else:
-                        # Altura mudou mas pins não? Pode estar carregando outras coisas
-                        stable_rounds += 0.5
-                else:
-                    # Houve progresso! Resetar rounds
-                    stable_rounds = 0
-                    last_height = current_height
-                    last_count = current_count
+                stable_rounds, last_count, last_height = _compute_scroll_stability(
+                    stable_rounds,
+                    last_count,
+                    last_height,
+                    current_count,
+                    current_height,
+                    has_more_like_this,
+                    is_bottom,
+                )
 
             except Exception:
                 # Fallback para detecção simples por contagem
@@ -767,6 +762,127 @@ def get_intercepted_metadata() -> Dict[str, PinMetadata]:
 
 def clear_intercepted_metadata() -> None:
     _intercepted_metadata.clear()
+
+
+def _compute_scroll_stability(
+    stable_rounds: float,
+    last_count: int,
+    last_height: int,
+    current_count: int,
+    current_height: int,
+    has_more_like_this: bool,
+    is_bottom: bool,
+) -> tuple[float, int, int]:
+    """Atualiza o contador de estabilidade usado para decidir quando parar o scroll.
+
+    Extraído de _collect_pin_links_with_browser para ser testável sem
+    browser: a decisão é aritmética pura sobre o estado observado.
+
+    Regras:
+    - houve progresso (mais pins) -> zera o contador e memoriza o novo estado
+    - sem progresso, com "Mais como esse" visível no fim da página -> conta 2
+      (indício forte de que chegou ao fim)
+    - sem progresso e altura igual -> conta 1
+    - sem progresso e altura diferente -> conta 0,5 (crédito parcial: a página
+      pode estar carregando outra coisa, ainda não é o fim)
+
+    Retorna (stable_rounds, last_count, last_height).
+    """
+    if current_count == last_count:
+        if has_more_like_this and is_bottom:
+            stable_rounds += 2
+        elif current_height == last_height:
+            stable_rounds += 1
+        else:
+            stable_rounds += 0.5
+    else:
+        # Houve progresso! Resetar rounds
+        stable_rounds = 0
+        last_height = current_height
+        last_count = current_count
+    return stable_rounds, last_count, last_height
+
+
+def _extract_boards_from_page(page, username: str, exclude: set[str]) -> List[BoardMetadata]:
+    """Extrai os quadros do usuário da página já carregada.
+
+    Separado de collect_board_urls para permitir teste com HTML local: a
+    função depende apenas do DOM da página, não de onde ela veio. É o que
+    permite testar a extração sem tocar a rede.
+    """
+    boards_data = page.evaluate(
+        rf"""(username) => {{
+            const results = [];
+            const exclude = {list(exclude)};
+            const els = document.querySelectorAll('a[href]');
+
+            els.forEach(el => {{
+                const href = el.getAttribute("href");
+                if (!href) return;
+
+                // Extrair partes do path: /<user>/<board>/
+                const parts = href.split('/').filter(Boolean);
+                if (parts.length === 2 && parts[0].toLowerCase() === username.toLowerCase()) {{
+                    const board = parts[1];
+                    if (exclude.includes(board.toLowerCase()) || board.startsWith('_')) return;
+
+                    const fullUrl = "https://www.pinterest.com/" + parts[0] + "/" + parts[1] + "/";
+
+                    // Tentar encontrar número de pins de forma mais precisa
+                    let pins = "";
+                    try {{
+                        // Pegar o container de texto do board card
+                        const text = el.innerText;
+                        // Regex mais restrita: ignorar o título (que vem antes de quebras de linha ou espaços duplos)
+                        // e ignorar sufixos de tempo (1d, 2h, etc)
+                        const lines = text.split('\n').filter(l => l.trim());
+                        for (const line of lines) {{
+                            const match = line.match(/^([\d,.]+\s*(?:mil|mi|k|m|pins|pin))\s*$/i);
+                            if (match) {{
+                                pins = match[1].trim();
+                                break;
+                            }}
+                        }}
+
+                        // Fallback se não achou em linhas separadas
+                        if (!pins) {{
+                            const match = text.match(/([\d,.]+\s*(?:mil|mi|k|m|pins|pin))\s*(?:Pins|Pin)?/i);
+                            if (match) pins = match[1].trim();
+                        }}
+                    }} catch(e) {{}}
+
+                    // Tentar encontrar título usando data-test-id se possível
+                    let title = board;
+                    try {{
+                        const titleEl = el.querySelector('h2, [data-test-id="board-card-title"]');
+                        if (titleEl) {{
+                            title = titleEl.innerText.trim();
+                        }} else {{
+                            // Fallback: primeira linha do texto
+                            const firstLine = el.innerText.split('\n')[0].trim();
+                            if (firstLine && !firstLine.match(/^\d/)) title = firstLine;
+                        }}
+                    }} catch(e) {{}}
+
+                    // Tentar encontrar thumbnail
+                    let thumb = "";
+                    const img = el.querySelector('img');
+                    if (img) thumb = img.getAttribute('src') || "";
+
+                    results.push({{url: fullUrl, title: title, thumbnail_url: thumb, pin_count: pins}});
+                }}
+            }});
+            return results;
+        }}""",
+        username,
+    )
+
+    results: List[BoardMetadata] = []
+    for b in boards_data:
+        # Pre-parse pin count to int
+        b["pin_count_int"] = parse_pin_count(b["pin_count"])
+        results.append(b)
+    return results
 
 
 def collect_pin_links(
@@ -902,78 +1018,11 @@ def collect_board_urls(
 
                 for _ in range(200):
                     # Extrair objetos com metadados via JS
-                    boards_data = page.evaluate(
-                        rf"""(username) => {{
-                            const results = [];
-                            const exclude = {list(exclude)};
-                            const els = document.querySelectorAll('a[href]');
-
-                            els.forEach(el => {{
-                                const href = el.getAttribute("href");
-                                if (!href) return;
-
-                                // Extrair partes do path: /<user>/<board>/
-                                const parts = href.split('/').filter(Boolean);
-                                if (parts.length === 2 && parts[0].toLowerCase() === username.toLowerCase()) {{
-                                    const board = parts[1];
-                                    if (exclude.includes(board.toLowerCase()) || board.startsWith('_')) return;
-
-                                    const fullUrl = "https://www.pinterest.com/" + parts[0] + "/" + parts[1] + "/";
-
-                                    // Tentar encontrar número de pins de forma mais precisa
-                                    let pins = "";
-                                    try {{
-                                        // Pegar o container de texto do board card
-                                        const text = el.innerText;
-                                        // Regex mais restrita: ignorar o título (que vem antes de quebras de linha ou espaços duplos)
-                                        // e ignorar sufixos de tempo (1d, 2h, etc)
-                                        const lines = text.split('\n').filter(l => l.trim());
-                                        for (const line of lines) {{
-                                            const match = line.match(/^([\d,.]+\s*(?:mil|mi|k|m|pins|pin))\s*$/i);
-                                            if (match) {{
-                                                pins = match[1].trim();
-                                                break;
-                                            }}
-                                        }}
-
-                                        // Fallback se não achou em linhas separadas
-                                        if (!pins) {{
-                                            const match = text.match(/([\d,.]+\s*(?:mil|mi|k|m|pins|pin))\s*(?:Pins|Pin)?/i);
-                                            if (match) pins = match[1].trim();
-                                        }}
-                                    }} catch(e) {{}}
-
-                                    // Tentar encontrar título usando data-test-id se possível
-                                    let title = board;
-                                    try {{
-                                        const titleEl = el.querySelector('h2, [data-test-id="board-card-title"]');
-                                        if (titleEl) {{
-                                            title = titleEl.innerText.trim();
-                                        }} else {{
-                                            // Fallback: primeira linha do texto
-                                            const firstLine = el.innerText.split('\n')[0].trim();
-                                            if (firstLine && !firstLine.match(/^\d/)) title = firstLine;
-                                        }}
-                                    }} catch(e) {{}}
-
-                                    // Tentar encontrar thumbnail
-                                    let thumb = "";
-                                    const img = el.querySelector('img');
-                                    if (img) thumb = img.getAttribute('src') || "";
-
-                                    results.push({{url: fullUrl, title: title, thumbnail_url: thumb, pin_count: pins}});
-                                }}
-                            }});
-                            return results;
-                        }}""",
-                        username,
-                    )
+                    boards_data = _extract_boards_from_page(page, username, exclude)
 
                     for b in boards_data:
                         if b["url"] not in seen_urls:
                             seen_urls.add(b["url"])
-                            # Pre-parse pin count to int
-                            b["pin_count_int"] = parse_pin_count(b["pin_count"])
                             results.append(b)
 
                     # Scroll detection inteligente
