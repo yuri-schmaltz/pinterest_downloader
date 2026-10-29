@@ -64,6 +64,8 @@ py-modules = [
     "adaptive_workers",
     "rate_limiter",
     "json_logger",
+    "app_version",
+    "_version",
 ]
 
 [tool.black]

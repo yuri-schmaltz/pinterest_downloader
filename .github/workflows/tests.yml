@@ -231,10 +231,11 @@ jobs:
       with:
         python-version: '3.12'
 
-    - name: Check that manifest and pyproject agree
+    - name: Check that manifest, pyproject and the generated file agree
       run: |
         # The version lived in three places (pyproject, manifest, tag) and
         # drifted: the v2.0.1 release shipped assets named v2.0.0.
+        # src/_version.py is the copy the app itself shows in --version.
         python scripts/sync_version.py --check
 
   lint:
@@ -267,4 +268,4 @@ jobs:
 
     - name: Type check with MyPy
       run: |
-        mypy src/pinterest_board_dl.py --ignore-missing-imports
+        mypy src/pinterest_board_dl.py src/app_version.py --ignore-missing-imports

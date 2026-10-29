@@ -14,9 +14,17 @@ A fonte da verdade e extension/manifest.json:
   - tem que ser uma versao valida de Chrome (ate 4 numeros, cada um ate 65535)
   - a versao que o usuario ve na loja de extensoes
 
+Duas outras copias sao DERIVADAS e nunca editadas a mao:
+  - pyproject.toml   (a versao do pacote Python)
+  - src/_version.py  (a versao que o app mostra em --version)
+
+Por que o app nao pergunta pro pacote instalado: num `pip install -e .`
+a metadata fica congelada na instalacao, entao apos um bump de versao ela
+continua reportando a versao antiga. Como o app e congelado num AppImage
+sem metadata nenhuma, o caminho confiavel e um arquivo gerado.
+
 Uso:
-    python scripts/sync_version.py          # sincroniza pyproject -> nada, ou
-                                           # escreve se divergir
+    python scripts/sync_version.py          # sincroniza as copias derivadas
     python scripts/sync_version.py --check  # so verifica (exit 1 se divergir)
     python scripts/sync_version.py --tag    # verifica tambem a tag do git
 """
@@ -29,6 +37,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "extension" / "manifest.json"
 PYPROJECT = ROOT / "pyproject.toml"
+GENERATED = ROOT / "src" / "_version.py"
+
+# O arquivo gerado. O cabecalho avisa que ele e gerado: um dev que editar
+# a mao vai ter o trabalho sobrescrito no proximo sync.
+GENERATED_TEMPLATE = """\
+# GERADO por scripts/sync_version.py -- nao editar a mao.
+# A fonte da verdade e extension/manifest.json.
+__version__ = "{version}"
+"""
 
 # Regra do Chrome: 1 a 4 numeros separados por ponto, cada um de 0 a 65535.
 CHROME_VERSION_RE = re.compile(r"^\d{1,5}(\.\d{1,5}){0,3}$")
@@ -68,6 +85,25 @@ def write_pyproject_version(version: str) -> bool:
     return False
 
 
+def read_generated_version() -> str | None:
+    """Versao no arquivo gerado, ou None se ele ainda nao existe."""
+    if not GENERATED.exists():
+        return None
+    text = GENERATED.read_text()
+    match = re.search(r'^__version__\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def write_generated_version(version: str) -> bool:
+    """Regenera src/_version.py. Devolve True se mudou algo."""
+    content = GENERATED_TEMPLATE.format(version=version)
+    if GENERATED.exists() and GENERATED.read_text() == content:
+        return False
+    GENERATED.parent.mkdir(parents=True, exist_ok=True)
+    GENERATED.write_text(content)
+    return True
+
+
 def current_git_tag() -> str | None:
     """Tag do HEAD, se houver."""
     import subprocess
@@ -105,16 +141,29 @@ def main() -> int:
 
     ok = True
 
+    # pyproject.toml
     if manifest_version != pyproject_version:
         if args.check:
             ok = False
             print(f"DIVERGENCIA: manifest={manifest_version} pyproject={pyproject_version}")
-            print("  (use sem --check para sincronizar)", file=sys.stderr)
         else:
             write_pyproject_version(manifest_version)
             print(f"CORRIGIDO: pyproject estava em {pyproject_version}, agora {manifest_version}")
     else:
         print(f"OK: manifest e pyproject estao em {manifest_version}")
+
+    # src/_version.py -- o que o app mostra em --version
+    generated_version = read_generated_version()
+    if generated_version != manifest_version:
+        if args.check:
+            ok = False
+            print(f"DIVERGENCIA: manifest={manifest_version} src/_version.py={generated_version}")
+            print("  (use sem --check para sincronizar)", file=sys.stderr)
+        else:
+            write_generated_version(manifest_version)
+            print(f"CORRIGIDO: src/_version.py estava em {generated_version}, agora {manifest_version}")
+    else:
+        print(f"OK: src/_version.py esta em {manifest_version}")
 
     if args.tag:
         tag = current_git_tag()
