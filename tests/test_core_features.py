@@ -239,7 +239,7 @@ def test_package_layout():
     assert popup_html.exists(), "extension/popup.html not found"
     import re
 
-    for src in re.findall(r'<script[^>]+src="([^"]+)"', popup_html.read_text()):
+    for src in re.findall(r'<script[^>]+src="([^"]+)"', popup_html.read_text(encoding="utf-8")):
         assert (ext_dir / src).exists(), f"extension/popup.html loads '{src}' but it is not in the repository"
 
     print("✅ PASS: Layout do pacote e da extensão íntegros\n")

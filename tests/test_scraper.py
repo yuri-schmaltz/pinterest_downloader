@@ -316,5 +316,93 @@ class TestExtractBoards:
             assert board["pin_count_int"] == parse_pin_count(board["pin_count"])
 
 
+# ======================================================================
+# 4. Helpers de download de mídia e pós-verificação (refatoração P2.4)
+# ======================================================================
+
+
+class TestDownloadMediaHelpers:
+    """Valida o funcionamento dos novos helpers modulares de download e integridade."""
+
+    def test_detect_media_extension(self):
+        from pinterest_board_dl import _detect_media_extension
+
+        assert _detect_media_extension("video/mp4; charset=binary") == ".mp4"
+        assert _detect_media_extension("image/png") == ".png"
+        assert _detect_media_extension("image/gif") == ".gif"
+        assert _detect_media_extension("image/webp") == ".webp"
+        assert _detect_media_extension("image/jpeg") == ".jpg"
+        assert _detect_media_extension("unknown/type") == ".jpg"
+
+    def test_is_media_already_downloaded(self, tmp_path):
+        from pinterest_board_dl import _is_media_already_downloaded
+
+        target_file = tmp_path / "pin123.jpg"
+        assert not _is_media_already_downloaded(str(tmp_path), "pin123")
+
+        # Arquivo de 0 bytes não deve contar como baixado
+        target_file.touch()
+        assert not _is_media_already_downloaded(str(tmp_path), "pin123")
+
+        # Arquivo com conteúdo válido conta como baixado
+        target_file.write_bytes(b"data")
+        assert _is_media_already_downloaded(str(tmp_path), "pin123")
+
+    def test_verify_downloaded_pins(self, tmp_path):
+        from pinterest_board_dl import _verify_downloaded_pins
+
+        (tmp_path / "101.jpg").write_bytes(b"image 101")
+        pin_img = {
+            "https://www.pinterest.com/pin/101/": "https://i.pinimg.com/101.jpg",
+            "https://www.pinterest.com/pin/102/": "https://i.pinimg.com/102.jpg",
+        }
+        verified, missing = _verify_downloaded_pins(pin_img, str(tmp_path))
+        assert verified == 1
+        assert missing == ["https://www.pinterest.com/pin/102/"]
+
+
+def test_download_media_success_and_skip_existing(tmp_path):
+    from pinterest_board_dl import download_media
+
+    class MockResponse:
+        def __init__(self, content=b"fake image data", content_type="image/jpeg"):
+            self.content = content
+            self.headers = {"Content-Type": content_type}
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size=1024):
+            yield self.content
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    class MockSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, **kwargs):
+            self.calls += 1
+            return MockResponse()
+
+    sess = MockSession()
+    # 1. Download inicial
+    ok = download_media("https://i.pinimg.com/orig/pin1.jpg", str(tmp_path), sess, filename_hint="pin1")
+    assert ok is True
+    assert sess.calls == 1
+    downloaded = list(tmp_path.glob("*.jpg"))
+    assert len(downloaded) == 1
+    assert downloaded[0].read_bytes() == b"fake image data"
+
+    # 2. Segunda tentativa: deve reaproveitar do disco sem fazer request
+    ok2 = download_media("https://i.pinimg.com/orig/pin1.jpg", str(tmp_path), sess, filename_hint="pin1")
+    assert ok2 is True
+    assert sess.calls == 1  # não incrementou
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

@@ -61,14 +61,14 @@ class JSONLogger:
 
     def start_phase(self, phase: str) -> None:
         """Marca início de uma fase."""
-        self.phase_start_time[phase] = time.time()
+        self.phase_start_time[phase] = time.perf_counter()
 
     def end_phase(self, phase: str, count: Optional[int] = None, message: str = "") -> None:
         """Marca fim de uma fase e registra duração."""
         if phase not in self.phase_start_time:
             return
 
-        duration_ms = (time.time() - self.phase_start_time[phase]) * 1000
+        duration_ms = (time.perf_counter() - self.phase_start_time[phase]) * 1000
 
         entry = LogEntry(
             timestamp=self._get_timestamp(),

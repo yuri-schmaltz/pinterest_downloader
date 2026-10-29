@@ -17,7 +17,7 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, NamedTuple, TypedDict
+from typing import Any, Callable, Dict, Iterable, List, NamedTuple, TypedDict
 
 import requests
 from playwright.sync_api import sync_playwright
@@ -377,6 +377,32 @@ def fetch_pin_media(pin_url: str, session: requests.Session, use_rate_limit: boo
     return url.split("?")[0]
 
 
+def _detect_media_extension(content_type: str) -> str:
+    """Mapeia Content-Type HTTP para a extensão de arquivo correspondente."""
+    if "video/mp4" in content_type:
+        return ".mp4"
+    if "image/png" in content_type:
+        return ".png"
+    if "image/gif" in content_type:
+        return ".gif"
+    if "image/webp" in content_type:
+        return ".webp"
+    return ".jpg"
+
+
+def _is_media_already_downloaded(out_dir: str, base_name: str) -> bool:
+    """Verifica se um arquivo com o mesmo stem já existe e tem tamanho > 0."""
+    if not os.path.exists(out_dir):
+        return False
+    stem = Path(base_name).stem
+    for existing_file in os.listdir(out_dir):
+        if existing_file.startswith(stem):
+            filepath = os.path.join(out_dir, existing_file)
+            if os.path.isfile(filepath) and os.path.getsize(filepath) > 0:
+                return True
+    return False
+
+
 def download_media(
     media_url: str,
     out_dir: str,
@@ -385,17 +411,10 @@ def download_media(
     max_retries: int = DOWNLOAD_MAX_RETRIES,
 ) -> bool:
     """Baixa mídia (imagem ou vídeo) e detecta extensão correta."""
-    # Placeholder initial name based on hint or URL
     base_name = safe_name(filename_hint or media_url)
 
-    # Pre-check: se já existir um arquivo com o mesmo "stem" (ex: ID do pin) e tamanho > 0,
-    # podemos assumir que já foi baixado (mesmo que a extensão mude depois).
-    # Isso evita uma requisição HTTP só para verificar o cabeçalho.
-    if os.path.exists(out_dir):
-        stem = Path(base_name).stem
-        for existing_file in os.listdir(out_dir):
-            if existing_file.startswith(stem) and os.path.getsize(os.path.join(out_dir, existing_file)) > 0:
-                return True
+    if _is_media_already_downloaded(out_dir, base_name):
+        return True
 
     for attempt in range(max_retries + 1):
         try:
@@ -403,18 +422,7 @@ def download_media(
                 r.raise_for_status()
                 os.makedirs(out_dir, exist_ok=True)
 
-                # Detectar extensão pelo Content-Type
-                content_type = r.headers.get("Content-Type", "")
-                ext = ".jpg"
-                if "video/mp4" in content_type:
-                    ext = ".mp4"
-                elif "image/png" in content_type:
-                    ext = ".png"
-                elif "image/gif" in content_type:
-                    ext = ".gif"
-                elif "image/webp" in content_type:
-                    ext = ".webp"
-
+                ext = _detect_media_extension(r.headers.get("Content-Type", ""))
                 final_filename = base_name if base_name.endswith(ext) else f"{base_name}{ext}"
                 dest = os.path.join(out_dir, final_filename)
 
@@ -565,6 +573,177 @@ def _collect_pin_metadata(response) -> List[PinMetadata]:
     return metas
 
 
+def _pin_from_pws_dict(d: dict) -> PinMetadata | None:
+    """Extrai metadados de pin a partir de um fragmento de dicionário PWS."""
+    pid = str(d.get("entityId") or d.get("id") or "")
+    imgs_dict = d.get("images", {})
+    flat_orig = d.get("images_orig") or d.get("images_736x") or d.get("images_474x")
+    if not (pid and (imgs_dict or flat_orig)):
+        return None
+
+    iurl = None
+    if flat_orig:
+        iurl = flat_orig.get("url")
+    elif imgs_dict:
+        orig = imgs_dict.get("orig", {}) or imgs_dict.get("736x", {})
+        iurl = orig.get("url")
+
+    if not iurl:
+        return None
+
+    purl = f"{PINTEREST_BASE_URL}/pin/{pid}/"
+    return {
+        "id": pid,
+        "url": purl,
+        "image_url": iurl,
+        "title": d.get("title") or d.get("gridTitle") or d.get("grid_title", ""),
+    }
+
+
+def _walk_pws_data(data: Any, out_cache: Dict[str, PinMetadata]) -> None:
+    """Navega recursivamente pela estrutura do PWS_DATA coletando pins."""
+    if isinstance(data, list):
+        for item in data:
+            _walk_pws_data(item, out_cache)
+    elif isinstance(data, dict):
+        meta = _pin_from_pws_dict(data)
+        if meta and meta["url"] not in out_cache:
+            out_cache[meta["url"]] = meta
+        for v in data.values():
+            if isinstance(v, (dict, list)):
+                _walk_pws_data(v, out_cache)
+
+
+def _extract_pws_metadata_from_page(page, metadata_cache: Dict[str, PinMetadata]) -> None:
+    """Tenta extrair metadados da página inicial contidos no script __PWS_DATA__."""
+    try:
+        pws_data_raw = page.evaluate(
+            '() => { var el = document.getElementById("__PWS_DATA__") || document.querySelector("script[id=\'__PWS_DATA__\']"); return el ? el.innerText : null; }'
+        )
+        if pws_data_raw:
+            pws_json = json.loads(pws_data_raw)
+            _walk_pws_data(pws_json, metadata_cache)
+    except Exception:
+        pass
+
+
+def _dismiss_popups_if_stalled(page, stable_rounds: float) -> None:
+    """Tenta fechar modais flutuantes e popups do Pinterest quando o scroll começa a estagnar."""
+    try:
+        if stable_rounds > 2:
+            page.keyboard.press("Escape")
+        page.evaluate(
+            "() => { "
+            '  const closes = Array.from(document.querySelectorAll(\'[aria-label="Close"], [aria-label="Fechar"], button\')); '
+            '  closes.forEach(c => { if(c.innerText === "✕" || c.innerText === "X") c.click(); }); '
+            "}"
+        )
+    except Exception:
+        pass
+
+
+def _scrape_pin_hrefs_from_page(page, seen: set[str]) -> None:
+    """Extrai links normalizados de pins a partir do DOM atual."""
+    try:
+        hrefs = page.eval_on_selector_all(
+            'a[href^="/pin/"]',
+            'els => Array.from(new Set(els.map(e => e.getAttribute("href"))))',
+        )
+        for h in hrefs:
+            if not h:
+                continue
+            u = _abs_url(h.split("?")[0])
+            u = u.replace("://br.pinterest.com/", "://www.pinterest.com/")
+            if u.startswith(f"{PINTEREST_BASE_URL}/pin/"):
+                seen.add(u)
+    except Exception:
+        pass
+
+
+def _evaluate_board_scroll_progress(
+    page,
+    seen_count: int,
+    stable_rounds: float,
+    last_count: int,
+    last_height: int,
+) -> tuple[float, int, int, bool]:
+    """Avalia o progresso do scroll do quadro e retorna o novo estado de estabilidade."""
+    has_more_like_this = False
+    if SCROLL_HEIGHT_CHECK:
+        try:
+            has_more_like_this = bool(
+                page.evaluate(
+                    "(() => { "
+                    "  const text = document.body.innerText; "
+                    '  return text.includes("Mais como esse") || text.includes("More like this"); '
+                    "})()"
+                )
+            )
+            current_height = page.evaluate(
+                "(() => { const el = document.scrollingElement || document.documentElement || document.body; "
+                "return el ? el.scrollHeight : 0; })()"
+            )
+            is_bottom = bool(
+                page.evaluate(
+                    "(() => { "
+                    "  return (window.innerHeight + window.scrollY) >= (document.body.offsetHeight - 800);"
+                    "})()"
+                )
+            )
+            stable_rounds, last_count, last_height = _compute_scroll_stability(
+                stable_rounds,
+                last_count,
+                last_height,
+                seen_count,
+                current_height,
+                has_more_like_this,
+                is_bottom,
+            )
+            return stable_rounds, last_count, last_height, has_more_like_this
+        except Exception:
+            pass
+
+    if seen_count == last_count:
+        stable_rounds += 1
+    else:
+        stable_rounds = 0
+        last_count = seen_count
+    return stable_rounds, last_count, last_height, has_more_like_this
+
+
+def _prepare_board_page_for_scraping(
+    page,
+    manual_login: bool,
+    manual_login_handler: Callable[[], None] | None = None,
+) -> None:
+    """Prepara a página de quadro para scraping, tratando login manual e espera de elementos."""
+    if manual_login:
+        if manual_login_handler:
+            manual_login_handler()
+        elif sys.stdin.isatty():
+            print(
+                "\n>>> Faça login na janela aberta e certifique-se de estar no QUADRO desejado."
+                "\n>>> Volte ao terminal e pressione ENTER para continuar…",
+                flush=True,
+            )
+            try:
+                input()
+            except KeyboardInterrupt:
+                sys.exit(1)
+
+    try:
+        page.wait_for_load_state("networkidle", timeout=10000)
+    except Exception:
+        pass
+
+    try:
+        page.wait_for_selector('a[href^="/pin/"]', state="visible", timeout=10000)
+    except Exception:
+        pass
+
+    page.wait_for_timeout(3000)
+
+
 def _collect_pin_links_with_browser(
     page,
     board_url: str,
@@ -590,34 +769,9 @@ def _collect_pin_links_with_browser(
 
     page.on("response", handle_response)
 
-    if manual_login:
-        if manual_login_handler:
-            manual_login_handler()
-        else:
-            print(
-                "\n>>> Faça login na janela aberta e certifique-se de estar no QUADRO desejado."
-                "\n>>> Volte ao terminal e pressione ENTER para continuar…",
-                flush=True,
-            )
-            try:
-                input()
-            except KeyboardInterrupt:
-                sys.exit(1)
+    _prepare_board_page_for_scraping(page, manual_login, manual_login_handler)
 
-    try:
-        page.wait_for_load_state("networkidle", timeout=10000)
-    except Exception:
-        pass
-
-    try:
-        # Aguarda que os primeiros pins sejam carregados na tela
-        page.wait_for_selector('a[href^="/pin/"]', state="visible", timeout=10000)
-    except Exception:
-        pass
-
-    page.wait_for_timeout(3000)
-
-    seen = set()
+    seen: set[str] = set()
     # float, não int: o scroll dá "crédito parcial" (+0.5) quando a altura da
     # página muda mas a contagem de pins não (linha do stable_rounds += 0.5).
     stable_rounds: float = 0
@@ -625,96 +779,24 @@ def _collect_pin_links_with_browser(
     last_height = 0
 
     while True:
-        # Tentar fechar popups de login/interferência
-        try:
-            # Pressionar ESC periodicamente para fechar modais flutuantes
-            if stable_rounds > 2:
-                page.keyboard.press("Escape")
-
-            # Clicar em botões de fechar se visíveis (comum no Pinterest)
-            page.evaluate(
-                "() => { "
-                '  const closes = Array.from(document.querySelectorAll(\'[aria-label="Close"], [aria-label="Fechar"], button\')); '
-                '  closes.forEach(c => { if(c.innerText === "✕" || c.innerText === "X") c.click(); }); '
-                "}"
-            )
-        except Exception:
-            pass
-
-        hrefs = page.eval_on_selector_all(
-            'a[href^="/pin/"]',
-            'els => Array.from(new Set(els.map(e => e.getAttribute("href"))))',
-        )
-        for h in hrefs:
-            if not h:
-                continue
-            u = _abs_url(h.split("?")[0])
-            u = u.replace("://br.pinterest.com/", "://www.pinterest.com/")
-            if u.startswith(f"{PINTEREST_BASE_URL}/pin/"):
-                seen.add(u)
+        _dismiss_popups_if_stalled(page, stable_rounds)
+        _scrape_pin_hrefs_from_page(page, seen)
 
         if max_pins and len(seen) >= max_pins:
             break
 
-        # Scroll detection inteligente: verificar altura da página
-        if SCROLL_HEIGHT_CHECK:
-            try:
-                # Verificar se chegamos na seção "Mais como esse" para evitar poluição
-                # Apenas se NÃO estamos encontrando novos pins (para evitar falso positivo durante carregamento)
-                current_count = len(seen)
-
-                # Detecção de "Mais como esse" (More like this)
-                has_more_like_this = page.evaluate(
-                    "(() => { "
-                    "  const text = document.body.innerText; "
-                    '  return text.includes("Mais como esse") || text.includes("More like this"); '
-                    "})()"
-                )
-
-                # Critério de parada: (Altura estável OU "Mais como esse" visível) E (Nenhum pin novo encontrado)
-                current_height = page.evaluate(
-                    "(() => { const el = document.scrollingElement || document.documentElement || document.body; "
-                    "return el ? el.scrollHeight : 0; })()"
-                )
-
-                is_bottom = page.evaluate(
-                    "(() => { "
-                    "  return (window.innerHeight + window.scrollY) >= (document.body.offsetHeight - 800);"
-                    "})()"
-                )
-
-                stable_rounds, last_count, last_height = _compute_scroll_stability(
-                    stable_rounds,
-                    last_count,
-                    last_height,
-                    current_count,
-                    current_height,
-                    has_more_like_this,
-                    is_bottom,
-                )
-
-            except Exception:
-                # Fallback para detecção simples por contagem
-                if len(seen) == last_count:
-                    stable_rounds += 1
-                else:
-                    stable_rounds = 0
-                    last_count = len(seen)
-        else:
-            # Modo legado: só por contagem
-            if len(seen) == last_count:
-                stable_rounds += 1
-            else:
-                stable_rounds = 0
-                last_count = len(seen)
+        stable_rounds, last_count, last_height, has_more_like_this = _evaluate_board_scroll_progress(
+            page,
+            seen_count=len(seen),
+            stable_rounds=stable_rounds,
+            last_count=last_count,
+            last_height=last_height,
+        )
 
         if stable_rounds >= SCROLL_STABLE_ROUNDS:
-            # Se ainda não atingimos o alvo e não temos o indicativo de fim absoluto ("Mais como esse"),
-            # dar uma última chance aumentando o tempo de espera ou tentando mais alguns rounds.
             if target_pin_count and len(seen) < target_pin_count:
-                # Se ainda faltam muitos e não vimos "Mais como esse", ser mais insistente
                 if not has_more_like_this and stable_rounds < (SCROLL_STABLE_ROUNDS * 2):
-                    stable_rounds -= 1  # Dar mais chances
+                    stable_rounds -= 1
                     page.wait_for_timeout(2000)
                     continue
             break
@@ -734,52 +816,7 @@ def _collect_pin_links_with_browser(
 
         page.wait_for_timeout(int(scroll_pause * 1000))
 
-    # Tentar extrair metadados da página inicial (PWS_DATA)
-    try:
-        pws_data_raw = page.evaluate(
-            '() => { var el = document.getElementById("__PWS_DATA__") || document.querySelector("script[id=\'__PWS_DATA__\']"); return el ? el.innerText : null; }'
-        )
-        if pws_data_raw:
-            print("DEBUG: __PWS_DATA__ encontrado no HTML.")
-            pws_json = json.loads(pws_data_raw)
-
-            # Navegar na estrutura complexa do PWS_DATA para achar pins
-            def extract_from_dict(d):
-                if not isinstance(d, (dict, list)):
-                    return
-                if isinstance(d, list):
-                    for item in d:
-                        extract_from_dict(item)
-                    return
-
-                pid = str(d.get("entityId") or d.get("id") or "")
-                imgs_dict = d.get("images", {})
-                flat_orig = d.get("images_orig") or d.get("images_736x") or d.get("images_474x")
-
-                if pid and (imgs_dict or flat_orig):
-                    purl = f"{PINTEREST_BASE_URL}/pin/{pid}/"
-                    iurl = None
-                    if flat_orig:
-                        iurl = flat_orig.get("url")
-                    elif imgs_dict:
-                        orig = imgs_dict.get("orig", {}) or imgs_dict.get("736x", {})
-                        iurl = orig.get("url")
-
-                    if iurl and purl not in metadata_cache:
-                        metadata_cache[purl] = {
-                            "id": pid,
-                            "url": purl,
-                            "image_url": iurl,
-                            "title": d.get("title") or d.get("gridTitle") or d.get("grid_title", ""),
-                        }
-
-                for v in d.values():
-                    if isinstance(v, (dict, list)):
-                        extract_from_dict(v)
-
-            extract_from_dict(pws_json)
-    except Exception:
-        pass
+    _extract_pws_metadata_from_page(page, metadata_cache)
 
     # Atualizar cache global temporário
     _intercepted_metadata.update(metadata_cache)
@@ -970,6 +1007,90 @@ def collect_pin_links(
                 browser_temp.close()
 
 
+def _scroll_step_profile_boards(
+    page,
+    current_count: int,
+    stable_rounds: int,
+    last_count: int,
+    last_height: int,
+    scroll_pause: float,
+) -> tuple[int, int, int, bool]:
+    """Executa um passo de scroll na listagem de quadros de perfil e avalia estabilidade."""
+    if SCROLL_HEIGHT_CHECK:
+        try:
+            current_height = page.evaluate(
+                "(() => { const el = document.scrollingElement || document.documentElement || document.body; "
+                "return el ? el.scrollHeight : 0; })()"
+            )
+            if current_height == last_height and current_count == last_count:
+                stable_rounds += 1
+            else:
+                stable_rounds = 0
+                last_height = current_height
+                last_count = current_count
+        except Exception:
+            if current_count == last_count:
+                stable_rounds += 1
+            else:
+                stable_rounds = 0
+                last_count = current_count
+    else:
+        if current_count == last_count:
+            stable_rounds += 1
+        else:
+            stable_rounds = 0
+            last_count = current_count
+
+    if stable_rounds >= SCROLL_STABLE_ROUNDS:
+        return stable_rounds, last_count, last_height, True
+
+    try:
+        page.evaluate(
+            "(() => { const el = document.scrollingElement || document.documentElement || document.body; "
+            "if (!el) return; window.scrollTo(0, el.scrollHeight); })()"
+        )
+    except Exception:
+        return stable_rounds, last_count, last_height, True
+
+    page.wait_for_timeout(int(scroll_pause * 1000))
+    return stable_rounds, last_count, last_height, False
+
+
+def _prepare_profile_page(
+    page,
+    candidate_index: int,
+    manual_login: bool,
+    manual_login_handler: Callable[[], None] | None,
+    username: str,
+) -> None:
+    """Trata login e verificação de perfil privado para cada URL candidata de perfil."""
+    if manual_login and candidate_index == 0:
+        if manual_login_handler:
+            manual_login_handler()
+        elif sys.stdin.isatty():
+            print(
+                "\n>>> Faça login na janela aberta." "\n>>> Volte ao terminal e pressione ENTER para continuar…",
+                flush=True,
+            )
+            try:
+                input()
+            except KeyboardInterrupt:
+                sys.exit(1)
+
+    page.wait_for_timeout(1500)
+
+    is_private = page.evaluate(
+        "(() => {"
+        '  const text = document.body.innerText || "";'
+        '  return text.includes("This profile is private") || '
+        '         text.includes("Este perfil é privado") || '
+        '         text.includes("profile is private");'
+        "})()"
+    )
+    if is_private and not manual_login:
+        raise PrivateProfileError(username)
+
+
 def collect_board_urls(
     username_or_url: str,
     headless: bool,
@@ -1017,35 +1138,7 @@ def collect_board_urls(
             try:
                 page.goto(url, wait_until="load", timeout=TIMEOUT_PAGE_LOAD)
 
-                if manual_login and i == 0:
-                    if manual_login_handler:
-                        manual_login_handler()
-                    else:
-                        print(
-                            "\n>>> Faça login na janela aberta."
-                            "\n>>> Volte ao terminal e pressione ENTER para continuar…",
-                            flush=True,
-                        )
-                        try:
-                            input()
-                        except KeyboardInterrupt:
-                            import sys
-
-                            sys.exit(1)
-
-                page.wait_for_timeout(1500)
-
-                # Detectar perfil privado antes de tentar coletar
-                is_private = page.evaluate(
-                    "(() => {"
-                    '  const text = document.body.innerText || "";'
-                    '  return text.includes("This profile is private") || '
-                    '         text.includes("Este perfil é privado") || '
-                    '         text.includes("profile is private");'
-                    "})()"
-                )
-                if is_private and not manual_login:
-                    raise PrivateProfileError(username)
+                _prepare_profile_page(page, i, manual_login, manual_login_handler, username)
 
                 stable_rounds = 0
                 last_count = 0
@@ -1060,44 +1153,16 @@ def collect_board_urls(
                             seen_urls.add(b["url"])
                             results.append(b)
 
-                    # Scroll detection inteligente
-                    if SCROLL_HEIGHT_CHECK:
-                        try:
-                            current_height = page.evaluate(
-                                "(() => { const el = document.scrollingElement || document.documentElement || document.body; "
-                                "return el ? el.scrollHeight : 0; })()"
-                            )
-                            if current_height == last_height and len(results) == last_count:
-                                stable_rounds += 1
-                            else:
-                                stable_rounds = 0
-                                last_height = current_height
-                                last_count = len(results)
-                        except Exception:
-                            if len(results) == last_count:
-                                stable_rounds += 1
-                            else:
-                                stable_rounds = 0
-                                last_count = len(results)
-                    else:
-                        if len(results) == last_count:
-                            stable_rounds += 1
-                        else:
-                            stable_rounds = 0
-                            last_count = len(results)
-
-                    if stable_rounds >= SCROLL_STABLE_ROUNDS:
+                    stable_rounds, last_count, last_height, should_stop = _scroll_step_profile_boards(
+                        page,
+                        current_count=len(results),
+                        stable_rounds=stable_rounds,
+                        last_count=last_count,
+                        last_height=last_height,
+                        scroll_pause=scroll_pause,
+                    )
+                    if should_stop:
                         break
-
-                    try:
-                        page.evaluate(
-                            "(() => { const el = document.scrollingElement || document.documentElement || document.body; "
-                            "if (!el) return; window.scrollTo(0, el.scrollHeight); })()"
-                        )
-                    except Exception:
-                        break
-
-                    page.wait_for_timeout(int(scroll_pause * 1000))
 
                 if results:
                     break
@@ -1286,6 +1351,71 @@ def resolve_images(
     return out
 
 
+def _verify_downloaded_pins(pin_img: Dict[str, str], target_dir: str) -> tuple[int, list[str]]:
+    """Confere no disco quais pins foram efetivamente gravados e quais faltam."""
+    verified_ok = 0
+    missing_pins = []
+    for link in pin_img:
+        stem = Path(safe_name(link)).stem
+        if _is_media_already_downloaded(target_dir, stem):
+            verified_ok += 1
+        else:
+            missing_pins.append(link)
+    return verified_ok, missing_pins
+
+
+def _retry_missing_pins(
+    missing_links: list[str],
+    target_dir: str,
+    session: requests.Session,
+    options: DownloadOptions,
+    emit: StatusCallback,
+) -> int:
+    """Tenta resolver e baixar novamente os pins ausentes pós-download."""
+    miss_pin_img = resolve_images(
+        missing_links,
+        session=session,
+        workers=options.workers,
+        emit=emit,
+        use_cache=False,
+        rate_limiting=options.rate_limiting,
+    )
+    recovered = 0
+    with ThreadPoolExecutor(max_workers=options.workers) as ex:
+        futs = [
+            ex.submit(download_media, iurl, target_dir, session, filename_hint=link)
+            for link, iurl in miss_pin_img.items()
+        ]
+        for fut in as_completed(futs):
+            if fut.result():
+                recovered += 1
+    return recovered
+
+
+def _handle_interactive_login(
+    board_url: str,
+    emit: StatusCallback,
+    handler: Callable[[str], None] | None = None,
+) -> None:
+    """Notifica e aguarda login interativo do usuário se necessário."""
+    emit("manual_login_required", {"board_url": board_url, "message": "Faça login e retorne para continuar."})
+    if handler:
+        handler(board_url)
+        return
+    if sys.stdin.isatty():
+        print(
+            "\n>>> Faça login na janela aberta e certifique-se de estar no QUADRO desejado."
+            "\n>>> Volte ao terminal e pressione ENTER para continuar…",
+            flush=True,
+        )
+        try:
+            input()
+        except KeyboardInterrupt:
+            sys.exit(1)
+    else:
+        raise RuntimeError("Manual login requerido sem manipulador interativo disponível.")
+
+
 def download_board(
     board_url: str | BoardMetadata,
     options: DownloadOptions,
@@ -1325,25 +1455,7 @@ def download_board(
     emit("log", {"message": "  [1/3] Coletando links dos pins…"})
 
     def handle_manual_login() -> None:
-        emit(
-            "manual_login_required",
-            {"board_url": actual_board_url, "message": "Faça login e retorne para continuar."},
-        )
-        if manual_login_handler:
-            manual_login_handler(actual_board_url)
-            return
-        if sys.stdin.isatty():
-            print(
-                "\n>>> Faça login na janela aberta e certifique-se de estar no QUADRO desejado."
-                "\n>>> Volte ao terminal e pressione ENTER para continuar…",
-                flush=True,
-            )
-            try:
-                input()
-            except KeyboardInterrupt:
-                sys.exit(1)
-        else:
-            raise RuntimeError("Manual login requerido sem manipulador interativo disponível.")
+        _handle_interactive_login(actual_board_url, emit, manual_login_handler)
 
     pin_links = collect_pin_links(
         board_url=actual_board_url,
@@ -1433,44 +1545,18 @@ def download_board(
                 },
             )
 
-    # ONDA 6: Verificação robusta pós-download
-    emit("log", {"message": "  [EXTRA] Verificando integridade no disco…"})
-    verified_ok = 0
-    missing_pins_links = []
-
-    # Criar mapeamento de Pin URL -> esperado nome de arquivo (sem extensão)
-    for link, _img_url in pin_img.items():
-        stem = Path(safe_name(link)).stem
-        found = False
-        if os.path.exists(target_dir):
-            for existing_file in os.listdir(target_dir):
-                if existing_file.startswith(stem) and os.path.getsize(os.path.join(target_dir, existing_file)) > 0:
-                    found = True
-                    break
-        if found:
-            verified_ok += 1
-        else:
-            missing_pins_links.append(link)
+    verified_ok, missing_pins_links = _verify_downloaded_pins(pin_img, target_dir)
 
     if missing_pins_links:
         emit("log", {"message": f"  Retentativa direcionada para {len(missing_pins_links)} pins ausentes…"})
-        # Tentar resolver novamente apenas os ausentes (sem cache para garantir)
-        miss_pin_img = resolve_images(
+        recovered = _retry_missing_pins(
             missing_pins_links,
+            target_dir=target_dir,
             session=session,
-            workers=options.workers,
+            options=options,
             emit=emit,
-            use_cache=False,
-            rate_limiting=options.rate_limiting,
         )
-        with ThreadPoolExecutor(max_workers=options.workers) as ex:
-            futs = [
-                ex.submit(download_media, iurl, target_dir, session, filename_hint=link)
-                for link, iurl in miss_pin_img.items()
-            ]
-            for fut in as_completed(futs):
-                if fut.result():
-                    verified_ok += 1
+        verified_ok += recovered
 
     # Status final de verificação
     status_msg = f"  Verificação: {verified_ok}/{total} pins efetivados no disco."

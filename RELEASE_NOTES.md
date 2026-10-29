@@ -1,3 +1,25 @@
+## O que há de novo na v2.0.5
+
+Esta release traz a **nova interface gráfica (GUI)** redesenhada em três
+etapas, suporte a **tema escuro moderno**, miniaturas quadradas com
+letterbox e melhorias fundamentais de compatibilidade e scraper.
+
+### Nova Interface Gráfica (GUI) em Três Etapas
+- **Fluxo guiado:** Busca de usuário e listagem -> Seleção visual de quadros -> Acompanhamento e download.
+- **Tema escuro integrado:** Interface polida com contraste aprimorado e perfis/estatísticas sempre visíveis.
+- **Miniaturas quadradas:** Tratamento consistente de capas e cards de quadros.
+
+### CLI e Scraper
+- Novas flags de linha de comando: --version e --user suportadas nativamente.
+- Refatoração de modularidade no scraper: extração de handle_response e esolve_images.
+- Compatibilidade multiplataforma refinada: suporte a ambientes Windows (resolução de UTF-8 em leituras e precisão de timers de log com 	ime.perf_counter).
+
+### Cobertura e Confiabilidade
+- Suíte expandida para **198 testes automatizados** em Python (100% PASS).
+- Cobertura global atingindo **60%** (GUI com **72%** e Rate Limiter com **86%**).
+
+---
+
 ## O que há de novo na v2.0.4
 
 Esta é a **primeira release com testes de verdade**. A v2.0.1 e a v2.0.2

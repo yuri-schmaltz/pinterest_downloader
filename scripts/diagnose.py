@@ -151,7 +151,7 @@ def check_extension() -> dict:
         return _fail("extension/manifest.json nao encontrado")
 
     try:
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception as exc:
         return _fail(f"manifest.json invalido: {exc}")
 
@@ -167,7 +167,7 @@ def check_extension() -> dict:
     if popup.exists():
         import re
 
-        referenced += re.findall(r'<script[^>]+src="([^"]+)"', popup.read_text())
+        referenced += re.findall(r'<script[^>]+src="([^"]+)"', popup.read_text(encoding="utf-8"))
 
     missing = [r for r in filter(None, referenced) if not (ext / r).exists()]
     if missing:
