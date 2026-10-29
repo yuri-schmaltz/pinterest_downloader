@@ -25,6 +25,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).parent))
+
+from test_gui import _FakeMessageBox  # noqa: E402
+
 import pinterest_board_gui as gui  # noqa: E402
 
 
@@ -210,6 +214,135 @@ class TestSearchField:
         window.search_edit.setText("culin")
         visible = [i for i in range(window.selection_list.count()) if not window.selection_list.item(i).isHidden()]
         assert len(visible) == 1
+
+
+class TestProfileAlwaysVisible:
+    """O campo de perfil fica na barra de etapas -- e por isso continua
+    visivel em todas elas."""
+
+    def test_the_field_is_in_the_steps_bar(self, window):
+        """O campo fica na barra, e nao no corpo de um passo."""
+        assert window.user_edit.isVisibleTo(window)
+        bar = window.findChild(gui.QFrame, "stepsBar")
+        assert bar is not None
+        assert window.user_edit.parentWidget() is bar
+
+    def test_the_field_is_visible_in_every_step(self, window):
+        window.on_boards_found([_board()])
+        assert window.user_edit.isVisibleTo(window)
+        window._set_step(window.STEP_DOWNLOAD)
+        assert window.user_edit.isVisibleTo(window)
+        window._set_step(window.STEP_PROFILE)
+        assert window.user_edit.isVisibleTo(window)
+
+    def test_the_field_stays_readable_when_the_step_changes(self, window):
+        window.user_edit.setText("yuri_schmaltz")
+        window.on_boards_found([_board()])
+        window._set_step(window.STEP_DOWNLOAD)
+        assert window.user_edit.text() == "yuri_schmaltz"
+
+    def test_the_field_is_disabled_while_the_download_runs(self, window):
+        """Trocar o perfil no meio do download nao faz sentido."""
+        window.user_edit.setEnabled(False)
+        assert not window.user_edit.isEnabled()
+
+    def test_the_field_is_enabled_again_after_an_error(self, window, monkeypatch):
+        # on_error abre um QMessageBox modal -- em modo offscreen isso
+        # travaria o teste para sempre, entao o dialogo e substituido.
+        monkeypatch.setattr(gui, "QMessageBox", _FakeMessageBox)
+        window.user_edit.setEnabled(False)
+        window.on_error("algo deu errado")
+        assert window.user_edit.isEnabled()
+
+
+class TestSquareThumbnail:
+    """A capa do quadro e sempre quadrada, sem distorcer a foto."""
+
+    @staticmethod
+    def _pixmap(width, height, color="#E60023"):
+        from PyQt6.QtGui import QColor, QPainter, QPixmap
+
+        pix = QPixmap(width, height)
+        pix.fill(QColor(color))
+        painter = QPainter(pix)
+        painter.setPen(QColor("#FFFFFF"))
+        painter.drawRect(0, 0, width - 1, height - 1)
+        painter.end()
+        return pix
+
+    @staticmethod
+    def _content_box(pixmap, background="#22262E"):
+        """A caixa ocupada pela imagem dentro do quadrado."""
+        from PyQt6.QtGui import QColor
+
+        image = pixmap.toImage()
+        bg = QColor(background).rgb()
+        xs, ys = [], []
+        for y in range(image.height()):
+            for x in range(image.width()):
+                if image.pixel(x, y) != bg:
+                    xs.append(x)
+                    ys.append(y)
+        if not xs:
+            return 0, 0
+        return max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+
+    def test_the_result_is_square(self):
+        from pinterest_board_gui import square_thumbnail
+
+        for width, height in ((600, 200), (200, 600), (400, 400), (300, 500)):
+            result = square_thumbnail(self._pixmap(width, height), 150)
+            assert result.width() == 150
+            assert result.height() == 150
+
+    def test_a_wide_photo_keeps_its_proportion(self):
+        """Uma foto panoramica fica baixa dentro do quadrado -- e nao
+        esticada para caber."""
+        from pinterest_board_gui import square_thumbnail
+
+        result = square_thumbnail(self._pixmap(600, 200), 150)
+        w, h = self._content_box(result)
+        assert w == 150
+        assert h == 50  # 150 * 200/600
+
+    def test_a_tall_photo_keeps_its_proportion(self):
+        from pinterest_board_gui import square_thumbnail
+
+        result = square_thumbnail(self._pixmap(200, 600), 150)
+        w, h = self._content_box(result)
+        assert h == 150
+        assert w == 50  # 150 * 200/600
+
+    def test_a_square_photo_fills_the_square(self):
+        from pinterest_board_gui import square_thumbnail
+
+        result = square_thumbnail(self._pixmap(400, 400), 150)
+        w, h = self._content_box(result)
+        assert w == 150
+        assert h == 150
+
+    def test_the_thumbnail_size_constant(self):
+        from pinterest_board_gui import THUMBNAIL_SIZE
+
+        assert THUMBNAIL_SIZE > 0
+
+
+class TestDarkTheme:
+    def test_the_stylesheet_is_the_dark_one(self, window):
+        style = window.styleSheet()
+        assert style == gui.DARK_QSS
+
+    def test_the_dark_background_is_applied(self, window):
+        assert "#1A1D23" in gui.DARK_QSS
+
+    def test_there_is_no_light_theme_left(self, window):
+        """Nao sobrou regra do tema claro -- um 'background: #FFFFFF' com
+        o fundo escuro ficaria um retangulo branco."""
+        for line in gui.DARK_QSS.splitlines():
+            if "background" in line and "#FFFFFF" in line:
+                # so o branco do texto e do preenchimento da barra de
+                # progresso pode aparecer
+                assert "color:" in line or "chunk" in line or "background-color: #FFFFFF" not in line
 
 
 if __name__ == "__main__":

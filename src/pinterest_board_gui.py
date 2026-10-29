@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List
 
 from PyQt6.QtCore import QSize, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
     QApplication,
@@ -215,175 +215,261 @@ class DownloadWorker(QThread):
 
 # ---------- UI Constants ----------
 
-# O layout em etapas: barra de passos no topo, uma tela por passo, e
-# um rodape com as acoes. As cores seguem o QSS principal (vermelho do
-# Pinterest), mas o fundo e as bordas sao mais leves.
-WIZARD_QSS = """
-#stepsBar {
-    background: #FFFFFF;
-    border-bottom: 1px solid #E2E5EA;
-}
-#stepNum {
-    background: #EDEFF2;
-    color: #6B7280;
-    border-radius: 13px;
-    font-weight: bold;
-    min-width: 26px;
-    max-width: 26px;
-    min-height: 26px;
-    max-height: 26px;
-}
-#stepNumActive {
-    background: #E60023;
-    color: #FFFFFF;
-    border-radius: 13px;
-    font-weight: bold;
-    min-width: 26px;
-    max-width: 26px;
-    min-height: 26px;
-    max-height: 26px;
-}
-#stepNumDone {
-    background: #DCF5E4;
-    color: #1E7B34;
-    border-radius: 13px;
-    font-weight: bold;
-    min-width: 26px;
-    max-width: 26px;
-    min-height: 26px;
-    max-height: 26px;
-}
-#stepLabel { color: #6B7280; }
-#stepLabelActive { color: #1F2430; font-weight: bold; }
-#stepLabelDone { color: #1E7B34; }
-#stepLine { background: #E2E5EA; max-height: 1px; min-height: 1px; border: none; }
-#stepTitle { color: #1F2430; font-size: 15px; font-weight: bold; }
-#stepHint { color: #6B7280; }
-#optionsStrip { background: #FFFFFF; border: 1px solid #E2E5EA; border-radius: 10px; }
-#stripLabel { color: #6B7280; font-size: 11px; font-weight: bold; }
-#footerBar { background: #FFFFFF; border-top: 1px solid #E2E5EA; }
-#progressCard { background: #FFFFFF; border: 1px solid #E2E5EA; border-radius: 10px; }
-#logCard { background: #FFFFFF; border: 1px solid #E2E5EA; border-radius: 10px; }
-QToolButton#btn_link {
-    background: transparent;
-    border: none;
-    color: #0076D3;
-    font-weight: bold;
-    padding: 2px 4px;
-    text-align: left;
-}
-QToolButton#btn_link:hover { color: #005A9E; }
-QPushButton#btn_back {
-    background: #EDEFF2;
-    color: #1F2430;
-}
-QPushButton#btn_back:hover { background: #E2E5EA; }
-QPushButton#btn_back:disabled { background: #EDEFF2; color: #9AA1AC; }
-QToolButton#disclosure {
-    border: none;
-    background: transparent;
-    color: #1F2430;
-    font-weight: bold;
-    padding: 4px 0;
-    text-align: left;
-}
-"""
+# Lado da miniatura do quadro. A capa e sempre quadrada.
+THUMBNAIL_SIZE = 150
 
-MAIN_QSS = """
-QGroupBox {
-    border: 1px solid gray;
-    border-radius: 8px;
-    margin-top: 1.2em;
-    padding: 10px;
-    font-weight: bold;
+# O app e escuro. Nao ha tema claro: uma unica paleta, aplicada por
+# folha de estilo, para que nenhum widget fique com a cor do sistema.
+
+DARK_QSS = """
+/* ---------- base ---------- */
+QWidget {
+    background-color: #1A1D23;
+    color: #E6E8EC;
+    font-size: 13px;
 }
-QGroupBox::title {
-    subcontrol-origin: margin;
-    left: 10px;
-    padding: 0 5px;
+QToolTip {
+    background-color: #2A2F38;
+    color: #E6E8EC;
+    border: 1px solid #3A414D;
+    padding: 4px;
 }
-QLineEdit, QSpinBox, QDoubleSpinBox {
-    padding: 5px;
-    border: 1px solid gray;
+
+/* ---------- campos ---------- */
+QLineEdit, QSpinBox, QDoubleSpinBox, QTextEdit {
+    background-color: #22262E;
+    border: 1px solid #3A414D;
     border-radius: 4px;
+    padding: 5px;
+    color: #E6E8EC;
+    selection-background-color: #E60023;
 }
-QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus {
     border: 1px solid #E60023;
 }
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {
+    background-color: #1E222A;
+    color: #6B7280;
+}
+QLineEdit::placeholder { color: #6B7280; }
+QSpinBox::up-button, QSpinBox::down-button,
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+    background-color: #2A2F38;
+    border: none;
+    width: 16px;
+}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover { background-color: #3A414D; }
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 5px solid #9AA1AC;
+    width: 0; height: 0;
+}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #9AA1AC;
+    width: 0; height: 0;
+}
+
+/* ---------- botoes ---------- */
 QPushButton {
     border: none;
     border-radius: 5px;
     padding: 8px 15px;
-    color: #ffffff;
+    color: #FFFFFF;
     font-weight: bold;
-    background-color: #5c5c5c;
+    background-color: #3A414D;
 }
-QPushButton:hover {
-    background-color: #6c6c6c;
-}
-QPushButton:pressed {
-    background-color: #4c4c4c;
-}
+QPushButton:hover { background-color: #4A5261; }
+QPushButton:pressed { background-color: #2A2F38; }
 QPushButton:disabled {
-    background-color: #3c3c3c;
-    color: #888;
+    background-color: #262B33;
+    color: #6B7280;
 }
+#btn_start { background-color: #E60023; }
+#btn_start:hover { background-color: #FF2E4D; }
+#btn_start:disabled { background-color: #5C2027; color: #8A7075; }
+#btn_list { background-color: #0076D3; }
+#btn_list:hover { background-color: #2E8FE8; }
+#btn_list:disabled { background-color: #1E3A52; color: #6B8AA5; }
+#btn_cancel { background-color: #3A414D; color: #E6E8EC; }
+#btn_cancel:hover { background-color: #4A5261; }
+#btn_cancel:enabled { background-color: #FF4D4D; color: #FFFFFF; }
+#btn_cancel:enabled:hover { background-color: #FF6B6B; }
+#btn_back { background-color: #2A2F38; color: #E6E8EC; }
+#btn_back:hover { background-color: #3A414D; }
+#btn_back:disabled { background-color: #22262E; color: #6B7280; }
 
-#btn_start {
+/* ---------- caixas de selecao ---------- */
+QCheckBox { color: #E6E8EC; spacing: 8px; }
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #4A5261;
+    border-radius: 3px;
+    background-color: #22262E;
+}
+QCheckBox::indicator:hover { border: 1px solid #E60023; }
+QCheckBox::indicator:checked {
     background-color: #E60023;
+    border: 1px solid #E60023;
+    image: none;
 }
-#btn_start:hover {
-    background-color: #ad001a;
-}
-#btn_list {
-    background-color: #0076d3;
-}
-#btn_list:hover {
-    background-color: #005a9e;
-}
-#btn_cancel {
-    background-color: #555;
-    color: #ccc;
-}
-#btn_cancel:enabled {
-    background-color: #ff4d4d;
-    color: white;
-}
+QCheckBox:disabled { color: #6B7280; }
+QCheckBox::indicator:disabled { border: 1px solid #313640; background-color: #1E222A; }
 
+/* ---------- barras de rolagem ---------- */
+QScrollBar:vertical {
+    background: #1A1D23;
+    width: 12px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: #3A414D;
+    border-radius: 5px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover { background: #4A5261; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar:horizontal {
+    background: #1A1D23;
+    height: 12px;
+    margin: 0;
+}
+QScrollBar::handle:horizontal {
+    background: #3A414D;
+    border-radius: 5px;
+    min-width: 30px;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+
+/* ---------- barra de etapas ---------- */
+#stepsBar {
+    background-color: #22262E;
+    border-bottom: 1px solid #313640;
+}
+#stepNum {
+    background-color: #313640;
+    color: #9AA1AC;
+    border-radius: 13px;
+    font-weight: bold;
+    min-width: 26px; max-width: 26px;
+    min-height: 26px; max-height: 26px;
+}
+#stepNumActive {
+    background-color: #E60023;
+    color: #FFFFFF;
+    border-radius: 13px;
+    font-weight: bold;
+    min-width: 26px; max-width: 26px;
+    min-height: 26px; max-height: 26px;
+}
+#stepNumDone {
+    background-color: #1E4D2B;
+    color: #5FD37E;
+    border-radius: 13px;
+    font-weight: bold;
+    min-width: 26px; max-width: 26px;
+    min-height: 26px; max-height: 26px;
+}
+#stepLabel { color: #9AA1AC; }
+#stepLabelActive { color: #E6E8EC; font-weight: bold; }
+#stepLabelDone { color: #5FD37E; }
+#stepLine { background-color: #313640; max-height: 1px; min-height: 1px; border: none; }
+#statusText { color: #9AA1AC; }
+QToolButton#btn_link {
+    background: transparent;
+    border: none;
+    color: #4DA3F0;
+    font-weight: bold;
+    padding: 2px 4px;
+    text-align: left;
+}
+QToolButton#btn_link:hover { color: #7CBEFF; }
+
+/* ---------- corpo ---------- */
+#stepTitle { color: #E6E8EC; font-size: 15px; font-weight: bold; }
+#stepHint { color: #9AA1AC; }
+#optionsStrip { background-color: #22262E; border: 1px solid #313640; border-radius: 10px; }
+#stripLabel { color: #9AA1AC; font-size: 11px; font-weight: bold; }
+#footerBar { background-color: #22262E; border-top: 1px solid #313640; }
+#progressCard { background-color: #22262E; border: 1px solid #313640; border-radius: 10px; }
+#logCard { background-color: #22262E; border: 1px solid #313640; border-radius: 10px; }
+QToolButton#disclosure {
+    border: none;
+    background: transparent;
+    color: #E6E8EC;
+    font-weight: bold;
+    padding: 4px 0;
+    text-align: left;
+}
+QToolButton#disclosure:hover { color: #4DA3F0; }
+
+/* ---------- progresso ---------- */
 QProgressBar {
-    border: 1px solid gray;
+    background-color: #1A1D23;
+    border: 1px solid #3A414D;
     border-radius: 10px;
     text-align: center;
     font-weight: bold;
+    color: #E6E8EC;
 }
 QProgressBar::chunk {
-    background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 #E60023, stop:1 #ff4d4d);
+    background-color: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 #E60023, stop:1 #FF2E4D);
     border-radius: 9px;
 }
 
+/* ---------- lista de quadros ---------- */
 QListWidget {
-    border: 1px solid gray;
-    border-radius: 5px;
-    padding: 5px;
+    background-color: #1A1D23;
+    border: 1px solid #313640;
+    border-radius: 10px;
+    color: #E6E8EC;
+    padding: 6px;
 }
-QListWidget::item {
-    border-radius: 5px;
-    padding: 10px;
-}
-QListWidget::item:selected {
-    background-color: #5c5c5c;
-    border: 1px solid #E60023;
-}
+QListWidget::item { color: #E6E8EC; border-radius: 6px; }
+QListWidget::item:hover { background-color: #262B33; }
+QListWidget::item:selected { background-color: #3A1F24; color: #FFFFFF; }
 
-QTextEdit {
-    border: 1px solid gray;
-    border-radius: 5px;
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    font-size: 11px;
+/* ---------- menus ---------- */
+QMenu {
+    background-color: #22262E;
+    border: 1px solid #3A414D;
+    color: #E6E8EC;
 }
+QMenu::item:selected { background-color: #E60023; }
 """
 
 
+def square_thumbnail(pixmap: QPixmap, size: int, background: str = "#22262E") -> QPixmap:
+    """Capa do quadro num quadrado, sem alterar as proporcoes da imagem.
+
+    A imagem e escalada para CABER no quadrado (KeepAspectRatio), o que
+    preserva a proporcao original; o que sobra nas laterais ou em cima e
+    embaixo fica com a cor de fundo. Escalar preenchendo (ByExpanding)
+    cortaria a foto -- e a miniatura do quadro e a primeira coisa que o
+    usuario ve, entao nao pode perder informacao.
+    """
+    square = QPixmap(size, size)
+    square.fill(QColor(background))
+
+    scaled = pixmap.scaled(
+        size,
+        size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    painter = QPainter(square)
+    painter.drawPixmap((size - scaled.width()) // 2, (size - scaled.height()) // 2, scaled)
+    painter.end()
+    return square
+
+
+# O layout em etapas: barra de passos no topo, uma tela por passo, e
+# um rodape com as acoes.
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -396,7 +482,7 @@ class MainWindow(QMainWindow):
         self.url_to_title: dict[str, str] = {}
 
         # Aplicar estilos
-        self.setStyleSheet(MAIN_QSS + WIZARD_QSS)
+        self.setStyleSheet(DARK_QSS)
 
         # Set application icon
         self._set_window_icon()
@@ -482,7 +568,7 @@ class MainWindow(QMainWindow):
         bar = QFrame()
         bar.setObjectName("stepsBar")
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(24, 14, 24, 14)
+        layout.setContentsMargins(24, 12, 24, 12)
         layout.setSpacing(0)
 
         self._step_badges: list[QLabel] = []
@@ -528,8 +614,21 @@ class MainWindow(QMainWindow):
 
         layout.addSpacing(28)
         layout.addStretch()
+
+        # O perfil fica na barra, e nao no corpo: assim ele continua
+        # visivel em todas as etapas -- voce ve o que esta baixando sem
+        # precisar voltar. Dar Enter no campo refaz a busca.
+        self.user_edit = QLineEdit()
+        self.user_edit.setPlaceholderText("Usuário ou link do perfil")
+        self.user_edit.setFixedWidth(260)
+        self.user_edit.returnPressed.connect(self.start_discovery)
+        layout.addWidget(self.user_edit)
+
+        layout.addSpacing(16)
         self.status_label = QLabel("Pronto.")
-        self.status_label.setStyleSheet("color: #6B7280;")
+        self.status_label.setObjectName("statusText")
+        self.status_label.setMinimumWidth(120)
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.status_label)
         return bar
 
@@ -537,38 +636,27 @@ class MainWindow(QMainWindow):
         """Passo 1: de qual perfil vamos buscar os quadros."""
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(24, 40, 24, 24)
+        layout.setContentsMargins(24, 56, 24, 24)
         layout.setSpacing(10)
+        layout.addStretch()
 
         title = QLabel("De qual perfil do Pinterest?")
         title.setObjectName("stepTitle")
-        title.setMaximumWidth(720)
         layout.addWidget(title)
 
-        hint = QLabel("Aceita o nome do usuário ou a URL do perfil.")
+        hint = QLabel("Escreva o usuário ou a URL do perfil no campo acima, à direita.\n" "Aceita as duas formas.")
         hint.setObjectName("stepHint")
-        hint.setMaximumWidth(720)
         layout.addWidget(hint)
-        layout.addSpacing(10)
-
-        row = QWidget()
-        row.setMaximumWidth(720)
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.user_edit = QLineEdit()
-        self.user_edit.setPlaceholderText("Usuário ou link do perfil")
-        self.user_edit.setMinimumHeight(38)
-        row_layout.addWidget(self.user_edit, 1)
+        layout.addSpacing(16)
 
         self.list_boards_button = QPushButton("Listar Quadros")
         self.list_boards_button.setObjectName("btn_list")
         self.list_boards_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.list_boards_button.setMinimumHeight(38)
+        self.list_boards_button.setMinimumHeight(44)
+        self.list_boards_button.setFixedWidth(220)
         self.list_boards_button.clicked.connect(self.start_discovery)
-        row_layout.addWidget(self.list_boards_button)
+        layout.addWidget(self.list_boards_button, 0, Qt.AlignmentFlag.AlignLeft)
 
-        layout.addWidget(row)
         layout.addStretch()
         return panel
 
@@ -609,8 +697,8 @@ class MainWindow(QMainWindow):
         self.selection_list.setWrapping(True)
         self.selection_list.setWordWrap(True)
         self.selection_list.setTextElideMode(Qt.TextElideMode.ElideRight)
-        self.selection_list.setIconSize(QSize(150, 150))
-        self.selection_list.setGridSize(QSize(186, 212))
+        self.selection_list.setIconSize(QSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE))
+        self.selection_list.setGridSize(QSize(THUMBNAIL_SIZE + 36, THUMBNAIL_SIZE + 62))
         self.selection_list.setSpacing(12)
         self.selection_list.itemChanged.connect(self._update_selection_state)
         layout.addWidget(self.selection_list, 1)
@@ -834,7 +922,7 @@ class MainWindow(QMainWindow):
                 continue
             active = index + 1 == step
             button.setStyleSheet(
-                f"color: {'#1F2430' if active else '#0076D3'}; font-weight: {'bold' if active else 'normal'};"
+                f"color: {'#E6E8EC' if active else '#4DA3F0'}; font-weight: {'bold' if active else 'normal'};"
             )
             self._step_labels[index].setText(button.text())
 
@@ -946,6 +1034,7 @@ class MainWindow(QMainWindow):
 
         self.start_button.setEnabled(False)
         self.list_boards_button.setEnabled(False)
+        self.user_edit.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self._set_step(self.STEP_DOWNLOAD)
 
@@ -1037,6 +1126,7 @@ class MainWindow(QMainWindow):
         if not boards:
             self.info_selection_label.setText("Nenhum quadro encontrado.")
             self.list_boards_button.setEnabled(True)
+            self.user_edit.setEnabled(True)
             self.start_button.setEnabled(False)
             # Sem quadro nao ha o que escolher: fica no passo 1.
             self._set_step(self.STEP_PROFILE)
@@ -1066,23 +1156,15 @@ class MainWindow(QMainWindow):
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
 
-            # Thumbnail ampliada (128x128)
+            # Thumbnail quadrada, sem distorcer a foto original
             if b["thumbnail_url"]:
                 try:
                     resp = requests.get(b["thumbnail_url"], timeout=3)
                     if resp.status_code == 200:
                         pix = QPixmap()
                         pix.loadFromData(resp.content)
-                        item.setIcon(
-                            QIcon(
-                                pix.scaled(
-                                    160,
-                                    160,
-                                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                                    Qt.TransformationMode.SmoothTransformation,
-                                )
-                            )
-                        )
+                        if not pix.isNull():
+                            item.setIcon(QIcon(square_thumbnail(pix, THUMBNAIL_SIZE)))
                 except Exception:
                     pass
 
@@ -1090,6 +1172,7 @@ class MainWindow(QMainWindow):
 
         self.info_selection_label.setText(f"{len(boards)} quadros encontrados.")
         self.list_boards_button.setEnabled(True)
+        self.user_edit.setEnabled(True)
         self.start_button.setEnabled(False)
         # Ha quadros para escolher: vai para o passo 2.
         self._set_step(self.STEP_BOARDS)
@@ -1129,6 +1212,7 @@ class MainWindow(QMainWindow):
         self.append_log(f"Total geral: {downloaded}/{total} imagens.")
         self.start_button.setEnabled(True)
         self.list_boards_button.setEnabled(True)
+        self.user_edit.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.worker = None
         self._set_step(self.STEP_DOWNLOAD)
@@ -1172,6 +1256,7 @@ class MainWindow(QMainWindow):
 
         self.start_button.setEnabled(True)
         self.list_boards_button.setEnabled(True)
+        self.user_edit.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.worker = None
         # Um erro devolve o usuario para onde a acao acontece.

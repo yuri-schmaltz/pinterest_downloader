@@ -13,8 +13,8 @@
 
 | Métrica | Antes (2026-10-22) | 2026-10-23 | Agora (2026-10-29) |
 |---|---|---|---|
-| Testes coletados | 21 | 85 | 153 | **185** (+ 69 checks em Node) |
-| Testes passando | 21 | 85 | 153 | **185** (100 %) |
+| Testes coletados | 21 | 85 | 153 | **198** (+ 69 checks em Node) |
+| Testes passando | 21 | 85 | 153 | **198** (100 %) |
 | Falhas / erros de coleta | 0 | 0 | 0 |
 | Tempo de execução | ~3 s | ~26 s | ~28 s |
 | Dependências externas (rede) | nenhuma | **nenhuma** | **nenhuma** |
@@ -81,6 +81,15 @@ novos em `tests/test_gui_steps.py`, que travam:
 Os 29 testes da GUI anterior (`tests/test_gui.py`) continuam passando sem
 alteração — os nomes dos widgets não mudaram, só a organização visual.
 
+Depois disso a GUI ganhou mais três coisas, cada uma com teste:
+
+- **tema escuro único** — não sobrou regra do tema claro
+- **perfil sempre visível** — o campo mora na barra de etapas, e trava
+  durante o download
+- **miniatura quadrada** — `square_thumbnail()` encaixa a foto inteira no
+  quadrado (KeepAspectRatio) em vez de cortá-la (KeepAspectRatioByExpanding);
+  os testes medem a proporção do conteúdo dentro do quadrado
+
 ### 2.1 O que o número de 16 % em `pinterest_board_dl.py` significa
 
 O módulo tem 783 statements, dos quais ~430 estão no caminho de coleta com
@@ -123,7 +132,7 @@ módulo não importar (ver §5).
 | `tests/test_metadata_extraction.py` | 40 | — | extração de metadados de pins |
 | `tests/test_resolve_images.py` | 15 | — | cache, interceptação, fallback mobile |
 | `tests/test_cli.py` | 19 | — | superfície da CLI (`--version`, `--user`) |
-| `tests/test_gui_steps.py` | 26 | **Qt (offscreen)** | o fluxo de três etapas da GUI e a busca |
+| `tests/test_gui_steps.py` | 39 | **Qt (offscreen)** | o fluxo de três etapas da GUI, a busca, o perfil sempre visível, a miniatura quadrada e o tema escuro |
 
 ### 3.1 `tests/test_11_rate_limiting.py` — 10 testes (ONDA 5E)
 

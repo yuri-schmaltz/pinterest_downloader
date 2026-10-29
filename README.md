@@ -134,12 +134,19 @@ você está:
 | **2 · Escolher quadros** | a grade de quadros (miniatura, título e contagem de pins), a busca, o *Selecionar Todos* e uma faixa de opções (destino, workers, máximo de pins) |
 | **3 · Baixar** | o progresso (quadro atual e total de quadros) e o log detalhado |
 
+O campo do perfil fica **na barra do topo**, então continua visível em
+todas as etapas — dá para ver o que está sendo baixado sem voltar. Dar
+Enter no campo refaz a busca.
+
 Fluxo: informo o usuário → *Listar Quadros* → marco os quadros →
 *Iniciar download*. O botão *← Voltar* volta uma etapa; as etapas 1 e 2
 também são clicáveis na barra do topo.
 
+A janela é **escura** — não há tema claro.
+
 A busca filtra a grade conforme você digita, e o *Selecionar Todos* marca
-só o que está visível na busca. O modo "quadro único" (uma URL de quadro
+só o que está visível na busca. As miniaturas são **quadradas**: a capa do
+quadro cabe inteira no quadrado, sem distorcer a proporção da foto. O modo "quadro único" (uma URL de quadro
 direto) existe **apenas na CLI**.
 
 > Em máquina sem display, a GUI não abre. O modo `offscreen` existe para
