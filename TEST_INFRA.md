@@ -1,6 +1,6 @@
 # TEST_INFRA.md — Cobertura real e limites declarados
 
-**Data da medição:** 2026-10-23 · **Branch:** `fix/ci-and-extension-repro`
+**Data da medição:** 2026-10-29 · **Branch:** `main`
 **Comando:** `QT_QPA_PLATFORM=offscreen python -m coverage run --source=src -m pytest tests/ -q && python -m coverage report -m`
 
 > Este documento declara **o que a suíte cobre e o que ela não cobre**.
@@ -11,15 +11,15 @@
 
 ## 1. Panorama
 
-| Métrica | Antes (2026-10-22) | Agora (2026-10-23) |
-|---|---|---|
-| Testes coletados | 21 | **85** (+ 69 checks em Node) |
-| Testes passando | 21 | **85** (100 %) |
-| Falhas / erros de coleta | 0 | 0 |
-| Tempo de execução | ~3 s | ~26 s |
-| Dependências externas (rede) | nenhuma | **nenhuma** |
-| Browser | não usava | Chromium local, via `file://` |
-| Cobertura total (`src/`) | 23 % | **45 %** |
+| Métrica | Antes (2026-10-22) | 2026-10-23 | Agora (2026-10-29) |
+|---|---|---|---|
+| Testes coletados | 21 | 85 | **153** (+ 69 checks em Node) |
+| Testes passando | 21 | 85 | **153** (100 %) |
+| Falhas / erros de coleta | 0 | 0 | 0 |
+| Tempo de execução | ~3 s | ~26 s | ~28 s |
+| Dependências externas (rede) | nenhuma | **nenhuma** | **nenhuma** |
+| Browser | não usava | Chromium local, via `file://` | idem |
+| Cobertura total (`src/`) | 23 % | 45 % | **50 %** |
 
 Os 26 s são quase todos o browser: a coleta de pins espera a página
 assentar antes de rolar, e cada coleta custa alguns segundos. Não há
@@ -29,16 +29,27 @@ acesso à rede em nenhum teste.
 
 ## 2. Cobertura por módulo (medida)
 
-| Módulo | Statements | Antes | Agora | Leitura |
-|---|---|---|---|---|
-| `src/rate_limiter.py` | 105 | 86 % | **86 %** | ✅ bem coberto |
-| `src/json_logger.py` | 85 | 85 % | **85 %** | ✅ bem coberto |
-| `src/adaptive_workers.py` | 109 | 74 % | **74 %** | 🟡 bom |
-| `src/pinterest_board_dl.py` | 792 | 16 % | **21 %** | 🟡 o núcleo ainda é o elo fraco |
-| `src/pinterest_board_gui.py` | 491 | **0 %** | **61 %** | ✅ era o pior buraco |
-| **TOTAL** | **1 582** | 23 % | **45 %** | |
+| Módulo | Statements | Antes | 2026-10-23 | Agora | Leitura |
+|---|---|---|---|---|---|
+| `src/rate_limiter.py` | 105 | 86 % | 86 % | **86 %** | ✅ bem coberto |
+| `src/json_logger.py` | 85 | 85 % | 85 % | **85 %** | ✅ bem coberto |
+| `src/adaptive_workers.py` | 109 | 74 % | 74 % | **74 %** | 🟡 bom |
+| `src/pinterest_board_dl.py` | 810 | 16 % | 21 % | **32 %** | 🟡 o núcleo ainda é o elo fraco |
+| `src/pinterest_board_gui.py` | 491 | **0 %** | 61 % | **61 %** | ✅ era o pior buraco |
+| `src/app_version.py` | 31 | — | — | **68 %** | 🟡 novo |
+| **TOTAL** | **1 632** | 23 % | 45 % | **50 %** | |
 
-### 2.1 O que mudou desde a medição anterior
+### 2.1 O que mudou na rodada de 2026-10-29
+
+| Entrega | Efeito |
+|---|---|
+| `tests/test_metadata_extraction.py` (40 testes) | a extração de metadados de pins, que era inalcançável dentro de um closure, virou função de módulo testável |
+| `tests/test_resolve_images.py` (15 testes) | o cache, a interceptação e o fallback para o domínio mobile, que estavam misturados num corpo de complexidade 16 |
+| `tests/test_cli.py` (19 testes) | `--version` e `--user`: duas flags que os docs prometiam e o código não tinha |
+| `_version.py` gerado + `app_version.py` | a versão que o app mostra é a do manifest, não a da metadata congelada do `pip install -e` |
+| refactor do `handle_response` (25) e do `resolve_images` (16) | complexidade 60 → 37 na coleta; 9 funções acima de 15 → 5 |
+
+### 2.2 O que mudou desde a medição anterior
 
 | Entrega | Efeito |
 |---|---|
@@ -49,7 +60,7 @@ acesso à rede em nenhum teste.
 | `tests/test_extension_i18n.js` (40 checks) | as traduções, nos dois caminhos (com e sem `chrome.i18n`) |
 | `_compute_scroll_stability` e `_extract_boards_from_page` extraídos | a aritmética do scroll virou função pura testável; a extração de quadros deixou de estar presa dentro de um closure |
 
-### 2.2 O que a GUI ainda não cobre
+### 2.3 O que a GUI ainda não cobre
 
 Ficou de fora: o ciclo de download de verdade (a thread que chama o
 scraper), o diálogo de login manual e o *worker* em background. O resto da
@@ -95,6 +106,9 @@ módulo não importar (ver §5).
 | `tests/test_extension_integration.py` | 13 | **Chromium** | scripts da extensão numa página real |
 | `tests/test_extension_i18n.js` | 40 checks | Node | traduções (dois caminhos) |
 | `tests/test_extension_pins.js` | 29 checks | Node | transformação de URL dos pins |
+| `tests/test_metadata_extraction.py` | 40 | — | extração de metadados de pins |
+| `tests/test_resolve_images.py` | 15 | — | cache, interceptação, fallback mobile |
+| `tests/test_cli.py` | 19 | — | superfície da CLI (`--version`, `--user`) |
 
 ### 3.1 `tests/test_11_rate_limiting.py` — 10 testes (ONDA 5E)
 
@@ -307,6 +321,7 @@ Prioridade para as próximas rodadas:
 
 | # | Item | Por quê | Esforço |
 |---|---|---|---|
+| 0 | **Baixar a cobertura do scraper dos 32 % para 50 %** | o download real e o parsing do HTML do Pinterest continuam sem teste | 2 dias |
 | 1 | **Capturar HTML real do Pinterest** e usar como fixture | hoje as fixtures são sintéticas: um layout novo do Pinterest não é detectado | 2 h |
 | 2 | Teste de download real (baixa um pin, confere o arquivo) | o download é a única parte sem nenhum teste | 1 dia |
 | 3 | Exercitar a extensão carregada de verdade (Playwright com extensão) | hoje os scripts são injetados à mão, o `chrome.*` não é real | 1–2 dias |

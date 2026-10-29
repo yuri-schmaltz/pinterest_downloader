@@ -1,5 +1,8 @@
 # Pinterest Pro Downloader
 
+[![Tests & Quality](https://github.com/yuri-schmaltz/pinterest_downloader/actions/workflows/tests.yml/badge.svg)](https://github.com/yuri-schmaltz/pinterest_downloader/actions/workflows/tests.yml)
+[![Release](https://img.shields.io/github/v/release/yuri-schmaltz/pinterest_downloader.svg)](https://github.com/yuri-schmaltz/pinterest_downloader/releases/latest)
+
 Baixa imagens de quadros do Pinterest. Três produtos independentes, mesmo objetivo:
 
 - 🐍 **CLI** — linha de comando, para script e servidor
@@ -81,6 +84,9 @@ pinterest-board-dl https://www.pinterest.com/usuario/quadro/
 # todos os quadros públicos de um usuário
 pinterest-board-dl --user usuario_pinterest
 
+# a versão instalada
+pinterest-board-dl --version
+
 # com as otimizações todas
 pinterest-board-dl <URL> \
   --workers 32 \
@@ -93,7 +99,8 @@ pinterest-board-dl <URL> \
 | Flag | Efeito |
 |---|---|
 | `-o, --out DIR` | pasta de saída (default `./pins`) |
-| `--user NOME` | baixa todos os quadros públicos do usuário |
+| `--user NOME` | baixa todos os quadros públicos do usuário (também aceita o nome como argumento posicional) |
+| `--version` | mostra a versão e sai |
 | `--max-pins N` | limita a quantidade de pins por quadro |
 | `--workers N` | paralelismo de resolução/download (default 16) |
 | `--boards-workers N` | paralelismo entre quadros (2–3, cada um abre um Chromium) |
