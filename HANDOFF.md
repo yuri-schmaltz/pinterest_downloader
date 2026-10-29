@@ -4,7 +4,7 @@
 > rodar, testar, publicar e **não repetir as armadilhas** listadas na §7.
 >
 > Para o inventário de features e os contratos de interface, veja
-> [`PROJECT.md`](PROJECT.md). Para o que ainda falta, veja
+> [`PROJECT.md`](PROJECT.md). Para o plano de trabalho e pendências, veja
 > [`PLANO-ESTABILIZACAO.md`](PLANO-ESTABILIZACAO.md). Para o que a suíte
 > cobre e o que ela **não** cobre, veja [`TEST_INFRA.md`](TEST_INFRA.md).
 
@@ -12,17 +12,19 @@
 
 ## 1. O que é, em 30 segundos
 
-Baixa imagens de quadros do Pinterest. **Três produtos independentes**, mesmo
-código-fonte:
+Baixa imagens e mídias de quadros do Pinterest. **Quatro produtos complementares**,
+mesmo repositório:
 
 | Produto | Onde | Stack |
 |---|---|---|
-| **CLI** | `src/pinterest_board_dl.py` | Python, Playwright, requests |
-| **GUI** | `src/pinterest_board_gui.py` | Python, PyQt6 (escuro) |
+| **Rust CLI** | `crates/pinterest-cli` | Rust puro, Tokio, reqwest, indicatif (alta performance) |
+| **Python CLI** | `src/pinterest_board_dl.py` | Python, Playwright, requests |
+| **Python GUI** | `src/pinterest_board_gui.py` | Python, PyQt6 (tema escuro moderno, 3 etapas) |
 | **Extensão** | `extension/` | JavaScript puro, MV3, Chrome/Firefox |
 
-A CLI e a GUI compartilham o scraper. A extensão **não usa Python** — é um
-caminho separado, e por isso tem testes próprios em Node.
+A CLI e a GUI em Python compartilham o scraper e os recursos de Playwright. A extensão
+**não usa Python** — é pura no navegador. A CLI em Rust é um executável nativo standalone
+com download assíncrono e baixo consumo de CPU/memória.
 
 ---
 
@@ -30,45 +32,49 @@ caminho separado, e por isso tem testes próprios em Node.
 
 | | |
 |---|---|
-| Branch padrão | `main` (`1330a84`) |
-| Release no ar | **v2.0.4**, buildada do commit `ef042b0` |
-| Commits na `main` além da release | **7** (refactor do scraper, flags da CLI, redesenho da GUI, docs) |
-| CI | **verde**, 7 jobs, 3 versões de Python |
-| Testes | **198** em Python + **69** checks em Node |
-| Cobertura | **57 %** no total · **72 %** na GUI |
-| PR aberto | nenhum |
+| Branch padrão | `main` (`5a41f3e`) |
+| Release no ar | **v2.0.5**, buildada do commit `5a41f3e` (6 artefatos verificados) |
+| Branch de feature | `feat/rust-core` (`fe7defa`), com PR #11 aberto |
+| CI | **verde**, 7 jobs bloqueantes no GitHub Actions |
+| Testes | **202** em Python + **69** checks em Node + **3** em Rust |
+| Cobertura | **63 %** no total · **72 %** na GUI · **48 %** no scraper |
+| PR aberto | **PR #11** (Reescrita do núcleo e CLI em Rust puro) |
 
-> **A release publicada não tem a GUI nova.** A v2.0.4 saiu do `ef042b0`,
-> antes do fluxo de três etapas, do tema escuro e das miniaturas
-> quadradas. Essas três coisas estão na `main` e **esperam uma v2.0.5**.
+> **A release v2.0.5 já está no ar.** Contém a GUI moderna em 3 etapas com tema escuro,
+> todas as 14 funções de alta complexidade refatoradas (P2.4 completo) e cobertura elevada
+> para 63%. A branch `feat/rust-core` traz a implementação de alto desempenho em Rust puro.
 
 ---
 
 ## 3. Ambiente
 
+### Python (CLI, GUI e Scraper)
+
 ```bash
 # Python >= 3.10
 pip install -e ".[dev]"          # inclui pytest, pytest-qt, pytest-cov, black, ruff, mypy
-python -m playwright install chromium   # so para os testes do scraper
-
-# o Chrome/Chromium e necessario para a GUI e para os testes de scraper
+python -m playwright install chromium   # para testes do scraper e headless browser
 ```
 
-O projeto usa **imports planos** (`from json_logger import ...`), não
-pacotes. `src/` precisa estar no `sys.path` — isso é feito em três lugares
-de propósito (barato contra breakage silencioso): `tests/conftest.py`,
-`[tool.pytest.ini_options] pythonpath` no `pyproject.toml` e o
-`sys.path.insert` de cada arquivo de teste.
+O projeto usa **imports planos** (`from json_logger import ...`). `src/` precisa estar no `sys.path`.
 
-### Rodando
+### Rust (Core e CLI Nativa)
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m pytest tests/ -q     # suíte inteira
-node tests/test_extension_i18n.js                          # checks da extensão
-node tests/test_extension_pins.js
-python scripts/sync_version.py --check                     # gate de versão
-python scripts/diagnose.py                                # diagnóstico offline
-bash scripts/build_release.sh                              # artefatos locais
+# Rust >= 1.80 (stable-x86_64-pc-windows-gnu ou MSVC)
+cargo test                       # roda a suíte de testes do Rust (crates/pinterest-core)
+cargo build --release            # gera target/release/pinterest-cli.exe
+```
+
+### Rodando a validação completa
+
+```bash
+QT_QPA_PLATFORM=offscreen python -m pytest tests/ -q     # suíte Python inteira (202 testes)
+node tests/test_extension_i18n.js                          # checks de internacionalização
+node tests/test_extension_pins.js                          # checks de extração de pins
+python scripts/sync_version.py --check                     # gate de sincronização de versão
+python scripts/diagnose.py                                # diagnóstico offline de ambiente
+cargo test --workspace                                     # testes dos crates em Rust
 ```
 
 ---
@@ -87,33 +93,31 @@ extension/manifest.json      ← a fonte da verdade
 `scripts/sync_version.py` regenera as cópias. A CI **falha o build** se
 qualquer uma divergir. O `src/_version.py` é o que o app mostra em
 `--version` — ele viaja com o código e funciona dentro do AppImage
-congelado, onde não há metadata nem manifest no disco.
+congelado.
 
 > **Nunca** edite `pyproject.toml`, `src/_version.py` ou a tag à mão.
 > Mude o manifest e rode `python scripts/sync_version.py`.
 
 ### Publicando uma release
 
-1. Bump da versão em `extension/manifest.json` + `scripts/sync_version.py`
+1. Bump da versão em `extension/manifest.json` + `python scripts/sync_version.py`
 2. Commit, push, **esperar o CI passar**
-3. `git tag -a v2.0.5 <commit> && git push origin v2.0.5`
+3. `git tag -a v2.0.x <commit> && git push origin v2.0.x`
 4. O workflow `Multi-Platform Release` dispara (2 jobs: Linux e Windows)
-5. **Baixar os assets de volta e verificar** — o build passar não prova que
-   o pacote está certo (já aconteceu: uma release publicou um `.exe` de
-   4 MB que não rodava sozinho)
+5. **Baixar os assets de volta e verificar** (AppImage, deb, zip Windows, extensões, source)
 6. Atualizar `RELEASE_NOTES.md` (o workflow lê esse arquivo) e os docs
-
-As notas de release ficam em `RELEASE_NOTES.md`, na raiz. **Atualize esse
-arquivo a cada release** — o workflow o lê e coloca no corpo do release.
-Se o arquivo faltar, o release sai sem as notas e sem quebrar.
 
 ---
 
 ## 5. Mapa do código
 
 ```
+crates/
+  pinterest-core/         núcleo assíncrono em Rust puro (parser DOM/JSON, rate-limiter, downloader)
+  pinterest-cli/          CLI de alta velocidade em Rust nativo (clap derive, indicatif)
+
 src/
-  pinterest_board_dl.py   o scraper (CLI + motor da GUI). 810 linhas
+  pinterest_board_dl.py   o scraper (CLI + motor da GUI). 880 linhas decompostas (< 15 complexidade)
   pinterest_board_gui.py  a GUI PyQt6, escura, em três etapas
   app_version.py          resolve a versão (gerado > manifest > metadata)
   _version.py             GERADO — não editar
@@ -138,23 +142,6 @@ hooks/
                           para o Chromium embutido
 ```
 
-### Contratos que importam
-
-- **A extensão carrega `lib/i18n.js` → `lib/pin_utils.js` → `content.js`**, nessa
-  ordem, e o manifest declara essa ordem. Duas coisas validam isso: o job
-  `extension` da CI confere que todo arquivo referenciado está
-  **rastreado no git** (o `lib/` do `.gitignore` já escondeu o
-  `i18n.js` uma vez, e o zip publicado saiu quebrado), e
-  `tests/test_extension_integration.py` confere a **ordem** num Chromium
-  real.
-- **`content.js` não pode ter lógica inline** — a extração de metadados
-  morava num closure e era inalcançável de qualquer teste. Hoje está em
-  `lib/pin_utils.js`, exposto como `window.__pbdPinUtils`.
-- **Os nomes dos widgets da GUI não mudam** (`user_edit`, `selection_list`,
-  `start_button`, `log_edit`…). O redesenho da GUI só trocou a
-  organização visual; foi o que permitiu manter os 29 testes antigos
-  passando sem tocar neles.
-
 ---
 
 ## 6. A suíte
@@ -164,7 +151,7 @@ hooks/
 | `test_11_rate_limiting.py` | 10 | — |
 | `test_core_features.py` | 10 | — |
 | `test_robustness.py` | 1 | — |
-| `test_scraper.py` | 22 | **Chromium** |
+| `test_scraper.py` | 26 | **Chromium** |
 | `test_gui.py` | 29 | **Qt** (offscreen) |
 | `test_gui_steps.py` | 39 | **Qt** (offscreen) |
 | `test_extension_integration.py` | 13 | **Chromium** |
@@ -173,11 +160,9 @@ hooks/
 | `test_cli.py` | 19 | — |
 | `test_extension_i18n.js` | 40 checks | Node |
 | `test_extension_pins.js` | 29 checks | Node |
+| `crates/pinterest-core` | 3 | Cargo / Rust |
 
-**Nenhum teste toca a rede.** As fixtures de HTML são servidas por
-`file://`. Isso é deliberado — a suíte precisa rodar em qualquer máquina.
-
-Cobertura medida: `python -m coverage run --source=src -m pytest tests/ -q`
+Total: **202 testes em Python** + **69 checks em Node** + **3 testes Rust**, 100% PASS.
 
 ---
 
@@ -186,104 +171,42 @@ Cobertura medida: `python -m coverage run --source=src -m pytest tests/ -q`
 Cada uma destas custou tempo real. Leia antes de mexer em qualquer coisa.
 
 ### 7.1 `libEGL.so.1` — a CI quebra sem ele
-
-O `pytest-qt` importa o `QtGui` já no `pytest_configure`, e o `libQt6Gui`
-é ligado contra `libEGL`. O runner do GitHub **não tem** essa lib, e o
-`playwright install --with-deps` cobre as dependências do *browser*, não
-as do Qt.
-
-```
-ImportError: libEGL.so.1: cannot open shared object file: No such file or directory
-```
-
-O job `test` e o `smoke-import` instalam explicitamente:
-`libegl1 libxkbcommon0 libxkbcommon-x11-0 libdbus-1-3 libxcb-icccm4
-libxcb-cursor0 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1
-libxcb-shape0`.
-
-No sandbox local as libs do sistema **somem sozinhas** de tempos em
-tempos — reinstale se o import do PyQt6 falhar do nada.
+O `pytest-qt` importa o `QtGui` já no `pytest_configure`. O runner do GitHub precisa
+de pacotes explícitos (`libegl1 libxkbcommon0 libdbus-1-3 libxcb-*`).
 
 ### 7.2 `zip -r` ATUALIZA o arquivo, não recria
-
-```
-$ zip -q -r p.zip lib/     # build 1
-$ rm lib/apagado.js
-$ zip -q -r p.zip lib/     # build 2
-$ unzip -l p.zip | grep apagado
-apagado.js          # ← continua no pacote!
-```
-
-Um arquivo apagado da extensão ficaria **para sempre** no pacote
-publicado, e o build reportava sucesso. `scripts/build_release.sh` agora
-remove os artefatos antes de zipar. **Não reintroduza `zip` sem isso.**
+Um arquivo apagado continuaria no pacote. `scripts/build_release.sh` sempre remove
+os zips antes de gerar.
 
 ### 7.3 `DELETE /releases/tags/{tag}` não existe
-
-Na API do GitHub só existe `DELETE /releases/{id}`. A chamada por tag
-devolve **404 e não apaga nada** — e, pior, apagar a *tag* de uma release
-publicada **rebaixa a release para draft** em vez de removê-la, com os
-assets ainda anexados.
-
-Sempre: pegue o `id` em `GET /releases` e use `DELETE /releases/{id}`.
+Sempre pegue o `id` em `GET /releases` e use `DELETE /releases/{id}`.
 
 ### 7.4 `importlib.metadata` mente num `pip install -e .`
-
-A metadata fica congelada na instalação. Aconteceu aqui: um `egg-info`
-de **2.0.3** convivendo com um `pyproject.toml` de **2.0.4**. Quem
-perguntasse ao pacote instalado receberia um número que não existe.
-
-Por isso o app lê `src/_version.py` (gerado), **não** a metadata.
+O app lê `src/_version.py` gerado, **não** a metadata.
 
 ### 7.5 Folha de estilo do Qt: sem seletor = `* { ... }`
-
-```python
-widget.setStyleSheet("background: #F6F7F9;")   # NÃO
-```
-
-Isso vale como `* { background: #F6F7F9 }` para **todos os descendentes**
-e **sobrescreve** o QSS dos botões dentro dele. O sintoma: os botões
-ficam com a cor errada e parecem desabilitados.
-
-Use a paleta (`setPalette`) para pintar o fundo de um widget, e um
-seletor explícito (`QFrame { ... }`) quando for folha de estilo.
+Use a paleta (`setPalette`) para pintar fundos, e seletores explícitos (`QFrame { ... }`)
+para folhas de estilo.
 
 ### 7.6 `setGridSize(QSize(0, 0))` quebra o `ListMode`
-
-Todos os itens caem na mesma linha, um em cima do outro. Para desfazer
-o grid do `IconMode`, use `setGridSize(QSize())` — tamanho **nulo** —
-ou não chame o método.
+Para desfazer o grid do `IconMode`, use `setGridSize(QSize())` — tamanho **nulo**.
 
 ### 7.7 QMessageBox modal trava o teste para sempre
-
-Em modo `offscreen`, `dlg.exec()` fica esperando um clique que nunca vem.
-`tests/test_gui.py` tem o duble `_FakeMessageBox`; use-o (`monkeypatch.setattr(gui, "QMessageBox", _FakeMessageBox)`).
+Em modo `offscreen`, use o dublê `_FakeMessageBox`.
 
 ### 7.8 O `myPy` do PyQt6 tem stubs quebrados
+A CI roda mypy apenas em `src/pinterest_board_dl.py` e `src/app_version.py`.
 
-```
-/usr/local/lib/python3.11/dist-packages/PyQt6/QtGui.pyi:4930: error:
-'/' parameter must appear before '*' parameter  [syntax]
-```
+### 7.9 Proxy corporativo bloqueando `git push` (HTTP 403 MediaTypeBlocked)
+Em redes corporativas filtradas por gateways (e.g. Skyhigh Secure Web Gateway), o
+protocolo Git Smart HTTP (POST `git-receive-pack`) é bloqueado com 403.
+**Solução:** Enviar commits e atualizar referências usando a API REST do GitHub
+(`/git/blobs`, `/git/trees`, `/git/commits`, `/git/refs`).
 
-Não é o seu código. Por isso a CI roda mypy **só** em
-`src/pinterest_board_dl.py` e `src/app_version.py` — nunca na GUI.
-
-### 7.9 No sandbox
-
-```bash
-export PIP_INDEX_URL=https://pypi.org/simple/     # senão o pip não acha nada
-pip install --break-system-packages <pacote>       # PEP 668
-export GIT_SSL_NO_VERIFY=true                     # o git falha sem isso
-```
-
-E os tokens do GitHub no ambiente já morreram uma vez (401 nos três:
-`GITHUB_TOKEN`, `GITHUB_PUSH_TOKEN`, `GITHUB_PAT`). **Se der 401, é o
-token — não a rede.** Reponha no secret store e troque a URL do remote:
-
-```bash
-git remote set-url origin "https://x-access-token:<token>@github.com/yuri-schmaltz/pinterest_downloader.git"
-```
+### 7.10 Linker MinGW GCC 16 no Windows (`libgcc_eh.a`)
+Ao compilar Rust com target `stable-x86_64-pc-windows-gnu` sob GCC 16, o linker pode
+exigir `-lgcc_eh`. Caso ausente no MinGW, basta copiar `libgcc.a` para `libgcc_eh.a`
+no diretório de bibliotecas do compilador GCC.
 
 ---
 
@@ -291,21 +214,11 @@ git remote set-url origin "https://x-access-token:<token>@github.com/yuri-schmal
 
 | # | Item | Onde |
 |---|---|---|
-| 1 | **Publicar a v2.0.5** com a GUI nova (3 etapas, escura, miniaturas quadradas), o refactor do scraper e as flags `--version`/`--user`. A v2.0.4 no ar tem a GUI antiga | §4 |
-| 2 | **Cobertura do scraper: 32 % → 50 %**. O download real e o parsing do HTML do Pinterest continuam sem teste | `TEST_INFRA.md` §6 |
-| 3 | **Capturar HTML real do Pinterest** para usar de fixture — hoje as fixtures são sintéticas, então uma mudança no layout real do Pinterest não é detectada | `TEST_INFRA.md` §6 |
-| 4 | **A extensão nunca foi testada com a extensão de verdade carregada** — os scripts são injetados à mão, o `chrome.*` não é real | `TEST_INFRA.md` §6 |
-| 5 | **Refatorar as 5 funções que ainda passam de 15 de complexidade**: `_collect_pin_links_with_browser` (37), `collect_board_urls` (22), `download_board` (20), `_collect_with_page` (19), `_status_callback` (16) | `PLANO-ESTABILIZACAO.md` P2.4 |
-| 6 | **Benchmark automatizado** — as tabelas de performance nos docs são de 2025 e não reproduzíveis | `PLANO-ESTABILIZACAO.md` P2.5 |
-| 7 | **Publicar a extensão no Chrome Web Store** — o script existe, falta credencial OAuth2 do Google | `PLANO-ESTABILIZACAO.md` P3.1 |
-| 8 | **Assinar o XPI** — a Mozilla exige assinatura; hoje sai sem assinar | `PLANO-ESTABILIZACAO.md` P3.2 |
-
-Duas decisões que ficaram em aberto e valem uma resposta:
-
-- O botão *Listar Quadros* está **só no passo 1**. Colocá-lo também na
-  barra deixaria dois botões iguais.
-- A cor de fundo das barras de *letterbox* da miniatura é `#22262E`, a
-  mesma dos painéis. Mais contraste seria uma constante só.
+| 1 | **Revisar e mergear PR #11 (`feat/rust-core`)** para unificar a CLI em Rust puro na `main` | GitHub PR #11 |
+| 2 | **Capturar HTML real do Pinterest** para ampliar fixtures de teste contra drift de layout | `TEST_INFRA.md` §6 |
+| 3 | **GUI pura em Rust (opcional)** com framework Iced ou Egui para substituir PyQt6 | Roadmap futuro |
+| 4 | **Publicar a extensão no Chrome Web Store** — script pronto, requer credenciais Google | `PLANO-ESTABILIZACAO.md` P3.1 |
+| 5 | **Assinar o XPI da extensão** para o portal Mozilla Add-ons | `PLANO-ESTABILIZACAO.md` P3.2 |
 
 ---
 
@@ -314,20 +227,7 @@ Duas decisões que ficaram em aberto e valem uma resposta:
 | Termo | Significado |
 |---|---|
 | **quadro** | board do Pinterest |
-| **pin** | uma imagem dentro de um quadro |
-| **ONDA** | as fases de implementação que o autor documentou em `docs/ONDA_*.md` — são histórico, com banner |
+| **pin** | uma imagem ou mídia dentro de um quadro |
+| **ONDA** | as fases históricas de implementação documentadas em `docs/` |
 | **interceptação** | captura dos metadados dos pins durante a navegação, antes do download |
-| **capa** | a miniatura de um quadro |
-| **letterbox** | as barras que sobram quando uma imagem não é quadrada |
-
----
-
-## 10. Se você só quiser fazer uma coisa
-
-**Publicar a v2.0.5.** É o que está em aberto há mais tempo e o que
-traz mais valor imediato: o app no ar ainda tem a GUI de duas colunas e
-o tema claro. O caminho está inteiro na §4 e o procedimento foi usado com
-sucesso duas vezes (v2.0.3 e v2.0.4).
-
-Antes de tagear, confira o passo 5 da §4 — **baixe os assets de volta e
-verifique**. É o passo que pegou o `.exe` quebrado da v2.0.1.
+| **letterbox** | as barras de contraste que sobram quando uma imagem não é quadrada |

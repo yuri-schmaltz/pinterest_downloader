@@ -1,26 +1,26 @@
 # PROJECT.md — Pinterest Pro Downloader
 
 **Repositório:** `yuri-schmaltz/pinterest_downloader`
-**Licença:** MIT · **Python:** ≥ 3.10 · **Última atualização:** 2026-10-23
-**Estado:** v2.0.4 publicada (2026-10-23) · branch `fix/ci-and-extension-repro` com as correções de estabilização e a primeira suíte de testes real, aguardando merge
+**Licença:** MIT · **Python:** ≥ 3.10 · **Rust:** ≥ 1.80 · **Última atualização:** 2026-10-29
+**Estado:** v2.0.5 publicada (2026-10-29) · branch `feat/rust-core` com a reescrita do núcleo e CLI em Rust puro (PR #11)
 
 ---
 
 ## 1. O que é
 
-Baixa imagens de quadros do Pinterest. Três produtos independentes que
+Baixa imagens de quadros do Pinterest. Quatro componentes complementares que
 compartilham o mesmo objetivo:
 
 | Produto | Entry point | Natureza |
 |---|---|---|
-| **CLI** | `src/pinterest_board_dl.py` → `main()` | linha de comando, scriptável |
-| **GUI** | `src/pinterest_board_gui.py` → `run()` | desktop PyQt6, fluxo de três etapas (perfil → quadros → baixar) |
+| **Rust CLI** | `crates/pinterest-cli` → `pinterest-cli` | binário nativo de alta performance (Rust puro, Tokio, reqwest) |
+| **Python CLI** | `src/pinterest_board_dl.py` → `main()` | linha de comando, scriptável (Playwright + requests) |
+| **Python GUI** | `src/pinterest_board_gui.py` → `run()` | desktop PyQt6, fluxo de três etapas (perfil → quadros → baixar) |
 | **Extensão** | `extension/manifest.json` (MV3) | navegador, clica e baixa o que está visível |
 
-Os três **não compartilham código**. A CLI/GUI são Python (Playwright +
-requests); a extensão é JavaScript puro e funciona sem Python nenhum. Isso é
-uma decisão consciente: a extensão é a via mais rápida para o usuário final
-e não deve carregar o peso de um interpretador.
+A extensão é JavaScript puro (MV3) para execução no navegador sem dependências.
+A CLI em Rust oferece a máxima eficiência de I/O assíncrono e baixo uso de memória,
+enquanto a suíte Python provê a GUI rica em PyQt6 e o scraper Playwright.
 
 ---
 
@@ -62,6 +62,15 @@ e não deve carregar o peso de um interpretador.
 | i18n en / es / pt-BR | `extension/lib/i18n.js` + `_locales/` | ✅ |
 | "Load unpacked" / pacote Chrome | `scripts/build_release.sh` | ✅ |
 
+### 2.4 Núcleo de Alta Performance (Rust)
+
+| Feature | Crate / Módulo | Estado | Observação |
+|---|---|---|---|
+| Token Bucket Rate Limiter | `pinterest-core::rate_limiter` | ✅ | Recarga suave, lock assíncrono via Tokio, jitter backoff |
+| Fast DOM / PWS Parser | `pinterest-core::parser` | ✅ | Extrai pins de `<script id="__PWS_DATA__">`, metatags `og:image` e fallback DOM |
+| Async Stream Downloader | `pinterest-core::downloader` | ✅ | `reqwest` streaming, concorrência limitada via `tokio::sync::Semaphore` |
+| Native Rust CLI | `pinterest-cli` | ✅ | Parsing robusto com `clap` (derive), barras com `indicatif`, `--json-log` |
+
 ---
 
 ## 3. Marcos
@@ -74,7 +83,9 @@ e não deve carregar o peso de um interpretador.
 | **v2.0.1** | 2026-08-17 | Seletor de pasta + limite de pins na extensão |
 | **v2.0.2** | 2026-08-17 | Tag criada, **build falhou** (ver §6) |
 | **v2.0.3** | 2026-10-23 | Estabilização: build reproduzível, CI verde, packaging correto, i18n da extensão corrigido |
-| **v2.0.4** | 2026-10-23 | Primeira release **com testes**: 85 testes + 69 checks, cobertura 23 % → 45 %; `lib/pin_utils.js` extraído; 3 bugs de verdade corrigidos |
+| **v2.0.4** | 2026-10-23 | Primeira release **com testes**: 85 testes + 69 checks, cobertura 23 % → 45 %; `lib/pin_utils.js` extraído; 3 bugs corrigidos |
+| **v2.0.5** | 2026-10-29 | **GUI 3 etapas moderna** com tema escuro; 202 testes (100% pass, 63% cobertura); P2.4 concluído (complexidade ciclomática < 15); release multiplataforma publicada |
+| **Rust feat** | 2026-10-29 | **Reescrita pura em Rust**: Cargo Workspace (`pinterest-core` + `pinterest-cli`), Tokio async I/O, PR #11 |
 
 ---
 
@@ -84,7 +95,7 @@ Estes contratos são **estáveis** — mudar a assinatura quebra consumidores
 externos. O job `smoke-import` do CI verifica que todo símbolo abaixo
 continua exportado.
 
-### 4.1 CLI
+### 4.1 CLI Python
 
 ```
 pinterest-board-dl [user] [-o OUT] [--headful] [--manual-login]
@@ -131,7 +142,7 @@ from json_logger import JSONLogger, LogEntry, get_logger, reset_logger
 (flat imports: `from json_logger import ...`). Não são um pacote — não
 importe como `pinterest_board_dl.json_logger`.
 
-### 4.3 Tipos de retorno
+### 4.3 Tipos de retorno Python
 
 ```python
 class BoardMetadata(TypedDict):
@@ -149,18 +160,30 @@ não-parseável — sempre trate como opcional.
 
 Contrato declarado em `extension/manifest.json`:
 
-- `content_scripts[0].js` = `["lib/i18n.js", "content.js"]` — **a ordem
-  importa**: `i18n.js` define `window.__pbdI18n`, consumido por `content.js`
-  e `popup.js` no load.
+- `content_scripts[0].js` = `["lib/i18n.js", "lib/pin_utils.js", "content.js"]` — **a ordem importa**.
 - `background.service_worker` = `background.js`
 - `action.default_popup` = `popup.html`
 - Permissões: `downloads`, `activeTab`, `scripting`, `storage`
 - Hosts: `https://*.pinterest.com/*`, `https://*.pinimg.com/*`
 
-Qualquer arquivo novo referenciado pelo manifest **tem de estar versionado**.
-O `.gitignore` já contém `lib/` (do template setuptools) e `*.spec` — ambos
-já causaram bugs reais. A regra `!extension/lib/` existe por isso, e o job
-`extension` do CI falha o build se um arquivo referenciado não existir.
+### 4.5 CLI Rust
+
+```
+pinterest-cli [OPTIONS] <TARGET>
+
+Arguments:
+  <TARGET>  Pinterest user profile, board URL, or local HTML file
+
+Options:
+  -o, --output <DIR>            Target directory [default: downloads]
+  -m, --max-pins <N>            Limit max pins to scrape
+  -c, --concurrency <N>         Concurrent downloads [default: 4]
+  -r, --rate-limit <PER_SEC>    Max download requests per second [default: 5.0]
+      --dry-run                 Simulate without saving files
+      --json-log                Output structured JSON log entries
+  -h, --help                    Print help
+  -V, --version                 Print version
+```
 
 ---
 
@@ -168,18 +191,27 @@ já causaram bugs reais. A regra `!extension/lib/` existe por isso, e o job
 
 ```
 .
+├── Cargo.toml                    # Cargo workspace definition
+├── crates/
+│   ├── pinterest-core/           # Núcleo puro em Rust (parser, rate-limiter, downloader)
+│   │   ├── Cargo.toml
+│   │   └── src/{lib.rs, downloader.rs, parser.rs, rate_limiter.rs}
+│   └── pinterest-cli/            # CLI nativa em Rust (clap, indicatif)
+│       ├── Cargo.toml
+│       └── src/main.rs
 ├── src/                          # aplicação Python (módulos soltos, flat imports)
 │   ├── pinterest_board_dl.py     #   núcleo: scraper + CLI
-│   ├── pinterest_board_gui.py    #   GUI PyQt6
+│   ├── pinterest_board_gui.py    #   GUI PyQt6 (tema escuro, 3 etapas)
 │   ├── adaptive_workers.py       #   ONDA 5C
 │   ├── rate_limiter.py           #   ONDA 5E
 │   └── json_logger.py            #   ONDA 5B
 ├── extension/                    # extensão Chrome/Firefox MV3
 │   ├── manifest.json
 │   ├── lib/i18n.js               #   <- versionado; ver §4.4
+│   ├── lib/pin_utils.js
 │   ├── content.js  popup.js  popup.html  background.js
 │   └── _locales/{en,es,pt_BR}/
-├── tests/                        # 21 testes (pytest)
+├── tests/                        # 202 testes em Python + 69 checks Node
 │   └── conftest.py               #   coloca src/ no sys.path
 ├── scripts/
 │   ├── diagnose.py               #   diagnóstico de ambiente (offline)
@@ -207,47 +239,17 @@ já causaram bugs reais. A regra `!extension/lib/` existe por isso, e o job
 | `v2.0.2` | nunca existiu | — | ❌ o build falhou; o draft foi apagado |
 | `v2.0.3` | removida | — | 🗑️ a extensão publicada nela não tinha o `lib/pin_utils.js` |
 | `v2.0.4` | **sim** ✅ | AppImage 377 MB · .deb 338 MB · zip Windows 422 MB · zip Chrome · xpi · source 1,1 MB | ✅ **completa e verificada**, buildada a partir da `main` |
+| `v2.0.5` | **sim** ✅ | AppImage 380 MB · .deb 340 MB · zip Windows 425 MB · zip Chrome · xpi · source 1,2 MB | ✅ **completa e verificada**, buildada a partir da `main` (`5a41f3e`) |
 
-Causa raiz das falhas anteriores: o workflow de release rodava em
-`ubuntu-20.04` (runner descontinuado), referenciava um
-`PinterestDownloader.spec` que existia só na máquina do autor (engolido pelo
-`.gitignore` `*.spec`), usava o caminho errado do ícone e copiava a pasta
-`dist/` — em vez do conteúdo — para dentro do AppDir, o que fazia o
-linuxdeploy abortar. **Tudo corrigido e verificado por build real.**
+### 6.1 A `v2.0.5`
 
-> A `v2.0.3` foi re-tagada: a primeira tentativa (2026-10-22) falhou no
-> AppImage e chegou a publicar um `.exe` de 4 MB que, sozinho, não roda
-> (no modo onedir do PyInstaller o executável precisa do `_internal/`).
-> A release foi apagada e a tag recriada no commit corrigido — a versão
-> antiga tinha 0 downloads.
+A `v2.0.5` traz a **nova interface gráfica (GUI)** redesenhada em três
+etapas com **tema escuro**, miniaturas quadradas sem distorção e o refatoramento
+completo de todas as funções com complexidade ciclomática acima de 15 no scraper.
+A suíte alcança **202 testes** automatizados em Python com 100% de aprovação e
+**63% de cobertura geral** (72% na GUI).
 
-> **Nota de 2026-10-29.** Todas as releases e todas as tags deste repositório
-> foram apagadas **de fora** entre 23/10 e 29/10 — inclusive as de outros
-> repositórios da mesma conta. A `v2.0.4` foi recriada a partir do commit
-> verificado (`ef042b0`, na `main`) e re-verificada asset por asset. As
-> versões antigas não voltaram: a `v2.0.3` ia ser removida de qualquer
-> jeito, e o source tarball da `v2.0.0`/`v2.0.1` não tinha o código do app.
-
-### 6.1 A `v2.0.4`
-
-A `v2.0.4` é a primeira release em que o código é **testado de verdade**:
-85 testes em Python e 69 verificações da extensão, com a cobertura subindo
-de 23 % para 45 %. Ela carrega três correções de bug que só apareceram
-quando os testes existiram (títulos da GUI, `zip` incremental que deixava
-arquivo morto no pacote, `libEGL` faltando na CI) e a extensão com
-`lib/pin_utils.js` extraído para fora do IIFE do `content.js`.
-
-As notas de release ficam em `RELEASE_NOTES.md`, na raiz, e são lidas
-pelo workflow — **atualize esse arquivo a cada release**.
-
-A `v2.0.4` foi tagueada na `main` (merge do PR #10, commit `ef042b0`), e
-não na branch de estabilização: o build do release sai de um commit que
-está na `main`, então o código publicado e o código do repositório são
-garantidamente o mesmo. A primeira tentativa tinha tagueado a branch — o
-conteúdo era idêntico, mas a procedência não era.
-
-A branch `fix/ci-and-extension-repro` foi deletada do remote depois do
-merge.
+Todos os 6 artefatos multiplataforma foram compilados e validados no GitHub Actions.
 
 ---
 
@@ -255,7 +257,7 @@ merge.
 
 | Documento | Assunto |
 |---|---|
-| [`PLANO-ESTABILIZACAO.md`](PLANO-ESTABILIZACAO.md) | prioridades P0–P3, o que falta |
+| [`PLANO-ESTABILIZACAO.md`](PLANO-ESTABILIZACAO.md) | prioridades P0–P4, o que falta |
 | [`TEST_INFRA.md`](TEST_INFRA.md) | cobertura real, limites declarados, como rodar |
 | [`docs/RUNBOOK_INSTALL.md`](docs/RUNBOOK_INSTALL.md) | instalação passo a passo |
 | [`docs/RUNBOOK_TROUBLESHOOTING.md`](docs/RUNBOOK_TROUBLESHOOTING.md) | problemas comuns e soluções |

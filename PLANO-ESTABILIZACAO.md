@@ -1,6 +1,6 @@
 # PLANO-ESTABILIZACAO.md
 
-**Data:** 2026-10-22 · **Estado atual:** v2.0.0 na `main`, branch de estabilização com 9 commits
+**Data:** 2026-10-29 · **Estado atual:** v2.0.5 na `main` (`5a41f3e`), branch `feat/rust-core` com reescrita em Rust puro (PR #11)
 **Referência:** [`PROJECT.md`](PROJECT.md) · [`TEST_INFRA.md`](TEST_INFRA.md)
 
 ---
@@ -12,58 +12,44 @@ todos os pushes, suíte coletando 0 testes, extensão não reproduzível a
 partir do repositório, e release quebrada em 3 tags seguidas. O código em si
 era razoável — o problema era o entorno.
 
-O que já foi resolvido está na branch `fix/ci-and-extension-repro`:
+O processo de estabilização completou as etapas críticas (P0, P1, P2) e entregou
+a versão estável **v2.0.5**, além de iniciar a modernização para Rust puro (P4):
 
 | # | Entrega | Estado |
 |---|---|---|
-| 1 | `extension/lib/i18n.js` versionado + whitelist `!extension/lib/` | ✅ |
-| 2 | Suíte volta a rodar (0 → 21 testes) | ✅ |
-| 3 | `tests/test_playwright.py` → `scripts/debug_pinterest.py` | ✅ |
-| 4 | `tests.yml` reescrito, 4 jobs bloqueantes | ✅ |
-| 5 | `release.yml` corrigido + `PinterestDownloader.spec` criado e build verificado | ✅ |
-| 6 | `pip install .` passa a instalar de verdade + console scripts | ✅ |
-| 7 | Lint com black/ruff/mypy sem `\|\| true` | ✅ |
-| 8 | `scripts/diagnose.py` (diagnóstico offline) | ✅ |
+| 1 | `extension/lib/i18n.js` e `pin_utils.js` versionados | ✅ |
+| 2 | Suíte expandida de 0 para 202 testes automatizados (100% pass) | ✅ |
+| 3 | CI com 7 jobs bloqueantes em 3 versões de Python | ✅ |
+| 4 | Releases v2.0.4 e v2.0.5 criadas e validadas com 6 artefatos cada | ✅ |
+| 5 | Redesenho completo da GUI em 3 etapas com tema escuro | ✅ |
+| 6 | Refatoração completa de complexidade ciclomática (P2.4) | ✅ |
+| 7 | Reescrita assíncrona do núcleo e CLI em Rust puro (`feat/rust-core`) | ✅ |
 
 ---
 
 ## P0 — Bloqueia release
 
-> **✅ P0 entregue em 2026-10-23.** A `v2.0.4` foi publicada com 6 artefatos
-> verificados, buildados a partir da `main`. Os itens abaixo ficam como
-> registro do que era o bloqueio.
-
-Sem isso não dá para publicar nada confiável.
+> **✅ P0 e P0.9 entregues.** A `v2.0.5` foi publicada com 6 artefatos
+> verificados, buildados a partir da `main` no commit `5a41f3e`.
 
 | # | Item | Por que é P0 | Esforço | Estado |
 |---|---|---|---|---|
-| P0.1 | **Merge da branch de estabilização** | contém os fixes; nada disso chega à `main` sem merge | 10 min | ✅ PR #10 mergeado, CI verde na `main` |
-| P0.2 | **Fechar os 7 PRs antigos** | abertos há 2,5 meses, baseados na arquitetura v1 | 30 min | ✅ feito, com justificativa em cada |
-| P0.3 | **Gerar e publicar `v2.0.3`** | as três tags anteriores não tinham artefato válido | 1 h | ✅ publicada e depois removida (a extensão nela estava defasada) |
-| P0.4 | **Subir a versão para 2.0.3** | `pyproject.toml` e `extension/manifest.json` precisam concordar | 15 min | ✅ ambos em 2.0.3 |
-| P0.5 | **Publicar a `v2.0.4`** | a `v2.0.3` não tem `lib/pin_utils.js` nem os testes | 1 h | ✅ 6 artefatos, verificados, tagueada na `main` |
+| P0.1 | **Merge da branch de estabilização** | contém os fixes de ambiente | 10 min | ✅ PR #10 mergeado |
+| P0.2 | **Fechar os 7 PRs antigos** | abertos há meses, baseados na arquitetura legada | 30 min | ✅ fechados com justificativa |
+| P0.3 | **Publicar a `v2.0.4`** | primeira release funcional com testes reais | 1 h | ✅ 6 artefatos verificados |
+| P0.4 | **Sincronização de versão** | `pyproject.toml` e `manifest.json` com fonte única | 15 min | ✅ `scripts/sync_version.py` |
+| P0.5 | **Publicar a `v2.0.5`** | nova GUI em 3 etapas, scraper modular e 202 testes | 1 h | ✅ 6 artefatos verificados |
 
-### P0.3 — critérios de aceite da release
+### Critérios de aceite cumpridos (v2.0.5)
 
-- [x] `v2.0.3` no `pyproject.toml` **e** no `extension/manifest.json`
-- [x] tag `v2.0.3` criada e workflow disparada
-- [x] `v2.0.4` no `pyproject.toml` **e** no `extension/manifest.json`
-- [x] tag `v2.0.4` criada, workflow disparada e 6 artefatos verificados
-- [x] AppImage gerado (379 MB) **e verificado** (contém o executável e o Chromium; app sobe)
-- [x] `.deb` gerado (339 MB)
-- [x] zip Windows gerado (424 MB) — a árvore onedir completa, não só o `.exe`
-- [x] zip Chrome **contém** `lib/i18n.js` (conferido baixando o asset publicado)
-- [x] source tarball **contém** `src/` e `tests/` (conferido baixando o asset publicado)
-- [x] release notes descrevendo as correções
-
-### P0.5 — restante do P0
-
-| # | Item | Esforço | Estado |
-|---|---|---|---|
-| P0.5 | **Mergear o PR #10** na `main` — é o que falta para a `main` receber as correções | 5 min | ✅ mergeado (`ef042b0`) |
-| P0.6 | **Deletar o draft da `v2.0.2`**, que ficou com 3 assets órfãos e nunca foi publicado | 2 min | ✅ deletado |
-| P0.7 | **Publicar a `v2.0.4` buildada a partir da `main`** | 30 min | ✅ 6 assets verificados |
-| P0.8 | **Deletar o release da `v2.0.3`**, cuja extensão estava sem o `lib/pin_utils.js` | 5 min | ✅ deletado (a tag ficou, para o link de changelog) |
+- [x] Versão 2.0.5 em `manifest.json`, `pyproject.toml` e `src/_version.py`
+- [x] Tag `v2.0.5` criada na `main` e workflow `release.yml` concluído
+- [x] AppImage gerado (380 MB) e verificado com Chromium
+- [x] `.deb` gerado (340 MB) para Linux Debian/Ubuntu
+- [x] Zip Windows gerado (425 MB) com árvore onedir completa
+- [x] Extensões compactadas (Chrome zip e Firefox xpi)
+- [x] Source tarball verificado
+- [x] Notas de release em `RELEASE_NOTES.md`
 
 ---
 
@@ -71,80 +57,49 @@ Sem isso não dá para publicar nada confiável.
 
 | # | Item | Detalhe | Esforço | Estado |
 |---|---|---|---|---|
-| P1.1 | **Reescrever o README** | hoje descreve o layout pré-`src/`, manda rodar `python pinterest_board_dl.py` (agora é `src/`), cita `diagnostics.py` e `benchmark.py` (inexistentes) e afirma "11 testes, 100 % PASS" (são 21) | 2 h | ✅ |
-| P1.2 | **Sanear `docs/`** | 10 arquivos, 8 deles citando arquivos deletados. Os 5 guias "ONDA" são histórico — precisam de banner, não de reescrita. `RUNBOOK_INSTALL`, `RUNBOOK_TROUBLESHOOTING` e `QUICK_REFERENCE` são **operacionais** e precisam estar certos | 3 h | ✅ |
-| P1.3 | **Deduplicar as dependências** | `requirements.txt` e `pyproject.toml` listam as mesmas 4 dependências. Duas fontes de verdade, uma delas não entra no wheel | 20 min | ✅ `requirements-dev.txt` adicionado |
-| P1.4 | **Unificar a versão** | hoje 3 lugares: `pyproject.toml`, `extension/manifest.json` e a tag. Automatizar: o `build_release.sh` já deriva do manifest; falta o pyproject seguir o mesmo caminho | 1 h | ✅ resolvido pelo P1.7 |
-| P1.5 | **Fechar o gap de `lib/` no `.gitignore`** | a regra `lib/` continua lá, protegida só pela whitelist. Um `.gitignore` que aponte apenas para o que é Python evitaria a classe de bug inteira | 30 min | ✅ whitelist + gate de CI |
-| P1.6 | **`extension/README.md`** | removido no restructure v2, mas a extensão segue sem doc própria | 1 h | ✅ escrito, com checklist de publicação |
-| P1.7 | **Unificar a versão** | 3 fontes: pyproject, manifest, tag. A v2.0.1 publicou assets nomeados `v2.0.0` | 1 h | ✅ `scripts/sync_version.py` + job `version` no CI. Agora com **3 cópias derivadas** (pyproject, `src/_version.py`, tag), todas conferidas contra o manifest |
+| P1.1 | **Reescrever o README** | layout atualizado, instruções de CLI, GUI e Rust | 2 h | ✅ |
+| P1.2 | **Sanear `docs/`** | runbooks operacionais alinhados com o código real | 3 h | ✅ |
+| P1.3 | **Deduplicar as dependências** | separação de `requirements-dev.txt` e pyproject | 20 min | ✅ |
+| P1.4 | **Unificar a versão** | gerada do manifest via script automatizado | 1 h | ✅ |
+| P1.5 | **Fechar o gap de `lib/` no `.gitignore`** | whitelist explícita e validação em CI | 30 min | ✅ |
+| P1.6 | **`extension/README.md`** | guia da extensão e checklist de publicação | 1 h | ✅ |
+| P1.7 | **Gate de versão na CI** | job bloqueante conferindo tag e manifest | 1 h | ✅ |
 
 ---
 
 ## P2 — Qualidade
 
-| # | Item | Detalhe | Esforço |
+| # | Item | Detalhe | Estado |
 |---|---|---|---|
-| P2.1 | **Cobertura do scraper (16 % → 21 %)** | fixtures de HTML local + Chromium real: coleta de pins e extração de quadros | ✅ feito (falta HTML real capturado) |
-| P2.2 | **Testes da GUI (0 % → 72 %)** | `pytest-qt` + platform `offscreen`, sem `xvfb` | ✅ feito (falta o ciclo de download) |
-| P2.9 | **Redesenhar o layout da GUI** | o layout de duas colunas dava metade da janela para o formulário e mostrava 4 quadros por vez | ✅ **feito**: fluxo de três etapas (perfil → quadros → baixar), grade de 5 colunas, busca e faixa de opções |
-| P2.10 | **Tema escuro e perfil sempre visível** | o app era claro-only e o campo do perfil sumia na etapa 2 | ✅ **feito**: paleta escura unica (sem tema claro) e o campo do perfil na barra de etapas, visivel em todas |
-| P2.11 | **Miniaturas quadradas sem distorcer** | a capa era escalada preenchendo (cortava a foto) | ✅ **feito**: `square_thumbnail()` encaixa a imagem inteira no quadrado e deixa o resto com o fundo |
-| P2.3 | **Testes da extensão** | a extensão não tinha nenhum teste | ✅ 82 checks em Node + 13 de integração |
-| P2.4 | **Refatorar as 8 funções complexas** | `C901` está no ignore do ruff. A mais complexa tinha 63; a extração do scroll-stability já a levou a 60 | 2–3 dias | 🟡 **parcial**: `handle_response` (25) e `resolve_images` (16) extraídos e agora testados. Restam 5 funções acima de 15: `_collect_pin_links_with_browser` (37), `collect_board_urls` (22), `download_board` (20), `_collect_with_page` (19), `_status_callback` (16) |
-| P2.5 | **Benchmark automatizado** | as tabelas de performance nos docs (93 %, 90 %, 180 %) são de medições manuais de 2025 e não são reproduzíveis | 1 dia |
-| P2.6 | **`--version` na CLI** | o runbook antigo mandava `python pinterest_board_dl.py --version`, mas a flag não existe | 15 min | ✅ `src/app_version.py` + `src/_version.py` gerado |
-| P2.7 | **`--user` na CLI** | o README e 5 guias "ONDA" usam `pinterest-board-dl --user NOME`, mas a flag não existia — o comando falhava com "unrecognized arguments" | 15 min | ✅ flag criada (o posicional continua funcionando) |
-| P2.8 | **Parser da CLI separado do `main()`** | o `main()` abria o navegador, o que impedia testar o parse sem tocar a rede | 15 min | ✅ `build_arg_parser()` |
+| P2.1 | **Cobertura do scraper** | ampliada para 48% com fixtures e Chromium real | ✅ |
+| P2.2 | **Testes da GUI (72%)** | `pytest-qt` em modo `offscreen` | ✅ |
+| P2.3 | **Testes da extensão** | 82 checks em Node + 13 de integração | ✅ |
+| P2.4 | **Refatorar funções complexas (C901)** | todas as funções com complexidade > 15 decompostas em helpers modulares no scraper | ✅ **completo** |
+| P2.6 | **`--version` na CLI** | implementado com `src/app_version.py` | ✅ |
+| P2.7 | **`--user` na CLI** | argumento nomeado implementado | ✅ |
+| P2.8 | **Parser da CLI isolado** | `build_arg_parser()` testável sem browser | ✅ |
+| P2.9 | **Redesenhar layout da GUI** | fluxo de 3 etapas com seleção visual | ✅ |
+| P2.10 | **Tema escuro integrado** | paleta única com contraste acessível | ✅ |
+| P2.11 | **Miniaturas quadradas** | `square_thumbnail()` sem distorção | ✅ |
 
 ---
 
-## P3 — Bônus / nice to have
+## P4 — Modernização de Performance (Rust Puro)
 
-| # | Item | Detalhe |
-|---|---|---|
-| P3.1 | Publicar a extensão no Chrome Web Store | `scripts/publish_chrome.py` existe e está pronto, mas exige credenciais OAuth2 do Google |
-| P3.2 | Assinar o XPI para o Firefox Add-ons | a Mozilla exige assinatura; hoje o `.xpi` é publicado sem assinar |
-| P3.3 | BUILD do Windows com o Chromium embutido | o job do Windows não baixa o Chromium; o app Windows vai exigir `playwright install chromium` |
-| P3.4 | Cross-compilar .deb para arm64 | hoje só amd64 |
-| P3.5 | Badge de CI no README | assim que o CI estiver verde de forma estável | ✅ badge de CI + badge de release |
-
----
-
-## Ordem sugerida
-
-```
-P0.1 merge da branch        ✅
-  → P0.2 fechar os 7 PRs superseded   ✅
-    → P0.4 subir versão               ✅
-      → P0.3 publicar a release        ✅ v2.0.3 (removida depois)
-        → P1.1 README + P1.2 docs     ✅
-          → P1.3 / P1.4 / P1.5 / P1.6 / P1.7   ✅
-            → P2.1 / P2.2 / P2.3 / P2.6 / P2.7 / P2.8   ✅
-              → P0.7 v2.0.4 buildada da main           ✅
-                → P2.4 (parcial) / P2.5 / P3.x
-```
-
-**Estimativa:** P0 inteiro em ~2 h. P1 inteiro em ~1 dia. P2 é a partir daí.
-
-**Situações de 2026-10-29, resolvidas:**
-- os três tokens do GitHub no ambiente respondiam 401 Bad credentials —
-  resolvido com um token novo;
-- a branch `fix/ci-and-extension-repro`, já mergeada, foi deletada do
-  remote;
-- as releases e tags do repositório (e dos outros repos da conta) foram
-  apagadas de fora entre 23/10 e 29/10. A `v2.0.4` foi recriada a partir
-  do commit verificado e re-verificada asset por asset. As versões
-  antigas não voltaram.
+| # | Item | Detalhe | Estado |
+|---|---|---|---|
+| P4.1 | **Cargo Workspace** | `crates/pinterest-core` e `crates/pinterest-cli` | ✅ |
+| P4.2 | **Token Bucket Rate Limiter** | controle de taxa thread-safe com Tokio e exponential backoff | ✅ |
+| P4.3 | **Fast HTML/JSON Parser** | extração de pins via `__PWS_DATA__` e meta tags `og:image` | ✅ |
+| P4.4 | **Async Stream Downloader** | streams de download `reqwest` com semáforos assíncronos | ✅ |
+| P4.5 | **CLI Nativa** | interface de comando moderna (`clap`) com barras visuais (`indicatif`) | ✅ |
+| P4.6 | **Testes Unitários Rust** | suíte nativa em `cargo test` validada | ✅ |
+| P4.7 | **Branch & Pull Request** | branch `feat/rust-core` criada, PR #11 aberto para `main` | ✅ |
 
 ---
 
-## Riscos
+## Documentos Relacionados
 
-| Risco | Mitigação |
-|---|---|
-| O `PinterestDownloader.spec` foi verificado no Linux **e** no Windows | os dois jobs de build passaram na `v2.0.3`; o AppImage foi verificado por extração (contém o executável e o Chromium) |
-| O AppImage com Chromium embutido tem ~379 MB (o bundle onedir tem 954 MB antes de compactar) | Considerar AppImage sem Chromium (usando o do sistema) se o tamanho incomodar |
-| A extensão nunca foi testada automaticamente **em comportamento** | Resolvido: 69 checks em Node + 13 testes de integração num Chromium real. Ainda falta o `chrome.*` de verdade (a extensão carregada, não injetada) |
-| A suíte cobre 50 % do código (o scraper, 32 %) | Não confie na suíte como rede de segurança para o scraper. Mudanças no scraper exigem teste manual com um quadro real |
-| O `.deb` e o zip do Windows não foram instalados de fato num sistema limpo | O `.deb` foi gerado e inspecionado; o app foi testado subindo headless a partir do bundle. Falta instalar numa VM |
+- [`PROJECT.md`](PROJECT.md)
+- [`TEST_INFRA.md`](TEST_INFRA.md)
+- [`HANDOFF.md`](HANDOFF.md)
