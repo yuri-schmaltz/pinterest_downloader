@@ -22,7 +22,8 @@ from typing import Callable, Dict, Iterable, List, NamedTuple, TypedDict
 import requests
 from playwright.sync_api import sync_playwright
 
-from adaptive_workers import get_adaptive_manager
+from adaptive_workers import AdaptiveWorkerManager, get_adaptive_manager
+from app_version import get_version_banner
 from json_logger import get_logger
 from rate_limiter import get_rate_limiter
 
@@ -437,6 +438,133 @@ def download_media(
 # ---------- Coleta de links ----------
 
 
+def _pin_metadata_from_payload(pin: dict) -> PinMetadata | None:
+    """Converte um payload de pin do Pinterest em metadados normalizados.
+
+    Aceita tanto o formato antigo (`id` + `images.orig`) quanto o GraphQL
+    (`entityId` + `images_orig`/`images_736x`), porque a mesma função
+    agora serve aos dois caminhos de resposta.
+
+    Devolve None quando o payload nao tem id ou nao tem imagem -- nesse
+    caso nao ha nada de util para baixar.
+    """
+    pin_id = str(pin.get("entityId") or pin.get("id") or "")
+    if not pin_id:
+        return None
+
+    # O GraphQL achata as imagens no proprio objeto; o formato antigo as
+    # aninha em "images". Nos dois, a preferencia e a maior resolucao.
+    flat = pin.get("images_orig") or pin.get("images_736x") or pin.get("images_474x")
+    if flat:
+        image_url = flat.get("url")
+    else:
+        images = pin.get("images") or {}
+        best = images.get("orig") or images.get("736x") or {}
+        image_url = best.get("url")
+
+    if not image_url:
+        return None
+
+    pin_url = f"{PINTEREST_BASE_URL}/pin/{pin_id}/"
+    return {
+        "id": pin_id,
+        "url": pin_url,
+        "image_url": image_url,
+        "title": pin.get("title") or pin.get("gridTitle") or pin.get("grid_title", ""),
+        "description": pin.get("description", ""),
+    }
+
+
+def _looks_like_pin(obj: dict) -> bool:
+    """Um objeto do GraphQL tem forma de pin?
+
+    graphQL aninha os pins em varios niveis, entao a busca e feita por
+     forma, nao por posicao na arvore.
+    """
+    if not str(obj.get("entityId") or obj.get("id") or ""):
+        return False
+    return bool(obj.get("images") or obj.get("images_orig") or obj.get("images_736x") or obj.get("images_474x"))
+
+
+def _find_pins_in_graphql(obj) -> List[dict]:
+    """Acha todos os payloads de pin dentro de uma resposta GraphQL.
+
+    A resposta do GraphQL muda de forma conforme o endpoint, entao a
+    busca e recursiva: qualquer dict que tenha id e imagem conta como
+    pin, e seus valores sao vasculhados tambem.
+    """
+    found: List[dict] = []
+    if isinstance(obj, list):
+        for item in obj:
+            found.extend(_find_pins_in_graphql(item))
+        return found
+    if not isinstance(obj, dict):
+        return found
+
+    if _looks_like_pin(obj):
+        found.append(obj)
+
+    for value in obj.values():
+        if isinstance(value, (dict, list)):
+            found.extend(_find_pins_in_graphql(value))
+    return found
+
+
+def _pins_from_resource_payload(data: dict) -> List[dict]:
+    """Extrai a lista de pins de uma resposta `resource/...`."""
+    if "resource_response" in data:
+        payload = data["resource_response"]
+        if not isinstance(payload, dict):
+            return []
+        data_list = payload.get("data", [])
+    elif "data" in data:
+        data_list = data["data"]
+    else:
+        return []
+
+    if not isinstance(data_list, list):
+        return []
+    return [pin for pin in data_list if isinstance(pin, dict)]
+
+
+def _collect_pin_metadata(response) -> List[PinMetadata]:
+    """Extrai metadados de pins de uma resposta de rede do Pinterest.
+
+    Devolve a lista do que deu para extrair. Uma resposta que nao seja
+    do Pinterest, ou que nao seja JSON, devolve lista vazia -- nunca
+    levanta excecao, porque um erro aqui nao pode derrubar a coleta.
+    """
+    url = getattr(response, "url", "") or ""
+    is_resource = (
+        "resource/BoardFeedResource/get" in url
+        or "resource/UserPinsResource/get" in url
+        or "resource/BoardResource/get" in url
+    )
+    is_graphql = "/_/graphql/" in url
+
+    if not (is_resource or is_graphql):
+        return []
+
+    try:
+        data = response.json()
+    except Exception:
+        return []
+    if not isinstance(data, dict):
+        return []
+
+    if is_graphql:
+        candidates = _find_pins_in_graphql(data)
+    else:
+        candidates = _pins_from_resource_payload(data)
+
+    metas: List[PinMetadata] = []
+    for pin in candidates:
+        meta = _pin_metadata_from_payload(pin)
+        if meta is not None:
+            metas.append(meta)
+    return metas
+
+
 def _collect_pin_links_with_browser(
     page,
     board_url: str,
@@ -457,101 +585,8 @@ def _collect_pin_links_with_browser(
 
     def handle_response(response):
         """Intercepta respostas XHR/Fetch para extrair metadados dos pins."""
-        is_resource = (
-            "resource/BoardFeedResource/get" in response.url
-            or "resource/UserPinsResource/get" in response.url
-            or "resource/BoardResource/get" in response.url
-        )
-        is_graphql = "/_/graphql/" in response.url
-
-        if is_resource or is_graphql:
-            try:
-                data = response.json()
-                data_list = []
-
-                if is_resource:
-                    if "resource_response" in data:
-                        data_list = data["resource_response"].get("data", [])
-                    elif "data" in data:
-                        data_list = data["data"]
-                elif is_graphql:
-                    # GraphQL pode retornar múltiplos objetos ou um feed aninhado
-                    def find_pins_graphql(obj):
-                        if not isinstance(obj, (dict, list)):
-                            return
-                        if isinstance(obj, list):
-                            for item in obj:
-                                find_pins_graphql(item)
-                            return
-
-                        # Tentar identificar se é um Pin pelos campos de imagem e ID
-                        imgs_dict = obj.get("images", {})
-                        # Pinterest novo (GraphQL) usa campos planos como images_736x, images_orig
-                        flat_orig = obj.get("images_orig") or obj.get("images_736x") or obj.get("images_474x")
-
-                        pid = str(obj.get("entityId") or obj.get("id") or "")
-
-                        if pid and (imgs_dict or flat_orig):
-                            purl = f"{PINTEREST_BASE_URL}/pin/{pid}/"
-
-                            iurl = None
-                            if flat_orig:
-                                iurl = flat_orig.get("url")
-                            elif imgs_dict:
-                                orig = imgs_dict.get("orig", {}) or imgs_dict.get("736x", {})
-                                iurl = orig.get("url")
-
-                            if iurl:
-                                metadata_cache[purl] = {
-                                    "id": pid,
-                                    "url": purl,
-                                    "image_url": iurl,
-                                    "title": obj.get("title") or obj.get("gridTitle") or obj.get("grid_title", ""),
-                                    "description": obj.get("description", ""),
-                                }
-
-                        for v in obj.values():
-                            if isinstance(v, (dict, list)):
-                                find_pins_graphql(v)
-
-                    find_pins_graphql(data)
-                    return  # Já processado recursivamente
-
-                if not isinstance(data_list, list):
-                    return
-                # Tentar extrair de diferentes formatos de resposta do Pinterest
-                if "resource_response" in data:
-                    data_list = data["resource_response"].get("data", [])
-                elif "data" in data:
-                    data_list = data["data"]
-
-                if not isinstance(data_list, list):
-                    return
-
-                for pin in data_list:
-                    if not isinstance(pin, dict):
-                        continue
-                    pin_id = str(pin.get("id", ""))
-                    if not pin_id:
-                        continue
-
-                    pin_url = f"{PINTEREST_BASE_URL}/pin/{pin_id}/"
-
-                    # Pegar melhor imagem disponível
-                    images = pin.get("images", {})
-                    orig = images.get("orig", {}) or images.get("736x", {})
-                    img_url = orig.get("url")
-
-                    if img_url:
-                        metadata_cache[pin_url] = {
-                            "id": pin_id,
-                            "url": pin_url,
-                            "image_url": img_url,
-                            "title": pin.get("title") or pin.get("grid_title", ""),
-                            "description": pin.get("description", ""),
-                        }
-            except Exception:
-                pass
+        for meta in _collect_pin_metadata(response):
+            metadata_cache[meta["url"]] = meta
 
     page.on("response", handle_response)
 
@@ -1101,6 +1136,65 @@ def create_session() -> requests.Session:
     return session
 
 
+def _partition_links(
+    links: Iterable[str],
+    cache: Dict[str, str],
+    intercepted: Dict[str, PinMetadata],
+) -> tuple[Dict[str, str], List[str]]:
+    """Separa os pins que já sabemos resolver dos que ainda vão ser buscados.
+
+    O que foi interceptado durante a navegação tem prioridade sobre o
+    cache: o metadado veio da página que o usuário está vendo agora, então
+    é mais fresco que qualquer coisa guardada em disco.
+    """
+    out: Dict[str, str] = {}
+    to_fetch: List[str] = []
+    for link in links:
+        if link in intercepted:
+            out[link] = intercepted[link]["image_url"]
+        elif link in cache:
+            out[link] = cache[link]
+        else:
+            to_fetch.append(link)
+    return out, to_fetch
+
+
+def _count_cache_hits(out: Dict[str, str], intercepted: Dict[str, PinMetadata]) -> tuple[int, int]:
+    """Quantos pins vieram do cache e quantos da interceptação."""
+    intercept_hits = len([link for link in out if link in intercepted])
+    cache_hits = len(out) - intercept_hits
+    return cache_hits, intercept_hits
+
+
+def _resolve_single_pin(
+    link: str,
+    session: requests.Session,
+    use_rate_limit: bool,
+    manager: AdaptiveWorkerManager | None = None,
+) -> tuple[str, str | None]:
+    """Resolve a imagem de um pin, com o fallback para o domínio mobile.
+
+    O Pinterest responde diferente em `www` e `br`: quando a URL canônica
+    falha, o domínio mobile costuma funcionar.
+    """
+    start_time = time.time()
+    img = fetch_pin_media(link, session, use_rate_limit=use_rate_limit)
+    if not img:
+        mobile = link.replace("www.pinterest.com", "br.pinterest.com")
+        img = fetch_pin_media(mobile, session, use_rate_limit=use_rate_limit)
+
+    latency_ms = (time.time() - start_time) * 1000
+
+    # Record metrics if adaptive
+    if manager:
+        if img:
+            manager.record_success(latency_ms)
+        else:
+            manager.record_failure()
+
+    return link, img
+
+
 def resolve_images(
     pin_links: Iterable[str],
     session: requests.Session,
@@ -1132,21 +1226,11 @@ def resolve_images(
     cache = load_pin_cache() if use_cache else {}
     intercepted = get_intercepted_metadata()
 
-    out: Dict[str, str] = {}
-    to_fetch: List[str] = []
-
     # Verificar quais pins já estão em cache ou foram interceptados
-    for link in links:
-        if link in intercepted:
-            out[link] = intercepted[link]["image_url"]
-        elif link in cache:
-            out[link] = cache[link]
-        else:
-            to_fetch.append(link)
+    out, to_fetch = _partition_links(links, cache, intercepted)
+    cache_hits, intercept_hits = _count_cache_hits(out, intercepted)
 
     processed = len(out)
-    cache_hits = len(out) - len([link for link in out if link in intercepted])
-    intercept_hits = len([link for link in out if link in intercepted])
 
     # Se tudo está em cache ou interceptado, retornar rápido
     if not to_fetch:
@@ -1162,22 +1246,7 @@ def resolve_images(
         return out
 
     def work(link: str) -> tuple[str, str | None]:
-        start_time = time.time()
-        img = fetch_pin_media(link, session, use_rate_limit=rate_limiting)
-        if not img:
-            mobile = link.replace("www.pinterest.com", "br.pinterest.com")
-            img = fetch_pin_media(mobile, session, use_rate_limit=rate_limiting)
-
-        latency_ms = (time.time() - start_time) * 1000
-
-        # Record metrics if adaptive
-        if manager:
-            if img:
-                manager.record_success(latency_ms)
-            else:
-                manager.record_failure()
-
-        return link, img
+        return _resolve_single_pin(link, session, rate_limiting, manager)
 
     with ThreadPoolExecutor(max_workers=actual_workers) as ex:
         for idx, (link, img) in enumerate(ex.map(work, to_fetch), 1):
@@ -1531,11 +1600,30 @@ def _cli_status_printer(stage: str, data: Dict) -> None:
         print(data.get("message", ""))
 
 
-def main() -> None:
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Monta o parser de argumentos da CLI.
+
+    Fica separado do `main()` para que os testes possam exercitar o
+    parse sem disparar o download -- o `main()` abre o navegador e
+    toca a rede, o que a suite nao faz.
+    """
     ap = argparse.ArgumentParser(description="Baixa imagens de TODOS os quadros públicos de um usuário do Pinterest.")
     ap.add_argument(
         "user",
+        nargs="?",
         help="Usuário do Pinterest para baixar todos os quadros (ou URL do perfil)",
+    )
+    ap.add_argument(
+        "--user",
+        dest="user_option",
+        metavar="NOME",
+        help="Usuário do Pinterest (alias do argumento posicional)",
+    )
+    ap.add_argument(
+        "--version",
+        action="version",
+        version=get_version_banner(),
+        help="Mostra a versão e sai",
     )
     ap.add_argument("-o", "--out", default="pins", help="Pasta raiz de saída (default: ./pins)")
     ap.add_argument("--headful", action="store_true", help="Abre o navegador visível (útil p/ depurar/login)")
@@ -1590,9 +1678,19 @@ def main() -> None:
         action="store_true",
         help="Ativa limitação inteligente de requisições (ONDA 5E)",
     )
+    return ap
+
+
+def main() -> None:
+    ap = build_arg_parser()
     args = ap.parse_args()
 
-    if not args.user:
+    # O usuario pode vir como posicional ou como --user. O README e os
+    # guias antigos usam --user, a CLI original usava so o posicional --
+    # os dois funcionam.
+    user = args.user_option or args.user
+
+    if not user:
         ap.print_help()
         sys.exit(2)
 
@@ -1621,7 +1719,7 @@ def main() -> None:
     total_ok = 0
     total_all = 0
 
-    results = download_user_boards(args.user, options, status_cb=_cli_status_printer)
+    results = download_user_boards(user, options, status_cb=_cli_status_printer)
     if not results:
         sys.exit(5)
     for res in results:
