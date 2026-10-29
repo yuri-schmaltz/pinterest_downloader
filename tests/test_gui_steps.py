@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""Testes do layout em etapas da GUI.
+
+A janela virou um fluxo de tres passos:
+
+    1 Perfil  ->  2 Escolher quadros  ->  3 Baixar
+
+Estes testes travam esse fluxo: qual passo aparece quando, o que cada
+passo mostra, e o que a busca faz.
+
+Rodam com o platform plugin "offscreen", sem display e sem xvfb:
+    QT_QPA_PLATFORM=offscreen python -m pytest tests/test_gui_steps.py
+"""
+
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+import pytest
+
+pytest.importorskip("PyQt6", reason="PyQt6 nao instalado")
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PyQt6.QtCore import Qt  # noqa: E402
+
+import pinterest_board_gui as gui  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def app():
+    from PyQt6.QtWidgets import QApplication
+
+    yield QApplication.instance() or QApplication([])
+
+
+@pytest.fixture
+def window(app):
+    w = gui.MainWindow()
+    yield w
+    w.close()
+
+
+def _board(url="https://www.pinterest.com/usuario/decoracao/", title="Decoração", pin_count="1,2 mil"):
+    return {
+        "url": url,
+        "title": title,
+        "thumbnail_url": "",
+        "pin_count": pin_count,
+        "pin_count_int": 1200,
+    }
+
+
+class TestStepNavigation:
+    def test_starts_on_the_profile_step(self, window):
+        assert window._step == window.STEP_PROFILE
+        assert window.step_profile_panel.isVisibleTo(window)
+        assert not window.step_boards_panel.isVisibleTo(window)
+
+    def test_finding_boards_advances_to_the_boards_step(self, window):
+        window.on_boards_found([_board()])
+        assert window._step == window.STEP_BOARDS
+        assert window.step_boards_panel.isVisibleTo(window)
+
+    def test_finding_nothing_stays_on_the_profile_step(self, window):
+        """Sem quadro nao ha o que escolher -- nao deve pular de etapa."""
+        window.on_boards_found([])
+        assert window._step == window.STEP_PROFILE
+
+    def test_the_back_button_goes_back_to_the_profile(self, window):
+        window.on_boards_found([_board()])
+        window._go_back()
+        assert window._step == window.STEP_PROFILE
+
+    def test_the_back_button_is_hidden_on_the_first_step(self, window):
+        assert not window.back_button.isVisibleTo(window)
+
+    def test_the_start_button_only_shows_on_the_boards_step(self, window):
+        window.on_boards_found([_board()])
+        assert window.start_button.isVisibleTo(window)
+        window._go_back()
+        assert not window.start_button.isVisibleTo(window)
+
+    def test_cannot_jump_to_the_boards_step_without_boards(self, window):
+        window._go_to_step(window.STEP_BOARDS)
+        assert window._step == window.STEP_PROFILE
+
+    def test_cannot_jump_to_the_boards_step_without_boards_even_clicking_the_step(self, window):
+        """Clicar em 'Escolher quadros' sem ter buscado nada nao abre a etapa."""
+        window._go_to_step(window.STEP_BOARDS)
+        assert window._step == window.STEP_PROFILE
+        assert "Busque" in window.status_label.text()
+
+    def test_jumping_to_the_boards_step_works_once_boards_are_there(self, window):
+        window.on_boards_found([_board()])
+        window._go_back()
+        assert window._step == window.STEP_PROFILE
+        window._go_to_step(window.STEP_BOARDS)
+        assert window._step == window.STEP_BOARDS
+
+
+class TestStepContent:
+    def test_the_profile_step_holds_the_profile_field(self, window):
+        assert window.user_edit.parent() is not None
+        assert window.user_edit.isVisibleTo(window)
+
+    def test_the_boards_step_holds_the_grid(self, window):
+        window.on_boards_found([_board()])
+        assert window.selection_list.isVisibleTo(window)
+
+    def test_the_download_step_holds_the_progress_and_the_log(self, window):
+        window._set_step(window.STEP_DOWNLOAD)
+        assert window.board_progress.isVisibleTo(window)
+        assert window.log_edit.isVisibleTo(window)
+
+    def test_the_log_is_not_visible_before_the_download_step(self, window):
+        window.on_boards_found([_board()])
+        assert not window.log_edit.isVisibleTo(window)
+
+    def test_the_options_strip_is_on_the_boards_step(self, window):
+        window.on_boards_found([_board()])
+        assert window.output_edit.isVisibleTo(window)
+        assert window.workers_spin.isVisibleTo(window)
+
+
+class TestBoardSearch:
+    def _boards(self, window):
+        window.on_boards_found(
+            [
+                _board("/a/", "Decoração Minimalista"),
+                _board("/b/", "Culinária"),
+                _board("/c/", "Fotografia"),
+            ]
+        )
+
+    def test_the_search_hides_the_non_matching_boards(self, window):
+        self._boards(window)
+        window._filter_boards("culin")
+        visible = [i for i in range(window.selection_list.count()) if not window.selection_list.item(i).isHidden()]
+        assert len(visible) == 1
+        assert window.selection_list.item(visible[0]).text().startswith("Culinária")
+
+    def test_an_empty_search_shows_everything_again(self, window):
+        self._boards(window)
+        window._filter_boards("culin")
+        window._filter_boards("")
+        assert all(not window.selection_list.item(i).isHidden() for i in range(window.selection_list.count()))
+
+    def test_the_search_ignores_case(self, window):
+        self._boards(window)
+        window._filter_boards("CULINÁRIA")
+        visible = [i for i in range(window.selection_list.count()) if not window.selection_list.item(i).isHidden()]
+        assert len(visible) == 1
+
+    def test_a_search_with_no_match_hides_everything(self, window):
+        self._boards(window)
+        window._filter_boards("zzzz")
+        assert all(window.selection_list.item(i).isHidden() for i in range(window.selection_list.count()))
+
+    def test_select_all_only_marks_the_visible_boards(self, window):
+        """Com uma busca ativa, marcar todos nao pode marcar o que o
+        usuario nao ve."""
+        self._boards(window)
+        window._filter_boards("culin")
+        window.select_all_check.setChecked(True)
+        checked = [
+            i
+            for i in range(window.selection_list.count())
+            if window.selection_list.item(i).checkState() == Qt.CheckState.Checked
+        ]
+        assert len(checked) == 1
+        assert window.selection_list.item(checked[0]).text().startswith("Culinária")
+
+    def test_select_all_without_a_filter_marks_everything(self, window):
+        self._boards(window)
+        window.select_all_check.setChecked(True)
+        checked = [
+            i
+            for i in range(window.selection_list.count())
+            if window.selection_list.item(i).checkState() == Qt.CheckState.Checked
+        ]
+        assert len(checked) == 3
+
+
+class TestStepBar:
+    def test_the_bar_has_three_steps(self, window):
+        assert len(window._step_badges) == 3
+        assert len(window._step_labels) == 3
+
+    def test_the_active_step_is_marked(self, window):
+        window.on_boards_found([_board()])
+        assert window._step_badges[1].objectName() == "stepNumActive"
+        assert window._step_badges[0].objectName() == "stepNumDone"
+
+    def test_the_pending_step_is_neutral(self, window):
+        window.on_boards_found([_board()])
+        assert window._step_badges[2].objectName() == "stepNum"
+
+    def test_the_first_step_is_neutral_at_the_start(self, window):
+        assert window._step_badges[0].objectName() == "stepNumActive"
+
+
+class TestSearchField:
+    def test_the_search_field_exists(self, window):
+        assert window.search_edit is not None
+
+    def test_the_search_field_filters_the_list(self, window):
+        window.on_boards_found([_board("/a/", "Decoração"), _board("/b/", "Culinária")])
+        window.search_edit.setText("culin")
+        visible = [i for i in range(window.selection_list.count()) if not window.selection_list.item(i).isHidden()]
+        assert len(visible) == 1
+
+
+if __name__ == "__main__":
+    sys.exit(pytest.main([__file__, "-v"]))

@@ -15,8 +15,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
-    QGridLayout,
-    QGroupBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -28,6 +27,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -215,6 +215,80 @@ class DownloadWorker(QThread):
 
 # ---------- UI Constants ----------
 
+# O layout em etapas: barra de passos no topo, uma tela por passo, e
+# um rodape com as acoes. As cores seguem o QSS principal (vermelho do
+# Pinterest), mas o fundo e as bordas sao mais leves.
+WIZARD_QSS = """
+#stepsBar {
+    background: #FFFFFF;
+    border-bottom: 1px solid #E2E5EA;
+}
+#stepNum {
+    background: #EDEFF2;
+    color: #6B7280;
+    border-radius: 13px;
+    font-weight: bold;
+    min-width: 26px;
+    max-width: 26px;
+    min-height: 26px;
+    max-height: 26px;
+}
+#stepNumActive {
+    background: #E60023;
+    color: #FFFFFF;
+    border-radius: 13px;
+    font-weight: bold;
+    min-width: 26px;
+    max-width: 26px;
+    min-height: 26px;
+    max-height: 26px;
+}
+#stepNumDone {
+    background: #DCF5E4;
+    color: #1E7B34;
+    border-radius: 13px;
+    font-weight: bold;
+    min-width: 26px;
+    max-width: 26px;
+    min-height: 26px;
+    max-height: 26px;
+}
+#stepLabel { color: #6B7280; }
+#stepLabelActive { color: #1F2430; font-weight: bold; }
+#stepLabelDone { color: #1E7B34; }
+#stepLine { background: #E2E5EA; max-height: 1px; min-height: 1px; border: none; }
+#stepTitle { color: #1F2430; font-size: 15px; font-weight: bold; }
+#stepHint { color: #6B7280; }
+#optionsStrip { background: #FFFFFF; border: 1px solid #E2E5EA; border-radius: 10px; }
+#stripLabel { color: #6B7280; font-size: 11px; font-weight: bold; }
+#footerBar { background: #FFFFFF; border-top: 1px solid #E2E5EA; }
+#progressCard { background: #FFFFFF; border: 1px solid #E2E5EA; border-radius: 10px; }
+#logCard { background: #FFFFFF; border: 1px solid #E2E5EA; border-radius: 10px; }
+QToolButton#btn_link {
+    background: transparent;
+    border: none;
+    color: #0076D3;
+    font-weight: bold;
+    padding: 2px 4px;
+    text-align: left;
+}
+QToolButton#btn_link:hover { color: #005A9E; }
+QPushButton#btn_back {
+    background: #EDEFF2;
+    color: #1F2430;
+}
+QPushButton#btn_back:hover { background: #E2E5EA; }
+QPushButton#btn_back:disabled { background: #EDEFF2; color: #9AA1AC; }
+QToolButton#disclosure {
+    border: none;
+    background: transparent;
+    color: #1F2430;
+    font-weight: bold;
+    padding: 4px 0;
+    text-align: left;
+}
+"""
+
 MAIN_QSS = """
 QGroupBox {
     border: 1px solid gray;
@@ -313,7 +387,7 @@ QTextEdit {
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Pinterest Board Downloader - Seleção Visual")
+        self.setWindowTitle("Pinterest Board Downloader")
         self.resize(1100, 750)
         self.worker: DownloadWorker | None = None
         self.boards_metadata: List[BoardMetadata] = []
@@ -322,7 +396,7 @@ class MainWindow(QMainWindow):
         self.url_to_title: dict[str, str] = {}
 
         # Aplicar estilos
-        self.setStyleSheet(MAIN_QSS)
+        self.setStyleSheet(MAIN_QSS + WIZARD_QSS)
 
         # Set application icon
         self._set_window_icon()
@@ -354,130 +428,178 @@ class MainWindow(QMainWindow):
             if isinstance(app_instance, QApplication):
                 app_instance.setWindowIcon(icon)
 
+    # --- layout em etapas -------------------------------------------
+    #
+    # A janela tem tres passos: 1) perfil, 2) escolher quadros,
+    # 3) baixar. Cada passo e uma tela propria; a barra do topo mostra
+    # onde voce esta, e o rodape traz as acoes do passo atual.
+    #
+    # Os nomes dos widgets nao mudaram -- e o que a GUI inteira (e os
+    # testes) usa: user_edit, selection_list, start_button, log_edit...
+    # So a organizacaovisual muda.
+
+    STEP_PROFILE = 1
+    STEP_BOARDS = 2
+    STEP_DOWNLOAD = 3
+
     def _build_ui(self) -> None:
         central = QWidget()
-        main_layout = QHBoxLayout(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # Coluna Esquerda: Configurações, Progresso e Log
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(self._build_steps_bar())
 
-        left_layout.addWidget(self._build_user_input())
-        left_layout.addWidget(self._build_options_group())
-        left_layout.addWidget(self._build_progress_group())
-        left_layout.addWidget(self._build_log_widget())
-        left_layout.addLayout(self._build_buttons())
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(0)
 
-        self.status_label = QLabel("Pronto.")
-        left_layout.addWidget(self.status_label)
+        self.step_profile_panel = self._build_step_profile()
+        self.step_boards_panel = self._build_step_boards()
+        self.step_download_panel = self._build_step_download()
 
-        # Coluna Direita: Seleção de Quadros
-        self.selection_panel = self._build_selection_panel()
+        self._step_panels = {
+            self.STEP_PROFILE: self.step_profile_panel,
+            self.STEP_BOARDS: self.step_boards_panel,
+            self.STEP_DOWNLOAD: self.step_download_panel,
+        }
+        # O painel de selecao e o passo 2. O atributo continua existindo
+        # porque e o que a GUI inteira (e os testes) referencia.
+        self.selection_panel = self.step_boards_panel
+        for panel in self._step_panels.values():
+            body_layout.addWidget(panel)
+            panel.hide()
 
-        main_layout.addWidget(left_widget, stretch=1)
-        main_layout.addWidget(self.selection_panel, stretch=1)
+        root.addWidget(body, 1)
+        root.addWidget(self._build_footer())
 
         self.setCentralWidget(central)
+        self._set_step(self.STEP_PROFILE)
 
-    def _build_user_input(self) -> QWidget:
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
+    def _build_steps_bar(self) -> QWidget:
+        """Barra de etapas no topo."""
+        bar = QFrame()
+        bar.setObjectName("stepsBar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(24, 14, 24, 14)
+        layout.setSpacing(0)
 
-        layout.addWidget(QLabel("Usuário ou URL:"))
+        self._step_badges: list[QLabel] = []
+        self._step_labels: list[QLabel] = []
+        self._step_buttons: list[QToolButton] = []
+
+        steps = (("1", "Perfil"), ("2", "Escolher quadros"), ("3", "Baixar"))
+        for i, (num, name) in enumerate(steps):
+            if i:
+                line = QFrame()
+                line.setObjectName("stepLine")
+                line.setFixedHeight(1)
+                line.setMinimumWidth(40)
+                layout.addWidget(line, 1)
+                layout.addSpacing(14)
+
+            badge = QLabel(num)
+            badge.setObjectName("stepNum")
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            badge.setFixedSize(28, 28)
+            layout.addWidget(badge)
+            layout.addSpacing(8)
+
+            # Os passos 1 e 2 sao clicaveis; o 3 e o resultado, entao
+            # nao faz sentido pular para ele antes da hora.
+            label = QLabel(name)
+            label.setObjectName("stepLabel")
+            if i < 2:
+                button = QToolButton()
+                button.setText(name)
+                button.setObjectName("btn_link")
+                button.setCursor(Qt.CursorShape.PointingHandCursor)
+                button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+                button.clicked.connect(lambda _checked=False, target=i + 1: self._go_to_step(target))
+                layout.addWidget(button)
+                self._step_buttons.append(button)
+            else:
+                layout.addWidget(label)
+                self._step_buttons.append(None)  # type: ignore[arg-type]
+
+            self._step_badges.append(badge)
+            self._step_labels.append(label)
+
+        layout.addSpacing(28)
+        layout.addStretch()
+        self.status_label = QLabel("Pronto.")
+        self.status_label.setStyleSheet("color: #6B7280;")
+        layout.addWidget(self.status_label)
+        return bar
+
+    def _build_step_profile(self) -> QWidget:
+        """Passo 1: de qual perfil vamos buscar os quadros."""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(24, 40, 24, 24)
+        layout.setSpacing(10)
+
+        title = QLabel("De qual perfil do Pinterest?")
+        title.setObjectName("stepTitle")
+        title.setMaximumWidth(720)
+        layout.addWidget(title)
+
+        hint = QLabel("Aceita o nome do usuário ou a URL do perfil.")
+        hint.setObjectName("stepHint")
+        hint.setMaximumWidth(720)
+        layout.addWidget(hint)
+        layout.addSpacing(10)
+
+        row = QWidget()
+        row.setMaximumWidth(720)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+
         self.user_edit = QLineEdit()
         self.user_edit.setPlaceholderText("Usuário ou link do perfil")
-        layout.addWidget(self.user_edit)
+        self.user_edit.setMinimumHeight(38)
+        row_layout.addWidget(self.user_edit, 1)
 
         self.list_boards_button = QPushButton("Listar Quadros")
         self.list_boards_button.setObjectName("btn_list")
         self.list_boards_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.list_boards_button.setMinimumHeight(38)
         self.list_boards_button.clicked.connect(self.start_discovery)
-        layout.addWidget(self.list_boards_button)
-        return widget
+        row_layout.addWidget(self.list_boards_button)
 
-    def _build_options_group(self) -> QGroupBox:
-        group = QGroupBox("Opções de download")
-        layout = QGridLayout(group)
+        layout.addWidget(row)
+        layout.addStretch()
+        return panel
 
-        self.output_edit = QLineEdit(str(Path("pins").resolve()))
-        select_button = QPushButton("Selecionar…")
-        select_button.clicked.connect(self._select_output_dir)
+    def _build_step_boards(self) -> QWidget:
+        """Passo 2: a grade de quadros e as opcoes de download."""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(24, 18, 24, 10)
+        layout.setSpacing(10)
 
-        self.max_pins_spin = QSpinBox()
-        self.max_pins_spin.setRange(0, 1000000)
-        self.max_pins_spin.setSpecialValueText("Sem limite")
-        self.max_pins_spin.setValue(0)
+        head = QWidget()
+        head_layout = QHBoxLayout(head)
+        head_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.scroll_pause_spin = QDoubleSpinBox()
-        self.scroll_pause_spin.setDecimals(2)
-        self.scroll_pause_spin.setRange(0.1, 10.0)
-        self.scroll_pause_spin.setValue(1.2)
+        title = QLabel("Escolha os quadros que quer baixar")
+        title.setObjectName("stepTitle")
+        head_layout.addWidget(title)
+        head_layout.addStretch()
 
-        self.workers_spin = QSpinBox()
-        self.workers_spin.setRange(1, 64)
-        self.workers_spin.setValue(16)
-        self.workers_spin.setToolTip(
-            "Número de downloads simultâneos dentro de um mesmo quadro.\nRecomendado: 16-32. Valores muito altos podem causar erros de rede."
-        )
-
-        self.boards_workers_spin = QSpinBox()
-        self.boards_workers_spin.setRange(1, 8)
-        self.boards_workers_spin.setValue(1)
-        self.boards_workers_spin.setToolTip(
-            "Número de quadros baixados ao mesmo tempo.\nRecomendado: 1-2. Aumentar muito consome muita CPU/RAM."
-        )
-
-        layout.addWidget(QLabel("Pasta de saída"), 0, 0)
-        layout.addWidget(self.output_edit, 0, 1)
-        layout.addWidget(select_button, 0, 2)
-
-        layout.addWidget(QLabel("Máximo de pins por quadro"), 2, 0)
-        layout.addWidget(self.max_pins_spin, 2, 1)
-
-        layout.addWidget(QLabel("Pausa entre rolagens (s)"), 3, 0)
-        layout.addWidget(self.scroll_pause_spin, 3, 1)
-
-        layout.addWidget(QLabel("Workers por quadro"), 4, 0)
-        layout.addWidget(self.workers_spin, 4, 1)
-
-        layout.addWidget(QLabel("Quadros em paralelo"), 5, 0)
-        layout.addWidget(self.boards_workers_spin, 5, 1)
-
-        self.manual_login_check = QCheckBox("Login Manual (perfis privados)")
-        self.manual_login_check.setChecked(False)
-        layout.addWidget(self.manual_login_check, 6, 0, 1, 3)
-
-        layout.setColumnStretch(1, 1)
-        return group
-
-    def _build_progress_group(self) -> QGroupBox:
-        group = QGroupBox("Progresso")
-        layout = QVBoxLayout(group)
-
-        self.board_progress = QProgressBar()
-        self.board_progress.setFormat("%v / %m imagens")
-        self.board_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.overall_progress = QProgressBar()
-        self.overall_progress.setFormat("%v / %m quadros")
-        self.overall_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.current_board_label = QLabel("Quadro atual")
-        layout.addWidget(self.current_board_label)
-        layout.addWidget(self.board_progress)
-        layout.addWidget(QLabel("Total de quadros"))
-        layout.addWidget(self.overall_progress)
-        return group
-
-    def _build_selection_panel(self) -> QGroupBox:
-        group = QGroupBox("Seleção de Quadros")
-        layout = QVBoxLayout(group)
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Buscar quadro…")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setMinimumWidth(240)
+        self.search_edit.textChanged.connect(self._filter_boards)
+        head_layout.addWidget(self.search_edit)
 
         self.select_all_check = QCheckBox("Selecionar Todos")
         self.select_all_check.stateChanged.connect(self._toggle_select_all)
-        layout.addWidget(self.select_all_check)
+        head_layout.addWidget(self.select_all_check)
+
+        layout.addWidget(head)
 
         self.selection_list = QListWidget()
         self.selection_list.setViewMode(QListWidget.ViewMode.IconMode)
@@ -487,41 +609,267 @@ class MainWindow(QMainWindow):
         self.selection_list.setWrapping(True)
         self.selection_list.setWordWrap(True)
         self.selection_list.setTextElideMode(Qt.TextElideMode.ElideRight)
-        self.selection_list.setIconSize(QSize(160, 160))
-        self.selection_list.setGridSize(QSize(200, 240))
-        self.selection_list.setSpacing(10)
+        self.selection_list.setIconSize(QSize(150, 150))
+        self.selection_list.setGridSize(QSize(186, 212))
+        self.selection_list.setSpacing(12)
         self.selection_list.itemChanged.connect(self._update_selection_state)
-        layout.addWidget(self.selection_list)
+        layout.addWidget(self.selection_list, 1)
+
+        layout.addWidget(self._build_options_strip())
 
         self.info_selection_label = QLabel("Nenhum quadro carregado.")
         layout.addWidget(self.info_selection_label)
+        return panel
 
-        return group
+    def _build_options_strip(self) -> QWidget:
+        """Faixa de opcoes abaixo da grade: destino e os ajustes."""
+        strip = QFrame()
+        strip.setObjectName("optionsStrip")
+        layout = QHBoxLayout(strip)
+        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setSpacing(14)
 
-    def _build_log_widget(self) -> QGroupBox:
-        group = QGroupBox("Log detalhado")
-        layout = QVBoxLayout(group)
+        layout.addWidget(self._strip_label("Destino"))
+        self.output_edit = QLineEdit(str(Path("pins").resolve()))
+        self.output_edit.setMinimumWidth(220)
+        layout.addWidget(self.output_edit, 3)
+
+        select_button = QPushButton("Selecionar…")
+        select_button.clicked.connect(self._select_output_dir)
+        layout.addWidget(select_button)
+
+        layout.addWidget(self._strip_label("Workers"))
+        self.workers_spin = QSpinBox()
+        self.workers_spin.setRange(1, 64)
+        self.workers_spin.setValue(16)
+        self.workers_spin.setToolTip(
+            "Número de downloads simultâneos dentro de um mesmo quadro.\n"
+            "Recomendado: 16-32. Valores muito altos podem causar erros de rede."
+        )
+        layout.addWidget(self.workers_spin)
+
+        layout.addWidget(self._strip_label("Máx. pins"))
+        self.max_pins_spin = QSpinBox()
+        self.max_pins_spin.setRange(0, 1000000)
+        self.max_pins_spin.setSpecialValueText("Sem limite")
+        layout.addWidget(self.max_pins_spin)
+
+        # O resto fica escondido ate o usuario pedir.
+        more = QWidget()
+        more_layout = QHBoxLayout(more)
+        more_layout.setContentsMargins(0, 0, 0, 0)
+        more_layout.setSpacing(12)
+
+        self.scroll_pause_spin = QDoubleSpinBox()
+        self.scroll_pause_spin.setDecimals(2)
+        self.scroll_pause_spin.setRange(0.1, 10.0)
+        self.scroll_pause_spin.setValue(1.2)
+        more_layout.addWidget(self._strip_field("Pausa (s)", self.scroll_pause_spin))
+
+        self.boards_workers_spin = QSpinBox()
+        self.boards_workers_spin.setRange(1, 8)
+        self.boards_workers_spin.setValue(1)
+        self.boards_workers_spin.setToolTip(
+            "Número de quadros baixados ao mesmo tempo.\n" "Recomendado: 1-2. Aumentar muito consome muita CPU/RAM."
+        )
+        more_layout.addWidget(self._strip_field("Quadros em paralelo", self.boards_workers_spin))
+
+        self.manual_login_check = QCheckBox("Login Manual (perfis privados)")
+        more_layout.addWidget(self.manual_login_check)
+        more_layout.addStretch()
+
+        layout.addWidget(self._build_disclosure("Mais opções", more), 1)
+        return strip
+
+    def _build_disclosure(self, title: str, content: QWidget) -> QWidget:
+        """Bloco que abre e fecha (o 'Mais opções')."""
+        holder = QWidget()
+        holder_layout = QVBoxLayout(holder)
+        holder_layout.setContentsMargins(0, 0, 0, 0)
+        holder_layout.setSpacing(2)
+
+        toggle = QToolButton()
+        toggle.setText(title)
+        toggle.setCheckable(True)
+        toggle.setChecked(False)
+        toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        toggle.setArrowType(Qt.ArrowType.RightArrow)
+        toggle.setObjectName("disclosure")
+
+        def on_toggle(checked: bool) -> None:
+            content.setVisible(checked)
+            toggle.setArrowType(Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
+
+        toggle.toggled.connect(on_toggle)
+        content.setVisible(False)
+
+        holder_layout.addWidget(toggle)
+        holder_layout.addWidget(content)
+        return holder
+
+    def _build_step_download(self) -> QWidget:
+        """Passo 3: o andamento e o log."""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(24, 18, 24, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("Baixando")
+        title.setObjectName("stepTitle")
+        layout.addWidget(title)
+
+        card = QFrame()
+        card.setObjectName("progressCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(16, 14, 16, 14)
+        card_layout.setSpacing(8)
+
+        self.current_board_label = QLabel("Quadro atual")
+        card_layout.addWidget(self.current_board_label)
+
+        self.board_progress = QProgressBar()
+        self.board_progress.setFormat("%v / %m imagens")
+        self.board_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(self.board_progress)
+
+        total_label = QLabel("Total de quadros")
+        total_label.setStyleSheet("color: #6B7280;")
+        card_layout.addWidget(total_label)
+
+        self.overall_progress = QProgressBar()
+        self.overall_progress.setFormat("%v / %m quadros")
+        self.overall_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(self.overall_progress)
+        layout.addWidget(card)
+
+        log_card = QFrame()
+        log_card.setObjectName("logCard")
+        log_layout = QVBoxLayout(log_card)
+        log_layout.setContentsMargins(16, 12, 16, 12)
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
         self.log_edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        layout.addWidget(self.log_edit)
-        return group
+        log_layout.addWidget(self.log_edit)
+        layout.addWidget(log_card, 1)
+        return panel
 
-    def _build_buttons(self) -> QHBoxLayout:
-        layout = QHBoxLayout()
+    def _build_footer(self) -> QWidget:
+        """Rodape com as acoes do passo atual."""
+        footer = QFrame()
+        footer.setObjectName("footerBar")
+        layout = QHBoxLayout(footer)
+        layout.setContentsMargins(24, 10, 24, 10)
+        layout.setSpacing(10)
+
+        self.back_button = QPushButton("← Voltar")
+        self.back_button.setObjectName("btn_back")
+        self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.back_button.clicked.connect(self._go_back)
+        layout.addWidget(self.back_button)
+
         layout.addStretch()
+
         self.start_button = QPushButton("Iniciar download")
         self.start_button.setObjectName("btn_start")
         self.start_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.start_button.setMinimumWidth(170)
         self.start_button.clicked.connect(self.start_download)
+        layout.addWidget(self.start_button)
+
         self.cancel_button = QPushButton("Cancelar")
         self.cancel_button.setObjectName("btn_cancel")
         self.cancel_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cancel_button.setMinimumWidth(110)
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self.cancel_download)
-        layout.addWidget(self.start_button)
         layout.addWidget(self.cancel_button)
-        return layout
+        return footer
+
+    def _strip_label(self, text: str) -> QLabel:
+        label = QLabel(text.upper())
+        label.setObjectName("stripLabel")
+        return label
+
+    def _strip_field(self, label: str, widget: QWidget) -> QWidget:
+        box = QWidget()
+        column = QVBoxLayout(box)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(2)
+        caption = QLabel(label)
+        caption.setObjectName("stripLabel")
+        column.addWidget(caption)
+        column.addWidget(widget)
+        return box
+
+    # --- navegacao entre passos -------------------------------------
+
+    def _set_step(self, step: int) -> None:
+        """Mostra um passo e atualiza a barra e o rodape."""
+        self._step = step
+        for number, panel in self._step_panels.items():
+            panel.setVisible(number == step)
+
+        for index, badge in enumerate(self._step_badges):
+            number = index + 1
+            if number == step:
+                badge.setObjectName("stepNumActive")
+                self._step_labels[index].setObjectName("stepLabelActive")
+            elif number < step:
+                badge.setObjectName("stepNumDone")
+                self._step_labels[index].setObjectName("stepLabelDone")
+            else:
+                badge.setObjectName("stepNum")
+                self._step_labels[index].setObjectName("stepLabel")
+            # setObjectName troca o estilo: e preciso reaplicar.
+            badge.style().unpolish(badge)
+            badge.style().polish(badge)
+            self._step_labels[index].style().unpolish(self._step_labels[index])
+            self._step_labels[index].style().polish(self._step_labels[index])
+
+        # O rotulo do passo ativo precisa acompanhar o botao, que tem
+        # estilo proprio.
+        for index, button in enumerate(self._step_buttons):
+            if button is None:
+                continue
+            active = index + 1 == step
+            button.setStyleSheet(
+                f"color: {'#1F2430' if active else '#0076D3'}; font-weight: {'bold' if active else 'normal'};"
+            )
+            self._step_labels[index].setText(button.text())
+
+        running = bool(self.worker and self.worker.isRunning())
+        self.back_button.setVisible(step != self.STEP_PROFILE)
+        self.back_button.setEnabled(step == self.STEP_BOARDS or not running)
+        self.start_button.setVisible(step == self.STEP_BOARDS)
+        self.cancel_button.setVisible(step == self.STEP_DOWNLOAD)
+
+    def _go_to_step(self, step: int) -> None:
+        """Vai para um passo, respeitando o que ja foi feito."""
+        if step == self.STEP_BOARDS and not self.boards_metadata:
+            self.status_label.setText("Busque os quadros primeiro.")
+            return
+        if step == self.STEP_DOWNLOAD and self.worker and self.worker.isRunning():
+            return
+        self._set_step(step)
+
+    def _go_back(self) -> None:
+        """O botao 'Voltar'."""
+        if self._step == self.STEP_DOWNLOAD:
+            if self.worker and self.worker.isRunning():
+                return
+            self._set_step(self.STEP_BOARDS)
+        elif self._step == self.STEP_BOARDS:
+            self._set_step(self.STEP_PROFILE)
+
+    def _filter_boards(self, text: str) -> None:
+        """Esconde os quadros que nao casam com a busca."""
+        needle = text.strip().lower()
+        for i in range(self.selection_list.count()):
+            item = self.selection_list.item(i)
+            if item is None:
+                continue
+            item.setHidden(bool(needle) and needle not in item.text().lower())
 
     # --- actions ---
     def _select_output_dir(self) -> None:
@@ -599,6 +947,7 @@ class MainWindow(QMainWindow):
         self.start_button.setEnabled(False)
         self.list_boards_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
+        self._set_step(self.STEP_DOWNLOAD)
 
     def _connect_worker_signals(self) -> None:
         assert self.worker is not None
@@ -689,6 +1038,8 @@ class MainWindow(QMainWindow):
             self.info_selection_label.setText("Nenhum quadro encontrado.")
             self.list_boards_button.setEnabled(True)
             self.start_button.setEnabled(False)
+            # Sem quadro nao ha o que escolher: fica no passo 1.
+            self._set_step(self.STEP_PROFILE)
             return
 
         import requests
@@ -740,12 +1091,17 @@ class MainWindow(QMainWindow):
         self.info_selection_label.setText(f"{len(boards)} quadros encontrados.")
         self.list_boards_button.setEnabled(True)
         self.start_button.setEnabled(False)
+        # Ha quadros para escolher: vai para o passo 2.
+        self._set_step(self.STEP_BOARDS)
 
     def _toggle_select_all(self, state: int) -> None:
         cs = Qt.CheckState.Checked if state == Qt.CheckState.Checked.value else Qt.CheckState.Unchecked
         for i in range(self.selection_list.count()):
             item = self.selection_list.item(i)
-            if item is not None:
+            # Com uma busca ativa, "selecionar todos" marca so o que
+            # esta visivel -- marcar o que o usuario nao ve seria
+            # surpreendente.
+            if item is not None and not item.isHidden():
                 item.setCheckState(cs)
         self._update_selection_state()
 
@@ -775,6 +1131,7 @@ class MainWindow(QMainWindow):
         self.list_boards_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.worker = None
+        self._set_step(self.STEP_DOWNLOAD)
 
     def on_cancelled(self) -> None:
         self.status_label.setText("Operação cancelada.")
@@ -817,6 +1174,8 @@ class MainWindow(QMainWindow):
         self.list_boards_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.worker = None
+        # Um erro devolve o usuario para onde a acao acontece.
+        self._set_step(self.STEP_BOARDS if self.boards_metadata else self.STEP_PROFILE)
 
     def on_manual_login_requested(self, board_url: str, message: str) -> None:
         dlg = QMessageBox(self)

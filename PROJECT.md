@@ -14,7 +14,7 @@ compartilham o mesmo objetivo:
 | Produto | Entry point | Natureza |
 |---|---|---|
 | **CLI** | `src/pinterest_board_dl.py` → `main()` | linha de comando, scriptável |
-| **GUI** | `src/pinterest_board_gui.py` → `run()` | desktop PyQt6, seleção visual de quadros |
+| **GUI** | `src/pinterest_board_gui.py` → `run()` | desktop PyQt6, fluxo de três etapas (perfil → quadros → baixar) |
 | **Extensão** | `extension/manifest.json` (MV3) | navegador, clica e baixa o que está visível |
 
 Os três **não compartilham código**. A CLI/GUI são Python (Playwright +

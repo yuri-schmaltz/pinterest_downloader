@@ -6,7 +6,7 @@
 Baixa imagens de quadros do Pinterest. Três produtos independentes, mesmo objetivo:
 
 - 🐍 **CLI** — linha de comando, para script e servidor
-- 🖼️ **GUI** — desktop PyQt6, com seleção visual de quadros e progresso
+- 🖼️ **GUI** — desktop PyQt6, em três etapas: perfil → escolher quadros → baixar
 - 🌐 **Extensão** — Chrome/Firefox (MV3), baixa o que está visível na página
 
 A CLI e a GUI são Python (Playwright + requests). A extensão é JavaScript
@@ -125,17 +125,22 @@ pinterest-board-gui          # instalado via pip install -e .
 python src/pinterest_board_gui.py
 ```
 
-A janela tem **duas colunas**:
+A janela é um fluxo de **três etapas**, com a barra do topo mostrando onde
+você está:
 
-- **Esquerda** — campo de usuário/URL do perfil, botão *Listar Quadros*,
-  opções de download, painel de progresso e log detalhado
-- **Direita** — *Seleção de Quadros*: os quadros encontrados aparecem em
-  grade, com miniatura, título e contagem de pins. Marque os que quiser
-  (checkbox) e clique em *Iniciar download*
+| Etapa | O que tem na tela |
+|---|---|
+| **1 · Perfil** | campo de usuário/URL e o botão *Listar Quadros* |
+| **2 · Escolher quadros** | a grade de quadros (miniatura, título e contagem de pins), a busca, o *Selecionar Todos* e uma faixa de opções (destino, workers, máximo de pins) |
+| **3 · Baixar** | o progresso (quadro atual e total de quadros) e o log detalhado |
 
 Fluxo: informo o usuário → *Listar Quadros* → marco os quadros →
-*Iniciar download*. O modo "quadro único" (uma URL de quadro direto) existe
-**apenas na CLI**.
+*Iniciar download*. O botão *← Voltar* volta uma etapa; as etapas 1 e 2
+também são clicáveis na barra do topo.
+
+A busca filtra a grade conforme você digita, e o *Selecionar Todos* marca
+só o que está visível na busca. O modo "quadro único" (uma URL de quadro
+direto) existe **apenas na CLI**.
 
 > Em máquina sem display, a GUI não abre. O modo `offscreen` existe para
 > testes: `QT_QPA_PLATFORM=offscreen python src/pinterest_board_gui.py`.

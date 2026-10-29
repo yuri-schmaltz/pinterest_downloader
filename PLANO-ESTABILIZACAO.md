@@ -86,7 +86,8 @@ Sem isso não dá para publicar nada confiável.
 | # | Item | Detalhe | Esforço |
 |---|---|---|---|
 | P2.1 | **Cobertura do scraper (16 % → 21 %)** | fixtures de HTML local + Chromium real: coleta de pins e extração de quadros | ✅ feito (falta HTML real capturado) |
-| P2.2 | **Testes da GUI (0 % → 61 %)** | `pytest-qt` + platform `offscreen`, sem `xvfb` | ✅ feito (falta o ciclo de download) |
+| P2.2 | **Testes da GUI (0 % → 72 %)** | `pytest-qt` + platform `offscreen`, sem `xvfb` | ✅ feito (falta o ciclo de download) |
+| P2.9 | **Redesenhar o layout da GUI** | o layout de duas colunas dava metade da janela para o formulário e mostrava 4 quadros por vez | ✅ **feito**: fluxo de três etapas (perfil → quadros → baixar), grade de 5 colunas, busca e faixa de opções |
 | P2.3 | **Testes da extensão** | a extensão não tinha nenhum teste | ✅ 82 checks em Node + 13 de integração |
 | P2.4 | **Refatorar as 8 funções complexas** | `C901` está no ignore do ruff. A mais complexa tinha 63; a extração do scroll-stability já a levou a 60 | 2–3 dias | 🟡 **parcial**: `handle_response` (25) e `resolve_images` (16) extraídos e agora testados. Restam 5 funções acima de 15: `_collect_pin_links_with_browser` (37), `collect_board_urls` (22), `download_board` (20), `_collect_with_page` (19), `_status_callback` (16) |
 | P2.5 | **Benchmark automatizado** | as tabelas de performance nos docs (93 %, 90 %, 180 %) são de medições manuais de 2025 e não são reproduzíveis | 1 dia |

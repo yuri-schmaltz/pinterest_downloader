@@ -1,6 +1,6 @@
 # TEST_INFRA.md — Cobertura real e limites declarados
 
-**Data da medição:** 2026-10-29 · **Branch:** `main`
+**Data da medição:** 2026-10-29 (rodada 2) · **Branch:** `main`
 **Comando:** `QT_QPA_PLATFORM=offscreen python -m coverage run --source=src -m pytest tests/ -q && python -m coverage report -m`
 
 > Este documento declara **o que a suíte cobre e o que ela não cobre**.
@@ -13,13 +13,13 @@
 
 | Métrica | Antes (2026-10-22) | 2026-10-23 | Agora (2026-10-29) |
 |---|---|---|---|
-| Testes coletados | 21 | 85 | **153** (+ 69 checks em Node) |
-| Testes passando | 21 | 85 | **153** (100 %) |
+| Testes coletados | 21 | 85 | 153 | **185** (+ 69 checks em Node) |
+| Testes passando | 21 | 85 | 153 | **185** (100 %) |
 | Falhas / erros de coleta | 0 | 0 | 0 |
 | Tempo de execução | ~3 s | ~26 s | ~28 s |
 | Dependências externas (rede) | nenhuma | **nenhuma** | **nenhuma** |
 | Browser | não usava | Chromium local, via `file://` | idem |
-| Cobertura total (`src/`) | 23 % | 45 % | **50 %** |
+| Cobertura total (`src/`) | 23 % | 45 % | **57 %** |
 
 Os 26 s são quase todos o browser: a coleta de pins espera a página
 assentar antes de rolar, e cada coleta custa alguns segundos. Não há
@@ -35,9 +35,9 @@ acesso à rede em nenhum teste.
 | `src/json_logger.py` | 85 | 85 % | 85 % | **85 %** | ✅ bem coberto |
 | `src/adaptive_workers.py` | 109 | 74 % | 74 % | **74 %** | 🟡 bom |
 | `src/pinterest_board_dl.py` | 810 | 16 % | 21 % | **32 %** | 🟡 o núcleo ainda é o elo fraco |
-| `src/pinterest_board_gui.py` | 491 | **0 %** | 61 % | **61 %** | ✅ era o pior buraco |
+| `src/pinterest_board_gui.py` | 699 | **0 %** | 61 % | **72 %** | ✅ era o pior buraco |
 | `src/app_version.py` | 31 | — | — | **68 %** | 🟡 novo |
-| **TOTAL** | **1 632** | 23 % | 45 % | **50 %** | |
+| **TOTAL** | **1 845** | 23 % | 45 % | **57 %** | |
 
 ### 2.1 O que mudou na rodada de 2026-10-29
 
@@ -64,8 +64,22 @@ acesso à rede em nenhum teste.
 
 Ficou de fora: o ciclo de download de verdade (a thread que chama o
 scraper), o diálogo de login manual e o *worker* em background. O resto da
-apresentação — lista de quadros, seleção, progresso, tratamento de erro —
-está coberto.
+apresentação — lista de quadros, seleção, progresso, tratamento de erro, o
+fluxo de três etapas e a busca — está coberto.
+
+### 2.4 A rodada do redesenho da GUI
+
+A janela deixou de ser duas colunas e virou um fluxo de três etapas
+(perfil → escolher quadros → baixar). O redesenho veio com 26 testes
+novos em `tests/test_gui_steps.py`, que travam:
+
+- qual passo aparece quando (buscar quadros avança, não achar nenhum não avança)
+- o que cada passo mostra (campo de perfil, grade, progresso e log)
+- a busca: filtra por título, ignora maiúsculas, e o *Selecionar Todos*
+  marca **só o que está visível** na busca
+
+Os 29 testes da GUI anterior (`tests/test_gui.py`) continuam passando sem
+alteração — os nomes dos widgets não mudaram, só a organização visual.
 
 ### 2.1 O que o número de 16 % em `pinterest_board_dl.py` significa
 
@@ -109,6 +123,7 @@ módulo não importar (ver §5).
 | `tests/test_metadata_extraction.py` | 40 | — | extração de metadados de pins |
 | `tests/test_resolve_images.py` | 15 | — | cache, interceptação, fallback mobile |
 | `tests/test_cli.py` | 19 | — | superfície da CLI (`--version`, `--user`) |
+| `tests/test_gui_steps.py` | 26 | **Qt (offscreen)** | o fluxo de três etapas da GUI e a busca |
 
 ### 3.1 `tests/test_11_rate_limiting.py` — 10 testes (ONDA 5E)
 
