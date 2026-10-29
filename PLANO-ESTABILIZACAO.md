@@ -124,12 +124,15 @@ P0.1 merge da branch        ✅
 
 **Estimativa:** P0 inteiro em ~2 h. P1 inteiro em ~1 dia. P2 é a partir daí.
 
-**Bloqueio atual (2026-10-29):** os três tokens do GitHub no ambiente
-(`GITHUB_TOKEN`, `GITHUB_PUSH_TOKEN`, `GITHUB_PAT`) respondem **401 Bad
-credentials**. Sem escrita remota não dá para deletar a branch já
-mergeada `fix/ci-and-extension-repro` nem as releases antigas
-`v2.0.0`/`v2.0.1` (cujo source tarball não tinha o código do app). O
-trabalho de código continua normal.
+**Situações de 2026-10-29, resolvidas:**
+- os três tokens do GitHub no ambiente respondiam 401 Bad credentials —
+  resolvido com um token novo;
+- a branch `fix/ci-and-extension-repro`, já mergeada, foi deletada do
+  remote;
+- as releases e tags do repositório (e dos outros repos da conta) foram
+  apagadas de fora entre 23/10 e 29/10. A `v2.0.4` foi recriada a partir
+  do commit verificado e re-verificada asset por asset. As versões
+  antigas não voltaram.
 
 ---
 

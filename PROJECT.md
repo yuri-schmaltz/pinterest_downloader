@@ -201,12 +201,12 @@ já causaram bugs reais. A regra `!extension/lib/` existe por isso, e o job
 
 | Tag | Release | Artefatos | Situação |
 |---|---|---|---|
-| `v1.1.0` | sim | AppImage (358 MB) | ✅ funcional |
-| `v2.0.0` | sim | zip Chrome + xpi + source | ⚠️ extensão funcionava; source **sem código** |
-| `v2.0.1` | sim | idem v2.0.0 (assets nomeados `v2.0.0`) | ⚠️ idem |
-| `v2.0.2` | **draft** | 3 assets | ❌ nunca publicada (build falhou) |
-| `v2.0.3` | **removida** | — | 🗑️ apagada: a extensão publicada nela não tinha o `lib/pin_utils.js`. A tag foi mantida, para o link de changelog |
-| `v2.0.4` | **sim** ✅ | AppImage 379 MB · .deb 339 MB · zip Windows 424 MB · zip Chrome · xpi · source 1,1 MB | ✅ **completa e verificada**, buildada a partir da `main` |
+| `v1.1.0` | removida | — | 🗑️ |
+| `v2.0.0` | removida | — | 🗑️ o source tarball não tinha o código do app |
+| `v2.0.1` | removida | — | 🗑️ idem |
+| `v2.0.2` | nunca existiu | — | ❌ o build falhou; o draft foi apagado |
+| `v2.0.3` | removida | — | 🗑️ a extensão publicada nela não tinha o `lib/pin_utils.js` |
+| `v2.0.4` | **sim** ✅ | AppImage 377 MB · .deb 338 MB · zip Windows 422 MB · zip Chrome · xpi · source 1,1 MB | ✅ **completa e verificada**, buildada a partir da `main` |
 
 Causa raiz das falhas anteriores: o workflow de release rodava em
 `ubuntu-20.04` (runner descontinuado), referenciava um
@@ -220,6 +220,13 @@ linuxdeploy abortar. **Tudo corrigido e verificado por build real.**
 > (no modo onedir do PyInstaller o executável precisa do `_internal/`).
 > A release foi apagada e a tag recriada no commit corrigido — a versão
 > antiga tinha 0 downloads.
+
+> **Nota de 2026-10-29.** Todas as releases e todas as tags deste repositório
+> foram apagadas **de fora** entre 23/10 e 29/10 — inclusive as de outros
+> repositórios da mesma conta. A `v2.0.4` foi recriada a partir do commit
+> verificado (`ef042b0`, na `main`) e re-verificada asset por asset. As
+> versões antigas não voltaram: a `v2.0.3` ia ser removida de qualquer
+> jeito, e o source tarball da `v2.0.0`/`v2.0.1` não tinha o código do app.
 
 ### 6.1 A `v2.0.4`
 
@@ -238,6 +245,9 @@ não na branch de estabilização: o build do release sai de um commit que
 está na `main`, então o código publicado e o código do repositório são
 garantidamente o mesmo. A primeira tentativa tinha tagueado a branch — o
 conteúdo era idêntico, mas a procedência não era.
+
+A branch `fix/ci-and-extension-repro` foi deletada do remote depois do
+merge.
 
 ---
 
