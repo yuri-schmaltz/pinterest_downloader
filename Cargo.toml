@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "crates/pinterest-core",
+    "crates/pinterest-cli",
+]
+resolver = "2"

@@ -1,0 +1,16 @@
+[package]
+name = "pinterest-cli"
+version = "2.0.5"
+edition = "2021"
+authors = ["Yuri Schmaltz"]
+description = "High performance CLI for Pinterest Board Downloader"
+license = "MIT"
+
+[dependencies]
+pinterest-core = { path = "../pinterest-core" }
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4.4", features = ["derive"] }
+indicatif = { version = "0.17", features = ["tokio"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1.0"
