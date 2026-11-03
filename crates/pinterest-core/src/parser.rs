@@ -80,7 +80,7 @@ fn pin_from_pws_dict(d: &serde_json::Map<String, Value>) -> Option<PinMetadata> 
     })
 }
 
-pub fn extract_boards_from_pws(val: &Value, username: &str) -> Vec<BoardMetadata> {
+pub fn extract_boards_from_pws(val: &Value, _username: &str) -> Vec<BoardMetadata> {
     let mut boards = Vec::new();
     // Navega em busca de boards de perfil
     if let Value::Object(map) = val {

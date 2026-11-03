@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
-use tracing::{info, warn};
+use tracing::info;
 
 pub struct Downloader {
     client: Client,

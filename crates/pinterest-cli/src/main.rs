@@ -1,5 +1,4 @@
 use clap::Parser;
-use indicatif::{ProgressBar, ProgressStyle};
 use pinterest_core::{DownloadOptions, Downloader};
 use std::collections::HashMap;
 use std::path::PathBuf;
