@@ -130,6 +130,18 @@ tar -czf "$DIST/pinterest-pro-downloader-source-v${VERSION}.tar.gz" \
     docs \
     assets \
     .github \
+    Cargo.toml \
+    Cargo.lock \
+    crates \
+    PinterestDownloader.spec \
+    hooks \
+    PROJECT.md \
+    HANDOFF.md \
+    TEST_INFRA.md \
+    PLANO-ESTABILIZACAO.md \
+    RELEASE_NOTES.md \
+    requirements-dev.txt \
+    .gitattributes \
     pyproject.toml \
     requirements.txt \
     README.md \
@@ -149,6 +161,12 @@ if ! printf '%s\n' "$ARCHIVE_CONTENTS" | grep -q "^tests/"; then
     echo "ERROR: source archive does not contain tests/ -- refusing to publish" >&2
     exit 1
 fi
+for required in Cargo.toml Cargo.lock crates/pinterest-core/Cargo.toml crates/pinterest-cli/Cargo.toml crates/pinterest-browser/Cargo.toml PinterestDownloader.spec hooks/playwright_browsers.py; do
+    if ! printf '%s\n' "$ARCHIVE_CONTENTS" | grep -Fxq "$required"; then
+        echo "ERROR: source archive missing $required" >&2
+        exit 1
+    fi
+done
 echo "    ✓ $DIST/pinterest-pro-downloader-source-v${VERSION}.tar.gz"
 
 echo
