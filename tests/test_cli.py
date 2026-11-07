@@ -177,3 +177,16 @@ class TestCliUserFlag:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+@pytest.mark.parametrize("target,is_board", [("https://www.pinterest.com/alice/art/", True), ("alice", False)])
+def test_cli_dispatches_board_and_profile(target, is_board, tmp_path, monkeypatch):
+    import pinterest_board_dl as module
+
+    calls = []
+    result = module.BoardDownloadResult("https://www.pinterest.com/alice/art/", 1, 1, str(tmp_path))
+    monkeypatch.setattr(sys, "argv", ["pinterest-board-dl", target, "--out", str(tmp_path)])
+    monkeypatch.setattr(module, "download_board", lambda *a, **kw: calls.append("board") or result)
+    monkeypatch.setattr(module, "download_user_boards", lambda *a, **kw: calls.append("profile") or [result])
+    module.main()
+    assert calls == ["board" if is_board else "profile"]

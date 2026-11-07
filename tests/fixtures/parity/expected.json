@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "dynamic_board": {
+    "pin_ids": ["101", "102"],
+    "media": {"101": "/media/101.jpg", "102": "/media/102.jpg"},
+    "source": "synthetic local virtualized board, two network responses",
+    "recommendation_ids": []
+  }
+}
