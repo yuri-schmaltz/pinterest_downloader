@@ -1,3 +1,5 @@
+> **Registro histórico.** Métricas e afirmações deste documento se referem à época da implementação. Para o estado atual, consulte [README](../README.md), [PROJECT](../PROJECT.md) e [TEST_INFRA](../TEST_INFRA.md).
+
 > **Documento histórico — 12 de janeiro de 2026.**
 > Descreve o estado do projeto na época da ONDA 1 a 5E. O código evoluiu
 > bastante desde então: o repositório foi reestruturado para `src/`, a suíte
@@ -12,9 +14,9 @@
 # 🎯 RESUMO VISUAL: TODAS AS ONDAS IMPLEMENTADAS
 
 ## ✅ Status Geral
-**Data:** 12 de janeiro de 2026  
-**Commits:** 11 commits  
-**Testes:** 11/11 PASS (100%)  
+**Data:** 12 de janeiro de 2026
+**Commits:** 11 commits
+**Testes:** 11/11 PASS (100%)
 **Cobertura:** ONDAs 1-5E completas
 
 ---
@@ -324,7 +326,7 @@ python src/pinterest_board_dl.py --user <usuario> \
 
 ---
 
-**Resumo criado em:** 12 de janeiro de 2026  
-**Versão:** 1.0.0  
-**Autor:** GitHub Copilot  
+**Resumo criado em:** 12 de janeiro de 2026
+**Versão:** 1.0.0
+**Autor:** GitHub Copilot
 **Status:** ✅ TODAS AS ONDAS 1-5E COMPLETAS

@@ -1,3 +1,5 @@
+> **Registro histórico.** Métricas e afirmações deste documento se referem à época da implementação. Para o estado atual, consulte [README](../README.md), [PROJECT](../PROJECT.md) e [TEST_INFRA](../TEST_INFRA.md).
+
 > **Documento histórico — 11 de janeiro de 2026.**
 > Descreve o estado do projeto na época da ONDA 1 a 5. O código evoluiu
 > bastante desde então: o repositório foi reestruturado para `src/`, a suíte
@@ -11,9 +13,9 @@
 
 # 📊 RELATÓRIO DE AUDITORIA — HIGIENE, LIMPEZA, OTIMIZAÇÃO E PERFORMANCE
 
-**Projeto:** Pinterest Board Downloader  
-**Data:** 11 de janeiro de 2026  
-**Tipo:** Aplicação Python (CLI + GUI PyQt6)  
+**Projeto:** Pinterest Board Downloader
+**Data:** 11 de janeiro de 2026
+**Tipo:** Aplicação Python (CLI + GUI PyQt6)
 **Status Pinokio:** ⚠️ **NÃO DETECTADO** — App standalone sem integração Pinokio
 
 ---
@@ -278,7 +280,7 @@ USER_BOARDS_RE = re.compile(r"^https?://(?:www|br)\\.pinterest\\.com/([^/]+)/?$"
 2. Critério PASS: "Compilado sem erros"
 3. Executar: `grep -n "timeout=" pinterest_board_dl.py | grep -v "TIMEOUT_"` → deve retornar 0 matches após refactor
 
-**Risco:** 🟢 Baixíssimo (apenas refactoring, sem mudança de lógica)  
+**Risco:** 🟢 Baixíssimo (apenas refactoring, sem mudança de lógica)
 **Rollback:** `git checkout pinterest_board_dl.py`
 
 ---
@@ -344,7 +346,7 @@ USER_BOARDS_RE = re.compile(r"^https?://(?:www|br)\\.pinterest\\.com/([^/]+)/?$"
 2. Critério PASS: 0 matches (exceto comentários/docstrings se houver)
 3. Executar smoke test (se disponível board de teste)
 
-**Risco:** 🟢 Baixo (string replacement simples)  
+**Risco:** 🟢 Baixo (string replacement simples)
 **Rollback:** `git diff HEAD~ -- pinterest_board_dl.py | git apply -R`
 
 ---
@@ -402,7 +404,7 @@ USER_BOARDS_RE = re.compile(r"^https?://(?:www|br)\\.pinterest\\.com/([^/]+)/?$"
 2. Critério PASS: 0 matches
 3. Executar: `python -m compileall -q pinterest_board_dl.py`
 
-**Risco:** 🟢 Baixo (valores idênticos aos originais)  
+**Risco:** 🟢 Baixo (valores idênticos aos originais)
 **Rollback:** `git revert <commit>`
 
 ---
@@ -463,7 +465,7 @@ def download_image(
     dest = os.path.join(out_dir, name)
     if os.path.exists(dest) and os.path.getsize(dest) > 0:
         return True
-    
+
     for attempt in range(max_retries + 1):
         try:
             with session.get(img_url, stream=True, timeout=TIMEOUT_IMAGE_DOWNLOAD) as r:
@@ -489,7 +491,7 @@ def download_image(
 2. Critério PASS: retry com delay crescente (1s, 2s)
 3. Smoke test: baixar 10 imagens e verificar sucesso
 
-**Risco:** 🟡 Médio (mudança de lógica de retry)  
+**Risco:** 🟡 Médio (mudança de lógica de retry)
 **Rollback:** `git revert <commit>` + validar download manual
 
 ---
@@ -553,7 +555,7 @@ def run() -> None:
     # Import aqui para evitar overhead no CLI
     from PyQt6.QtCore import Qt, QThread, pyqtSignal
     from PyQt6.QtWidgets import QApplication
-    
+
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
@@ -569,8 +571,8 @@ if __name__ == "__main__":
 2. Medir: `time python src/pinterest_board_gui.py` → deve ser similar ao anterior (GUI ainda precisa carregar)
 3. Critério PASS: Import de CLI não carrega PyQt6
 
-**Risco:** 🟡 Médio (mudança de estrutura de imports)  
-**Rollback:** `git revert <commit>`  
+**Risco:** 🟡 Médio (mudança de estrutura de imports)
+**Rollback:** `git revert <commit>`
 **Nota:** Requer testar GUI em ambiente com display (X11/Wayland)
 
 ---
@@ -623,12 +625,12 @@ def resolve_images(
     cache = load_pin_cache() if use_cache else {}
     out: Dict[str, str] = {}
     to_fetch = [link for link in links if link not in cache]
-    
+
     # Carregar do cache
     for link in links:
         if link in cache:
             out[link] = cache[link]
-    
+
     if not to_fetch:
         emit("resolve_complete", {"found": len(out), "total": total_links, "from_cache": len(out)})
         return out
@@ -663,8 +665,8 @@ def resolve_images(
 3. Verificar: `wc -l .pinterest_cache.json` → deve ter ~100 entradas
 4. Critério PASS: 2ª execução 50-80% mais rápida na fase de resolução
 
-**Risco:** 🟡 Médio (adiciona I/O de disco, pode falhar se disco cheio)  
-**Rollback:** `git revert <commit>` + deletar `.pinterest_cache.json`  
+**Risco:** 🟡 Médio (adiciona I/O de disco, pode falhar se disco cheio)
+**Rollback:** `git revert <commit>` + deletar `.pinterest_cache.json`
 **Nota:** Adicionar `.pinterest_cache.json` ao `.gitignore`
 
 ---
@@ -709,7 +711,7 @@ def collect_pin_links(
 ) -> List[str]:
     """Abre o quadro, rola a página e coleta URLs de Pins."""
     _owns_browser = browser is None
-    
+
     if _owns_browser:
         # Modo standalone: criar e fechar browser
         with sync_playwright() as p:
@@ -742,16 +744,16 @@ def download_user_boards(
 ) -> List[BoardDownloadResult]:
     emit = status_cb or (lambda *_: None)
     emit("log", {"message": "Coletando quadros públicos do usuário…"})
-    
+
     # Criar browser uma vez
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=options.headless)
         ctx = browser.new_context(user_agent=UA)
-        
+
         # Coletar boards
         page = ctx.new_page()
         boards = collect_board_urls_impl(page, username_or_url, options.scroll_pause)
-        
+
         if not boards:
             emit("log", {"message": "Nenhum quadro público encontrado para o usuário."})
             browser.close()
@@ -786,8 +788,8 @@ def download_user_boards(
 3. Critério PASS: redução de 20-40% no tempo total (de 60s para 40s, por exemplo)
 4. Verificar logs: apenas 1 "Chromium launched" ao invés de 5
 
-**Risco:** 🔴 Alto (mudança arquitetural significativa)  
-**Rollback:** `git revert <commit>` + testar cuidadosamente  
+**Risco:** 🔴 Alto (mudança arquitetural significativa)
+**Rollback:** `git revert <commit>` + testar cuidadosamente
 **Nota:** Requer testes extensivos com múltiplos boards e casos edge (login manual, erros)
 
 ---
@@ -805,8 +807,8 @@ def download_user_boards(
 - [ ] Executar `black` para formatar código — 10min
 - [ ] Validar: rodar smoke test CLI — 20min
 
-**Entregável:** Código 100% sem magic numbers, pronto para config externa futura.  
-**Risco:** 🟢 Baixíssimo  
+**Entregável:** Código 100% sem magic numbers, pronto para config externa futura.
+**Risco:** 🟢 Baixíssimo
 **ROI:** Médio (facilita manutenção futura)
 
 ---
@@ -820,8 +822,8 @@ def download_user_boards(
 - [ ] Adicionar flag `--cache-dir` para configurar localização do cache — 30min
 - [ ] Validar: testar com 2 boards reais (100 pins cada) — 1h
 
-**Entregável:** App 30-50% mais rápido em re-execuções, startup CLI otimizado.  
-**Risco:** 🟡 Médio  
+**Entregável:** App 30-50% mais rápido em re-execuções, startup CLI otimizado.
+**Risco:** 🟡 Médio
 **ROI:** Alto (impacto visível ao usuário)
 
 ---
@@ -834,8 +836,8 @@ def download_user_boards(
 - [ ] Implementar detecção de "fim de scroll" por altura de página — 1h
 - [ ] Adicionar progresso granular no GUI (% do scroll, pins/min) — 1h
 
-**Entregável:** App 2x mais rápido em cenários com múltiplos boards.  
-**Risco:** 🔴 Alto (mudanças arquiteturais)  
+**Entregável:** App 2x mais rápido em cenários com múltiplos boards.
+**Risco:** 🔴 Alto (mudanças arquiteturais)
 **ROI:** Muito Alto (principal gargalo eliminado)
 
 ---
@@ -849,8 +851,8 @@ def download_user_boards(
 - [ ] Adicionar CI com pytest + ruff + black + mypy — 1h
 - [ ] Documentar performance budgets (ex.: "startup < 5s", "100 pins < 60s") — 30min
 
-**Entregável:** App production-ready com observabilidade e qualidade garantida.  
-**Risco:** 🟢 Baixo (infra adicional)  
+**Entregável:** App production-ready com observabilidade e qualidade garantida.
+**Risco:** 🟢 Baixo (infra adicional)
 **ROI:** Médio (payoff de longo prazo)
 
 ---
@@ -938,16 +940,16 @@ Antes de considerar "DONE", validar:
 
 ### ⚠️ Limitações do Relatório
 
-1. **Sem Pinokio**: App não roda via Pinokio, então não há scripts `install/start/reset` para otimizar.  
+1. **Sem Pinokio**: App não roda via Pinokio, então não há scripts `install/start/reset` para otimizar.
    → **Ação sugerida**: Se desejado, criar estrutura Pinokio com:
    - `install.json`: instala deps + playwright chromium
    - `start.json`: roda GUI ou CLI
    - `diagnostics.json`: executa smoke tests
 
-2. **Métricas não medidas**: Baseline de performance requer execução real com boards de teste.  
+2. **Métricas não medidas**: Baseline de performance requer execução real com boards de teste.
    → **Próximos passos**: Criar board público de teste com 100 pins fixos e rodar benchmarks.
 
-3. **Sem testes automatizados**: Código não tem `tests/` nem CI.  
+3. **Sem testes automatizados**: Código não tem `tests/` nem CI.
    → **Recomendação**: Adicionar pytest na ONDA 4 para evitar regressões.
 
 ### 🎯 Prioridade Recomendada
@@ -975,6 +977,6 @@ git commit -m "refactor: centralize timeouts and URLs (PATCH 1-2-3)"
 
 **FIM DO RELATÓRIO**
 
-_Gerado em: 11 de janeiro de 2026_  
-_Versão: 1.0_  
+_Gerado em: 11 de janeiro de 2026_
+_Versão: 1.0_
 _Autor: GitHub Copilot (Claude Sonnet 4.5)_

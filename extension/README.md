@@ -1,3 +1,5 @@
+> **Estado em 2026-11-06:** Chrome é o alvo do manifest atual. O XPI gerado reutiliza esse manifest, não é assinado e não teve compatibilidade Firefox validada. As instruções Firefox abaixo são experimentais; empacotar não comprova funcionamento.
+
 # Pinterest Pro Downloader — extensão
 
 Extensão do navegador (Chrome / Firefox, Manifest V3) que baixa as imagens

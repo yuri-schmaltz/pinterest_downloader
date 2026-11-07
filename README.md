@@ -1,147 +1,117 @@
 # Pinterest Pro Downloader
 
 [![Tests & Quality](https://github.com/yuri-schmaltz/pinterest_downloader/actions/workflows/tests.yml/badge.svg)](https://github.com/yuri-schmaltz/pinterest_downloader/actions/workflows/tests.yml)
-[![Release](https://img.shields.io/github/v/release/yuri-schmaltz/pinterest_downloader.svg)](https://github.com/yuri-schmaltz/pinterest_downloader/releases/latest)
 
-Baixa imagens de quadros do Pinterest com máxima velocidade, resiliência e integridade.
+Baixa mídias de quadros públicos do Pinterest. Versão declarada: **2.0.5**.
 
-O projeto disponibiliza **quatro vertentes independentes**:
+| Interface | Implementação | Uso e limites |
+|---|---|---|
+| CLI Python | Playwright + requests | Coleta dinâmica de quadros e perfis, scroll e login manual |
+| GUI Python | PyQt6, mesmo motor da CLI | Perfil → escolher quadros → baixar |
+| CLI Rust | Tokio + reqwest + Chromium/CDP | Coleta dinâmica por DOM/rede e scroll; modo HTTP explícito para snapshots. Migração em andamento |
+| Extensão | JavaScript, Manifest V3 | Coleta no navegador; Chrome empacotado e XPI experimental |
 
-- 🦀 **Rust Core & CLI (Novo em v2.0.5 / PR #11)** — binário nativo compilado, ultra-rápido, assíncrono com Tokio, stream download e rate-limiter Token Bucket.
-- 🐍 **Python CLI** — linha de comando completa (`pinterest-board-dl`), scriptável com Playwright e requests.
-- 🖼️ **GUI Moderna (PyQt6)** — desktop em tema escuro e fluxo guiado de 3 etapas (*Perfil → Escolher quadros → Baixar*).
-- 🌐 **Extensão de Navegador** — Chrome (MV3) e Firefox (XPI), JavaScript puro sem dependência de interpretadores locais.
+Os testes usam fixtures e servidores locais. Eles não comprovam compatibilidade com o layout atual do Pinterest. A implementação Rust tem testes HTTP e Chromium com fixtures locais, mas ainda não tem paridade completa com o produto Python nem benchmarks comparativos.
 
----
+## Instalação Python
 
-## ✨ Recursos
-
-- **Download em Alta Performance:** Paralelismo adaptativo ajustado por CPU/RAM (`--adaptive-workers`).
-- **Resolução Automática:** Detecção da URL em resolução original (`orig`), `736x` ou `474x`.
-- **Proteção Ativa:** Rate limiter com Token Bucket e backoff exponencial contra HTTP 429.
-- **Cache Inteligente:** Re-download quase instantâneo com verificação de metadados no disco.
-- **Detecção de Perfis Privados:** Orientação clara e suporte a login manual interativo.
-- **Logging Estruturado:** Exportação de métricas e fases em JSON (`--json-log`).
-- **Compatibilidade Multiplataforma Real:** Linux, Windows e macOS (suporte a UTF-8 e timers precisos via `time.perf_counter`).
-
----
-
-## 🦀 Usando a versão em Rust puro (Alta Performance)
-
-O workspace Rust em `crates/` fornece uma CLI compilada independente de interpretador:
+Requer Python ≥ 3.10 e as bibliotecas de sistema do Qt/Chromium.
 
 ```bash
-# Compilar binário release
-cargo build --release
-
-# Executar a CLI em Rust
-./target/release/pinterest-cli --help
-
-# Baixar quadro com 16 workers
-./target/release/pinterest-cli https://www.pinterest.com/usuario/quadro/ -w 16
-```
-
----
-
-## 🐍 Instalação e Uso — Python (CLI e GUI)
-
-### Requisitos
-- Python ≥ 3.10
-- [Playwright](https://playwright.dev/python/) com Chromium instalado
-
-```bash
-# 1. Clone o repositório
 git clone https://github.com/yuri-schmaltz/pinterest_downloader.git
 cd pinterest_downloader
-
-# 2. Crie e ative o ambiente virtual
 python3 -m venv .venv
-source .venv/bin/activate       # Linux/macOS
-# .\.venv\Scripts\Activate.ps1  # Windows PowerShell
-
-# 3. Instale as dependências e o Chromium
+source .venv/bin/activate
+# Windows PowerShell: .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 python -m playwright install chromium
-
-# 4. Diagnóstico completo de ambiente
-python scripts/diagnose.py --deep
+python scripts/diagnose.py
 ```
 
-### CLI Python
 ```bash
-# Baixar um quadro específico
+# Quadro único
 pinterest-board-dl https://www.pinterest.com/usuario/quadro/
 
-# Baixar todos os quadros de um usuário com rate limiter e workers adaptativos
-pinterest-board-dl --user usuario_pinterest --adaptive-workers --rate-limiting
+# Quadros públicos de um perfil
+pinterest-board-dl --user usuario --adaptive-workers --rate-limiting
 
-# Conferir versão
-pinterest-board-dl --version
-```
+# Login manual, se necessário
+pinterest-board-dl usuario --headful --manual-login
 
-### GUI Desktop (PyQt6)
-```bash
 pinterest-board-gui
-# ou: python src/pinterest_board_gui.py
+pinterest-board-dl --help
 ```
-A interface conta com fluxo em 3 etapas guiadas:
-1. **Perfil:** Digite o usuário e liste os quadros públicos.
-2. **Escolha:** Filtro instantâneo por busca, botão *Selecionar Todos*, capas quadradas sem distorção e opções de pasta/workers.
-3. **Download:** Acompanhamento do progresso e log em tempo real.
 
----
+O Python oferece cache de metadados, workers adaptativos e logs JSON. `--no-cache` desativa o cache de metadados; arquivos já presentes continuam sendo reaproveitados. `--cache-dir DIR` aponta o cache para outro diretório; sem a opção vale o cache do sistema (XDG em Linux/macOS, `LOCALAPPDATA` no Windows). Com `--adaptive-workers`, o número de tarefas em voo acompanha o ajuste do gerenciador. Downloads novos são gravados em temporários e publicados somente quando a resposta termina, sem considerar arquivos `.part` como concluídos. Arquivos antigos não são revalidados por checksum.
 
-## 🌐 Extensão do Navegador (Chrome / Firefox)
+## CLI Rust
 
-1. Baixe o `.zip` (Chrome) ou `.xpi` (Firefox) na [página de Releases](https://github.com/yuri-schmaltz/pinterest_downloader/releases).
-2. **Chrome:** Acesse `chrome://extensions`, ative o *Modo do desenvolvedor* e use *Carregar sem compactação*.
-3. **Firefox:** Acesse `about:debugging` e carregue o arquivo como complemento temporário.
-
----
-
-## 🧪 Qualidade de Código e Testes
-
-O repositório possui suíte de testes unitários e de integração sem dependência de rede externa:
+Use o toolchain **stable atual via rustup**. O lockfile usa formato 4; o Cargo 1.75 fornecido por algumas distribuições não o suporta. O projeto ainda não valida uma versão mínima de Rust em CI.
 
 ```bash
-# Suíte Python completa (202 testes, 100% PASS, 63% cobertura)
-python -m pytest tests/ -q
+cargo build --release --locked
+./target/release/pinterest-cli https://www.pinterest.com/usuario/quadro/ -w 8 --max-pins 20
+./target/release/pinterest-cli --user usuario --output downloads
+./target/release/pinterest-cli --help
+```
 
-# Testes de unidade dos módulos Rust
-cargo test
+O modo padrão `auto` usa Chromium para não presumir que o HTML inicial contém todos os pins. O browser é localizado por `--browser-executable`, `PINTEREST_CHROMIUM`, instalação do sistema ou cache Playwright já existente; Python/Node não são necessários para usar o binário Rust. Sem browser instalado, a CLI informa como configurar o caminho. Chromium ainda não é baixado/empacotado automaticamente pela versão Rust.
 
-# Linters e tipagem estática
+```bash
+# Coleta dinâmica e eventos JSONL
+./target/release/pinterest-cli usuario/quadro --mode browser --json-log
+
+# Browser visível; login manual aguarda Enter e pode ser cancelado com Ctrl+C
+./target/release/pinterest-cli usuario --headful --manual-login
+
+# Snapshot explícito, sem browser: completude desconhecida, código de saída 6
+./target/release/pinterest-cli usuario/quadro --mode http
+```
+
+A coleta acumula IDs entre páginas/scroll e captura respostas JSON. Pins sem metadados podem ser resolvidos pela página do pin e metatags. Cookies da sessão são encaminhados ao downloader. O protocolo de login está implementado, mas o fluxo headful autenticado ainda precisa de validação interativa; a CI cobre browser headless.
+
+`--max-pins` limita cada quadro; `--no-cache` preserva a semântica Rust de forçar download de mídia; `--no-rate-limit` desativa o limitador. Use `--scroll-pause`, `--collection-timeout`, `--headful`, `--browser-executable`, `--json-log` e `--log-file` conforme `--help`. O log Rust é JSONL versionado, diferente do arquivo JSON da implementação Python.
+
+O modo automático ainda não possui fast path HTTP com prova de completude. Estabilidade/timeout produzem completude desconhecida; um limite pedido é informado separadamente. Código 0 indica conclusão conhecida/limitada sem falhas, 6 indica resultado parcial/desconhecido, 7 indica extração não comprovada; cancelamento retorna 130. Falhas de browser e autenticação usam 3 e 4. A interpretação de fim de feed ainda depende de fixtures sintéticas e precisa ser validada no Pinterest atual.
+
+A saída Rust mantém `downloads/<usuario>_<quadro>/`. O cache de metadados é `.pinterest_cache.json` no diretório de `--cache-dir` (cache do sistema por padrão) e tem o mesmo formato do Python, então o diretório pode ser compartilhado entre as duas CLIs; `--no-metadata-cache` desliga apenas esse cache, sem alterar `--no-cache`. Cache persistente com expiração, workers adaptativos, concorrência entre quadros, GUI e migração dos arquivos estão pendentes. O progresso está registrado em [docs/PLANO-PARIDADE-RUST.md](docs/PLANO-PARIDADE-RUST.md) e no [contrato de paridade](docs/CONTRATO-PARIDADE.md).
+
+## Extensão
+
+Para Chrome, carregue `extension/` em `chrome://extensions` → modo do desenvolvedor → carregar sem compactação. Para gerar ZIP Chrome e XPI:
+
+```bash
+bash scripts/build_release.sh
+```
+
+O XPI atual reutiliza o manifest Chrome, não é assinado e ainda precisa de validação de compatibilidade Firefox. Gerar o arquivo não comprova que ele funciona no Firefox. Veja [extension/README.md](extension/README.md).
+
+## Desenvolvimento e verificação
+
+```bash
+QT_QPA_PLATFORM=offscreen python -m pytest tests/ -q --cov=src
+node tests/test_extension_i18n.js
+node tests/test_extension_pins.js
+python scripts/sync_version.py --check
 ruff check src/ tests/ scripts/
 black --check src/ tests/ scripts/
 mypy src/pinterest_board_dl.py src/app_version.py
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-features --locked
+# Inclui testes que exigem Chromium instalado:
+cargo test --workspace --all-features --locked -- --include-ignored
 ```
 
----
+As medições e os limites dos testes estão em [TEST_INFRA.md](TEST_INFRA.md). Os workflows versionados validam Python, extensão, versões e Rust. O workflow de release inclui builds desktop Python, extensões, source e CLI Rust Linux/Windows; alterações locais nesses workflows só passam a valer após push. Nenhuma nova release é criada ao executar testes ou builds locais.
 
-## 📦 Artefatos de Instalação (Release v2.0.5)
+## Documentação
 
-| Plataforma | Artefato | Descrição |
-|---|---|---|
-| **Windows** | `pinterest-board-downloader-x64.zip` | Pacote completo standalone (onedir) |
-| **Linux** | `PinterestDownloader-x86_64.AppImage` | Imagem com Chromium e dependências embutidas |
-| **Linux (Debian/Ubuntu)** | `pinterest-downloader_amd64.deb` | Pacote Debian instalável via `dpkg -i` |
-| **Chrome** | `pinterest-pro-downloader-chrome-v2.0.5.zip` | Extensão MV3 empacotada |
-| **Firefox** | `pinterest-pro-downloader-firefox-v2.0.5.xpi` | Extensão WebExtension |
-| **Source** | `pinterest-pro-downloader-source-v2.0.5.tar.gz` | Código-fonte verificado com suíte completa |
+- [PROJECT.md](PROJECT.md): arquitetura e contratos.
+- [HANDOFF.md](HANDOFF.md): retomada do trabalho e publicação.
+- [PLANO-ESTABILIZACAO.md](PLANO-ESTABILIZACAO.md): correções e pendências.
+- [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md): comandos e opções.
+- [docs/RUNBOOK_INSTALL.md](docs/RUNBOOK_INSTALL.md): instalação.
+- [docs/RUNBOOK_TROUBLESHOOTING.md](docs/RUNBOOK_TROUBLESHOOTING.md): diagnóstico.
 
----
-
-## 📚 Documentação Técnica
-
-- [`PROJECT.md`](PROJECT.md) — Visão do produto, contratos de interface e inventário de funcionalidades.
-- [`PLANO-ESTABILIZACAO.md`](PLANO-ESTABILIZACAO.md) — Histórico de correções, auditoria ciclomática e marcos entregues.
-- [`TEST_INFRA.md`](TEST_INFRA.md) — Detalhamento da cobertura de testes e fixtures locais.
-- [`docs/RUNBOOK_INSTALL.md`](docs/RUNBOOK_INSTALL.md) — Guia de instalação passo a passo.
-- [`docs/RUNBOOK_TROUBLESHOOTING.md`](docs/RUNBOOK_TROUBLESHOOTING.md) — Solução de problemas frequentes.
-- [`docs/QUICK_REFERENCE.md`](docs/QUICK_REFERENCE.md) — Referência rápida de comandos e flags.
-
----
-
-## ⚖️ Licença
-
-Distribuído sob licença MIT. Consulte [`LICENSE`](LICENSE) para mais detalhes.
+Os guias `ONDA*` e relatórios antigos em `docs/` são registros históricos, com métricas da época. Licença [MIT](LICENSE).

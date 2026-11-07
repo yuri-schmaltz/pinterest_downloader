@@ -1,354 +1,72 @@
-# TEST_INFRA.md — Cobertura real e limites declarados
+# Infraestrutura e limites dos testes
 
-**Data da medição:** 2026-10-29 (rodada 2) · **Branch:** `main`
-**Comando:** `QT_QPA_PLATFORM=offscreen python -m coverage run --source=src -m pytest tests/ -q && python -m coverage report -m`
+Verificação local em **2026-11-06**, sobre as correções posteriores ao clone de `688243c`. Resultados locais não equivalem a CI remota nem validação dos artefatos publicados.
 
-> Este documento declara **o que a suíte cobre e o que ela não cobre**.
-> Números aqui são medidos, não estimados. Se a medição divergir, a medição
-> está errada — reexecute o comando acima.
+## Resultado reproduzido
 
----
-
-## 1. Panorama
-
-| Métrica | Antes (2026-10-22) | 2026-10-23 | Agora (2026-10-29) |
-|---|---|---|---|
-| Testes coletados | 21 | 85 | 153 | **198** (+ 69 checks em Node) |
-| Testes passando | 21 | 85 | 153 | **198** (100 %) |
-| Falhas / erros de coleta | 0 | 0 | 0 |
-| Tempo de execução | ~3 s | ~26 s | ~28 s |
-| Dependências externas (rede) | nenhuma | **nenhuma** | **nenhuma** |
-| Browser | não usava | Chromium local, via `file://` | idem |
-| Cobertura total (`src/`) | 23 % | 45 % | **57 %** |
-
-Os 26 s são quase todos o browser: a coleta de pins espera a página
-assentar antes de rolar, e cada coleta custa alguns segundos. Não há
-acesso à rede em nenhum teste.
-
----
-
-## 2. Cobertura por módulo (medida)
-
-| Módulo | Statements | Antes | 2026-10-23 | Agora | Leitura |
-|---|---|---|---|---|---|
-| `src/rate_limiter.py` | 105 | 86 % | 86 % | **86 %** | ✅ bem coberto |
-| `src/json_logger.py` | 85 | 85 % | 85 % | **85 %** | ✅ bem coberto |
-| `src/adaptive_workers.py` | 109 | 74 % | 74 % | **74 %** | 🟡 bom |
-| `src/pinterest_board_dl.py` | 810 | 16 % | 21 % | **32 %** | 🟡 o núcleo ainda é o elo fraco |
-| `src/pinterest_board_gui.py` | 699 | **0 %** | 61 % | **72 %** | ✅ era o pior buraco |
-| `src/app_version.py` | 31 | — | — | **68 %** | 🟡 novo |
-| **TOTAL** | **1 845** | 23 % | 45 % | **57 %** | |
-
-### 2.1 O que mudou na rodada de 2026-10-29
-
-| Entrega | Efeito |
+| Verificação | Resultado |
 |---|---|
-| `tests/test_metadata_extraction.py` (40 testes) | a extração de metadados de pins, que era inalcançável dentro de um closure, virou função de módulo testável |
-| `tests/test_resolve_images.py` (15 testes) | o cache, a interceptação e o fallback para o domínio mobile, que estavam misturados num corpo de complexidade 16 |
-| `tests/test_cli.py` (19 testes) | `--version` e `--user`: duas flags que os docs prometiam e o código não tinha |
-| `_version.py` gerado + `app_version.py` | a versão que o app mostra é a do manifest, não a da metadata congelada do `pip install -e` |
-| refactor do `handle_response` (25) e do `resolve_images` (16) | complexidade 60 → 37 na coleta; 9 funções acima de 15 → 5 |
+| Python 3.12.3, Qt offscreen e Chromium | **218 passaram**, nenhum skip, 0 avisos de depreciação |
+| Cobertura de `src/` | **67%** geral; scraper **57%**; GUI **72%** |
+| Node: i18n + helpers de pins | **40 + 29 verificações** |
+| Rust 1.99.1 | **36 testes** (13 unitários no core, 3 do browser, 3 da CLI, 17 de integração), todos aprovados com Chromium |
+| Ruff / Black / mypy | Aprovados; mypy cobre scraper e app_version |
+| Rustfmt / Clippy | Aprovados; Clippy com `-D warnings` |
+| Versões | Manifest, Python, manifests Cargo e entradas locais do Cargo.lock sincronizados em 2.0.5 |
+| Diagnóstico `--deep` | 13 checagens, nenhuma falha ou aviso |
 
-### 2.2 O que mudou desde a medição anterior
+Os avisos Python restantes vieram de `datetime.utcnow()`, removido de `json_logger.py`, `adaptive_workers.py` e `rate_limiter.py`; o formato dos timestamps foi preservado. Nenhum teste Rust da CLI é contado como teste unitário: os 13 unitários ficam no core, e os 23 restantes são de integração (browser, CLI, fluxo HTTP, coleta dinâmica e cache de metadados). O binário foi adicionalmente exercitado contra servidor local, verificando sucesso, extração vazia, workers zero e stream interrompido.
 
-| Entrega | Efeito |
-|---|---|
-| `tests/test_scraper.py` (22 testes) | fixtures de HTML local + Chromium real: a coleta de pins e a extração de quadros passaram a ser testadas de verdade |
-| `tests/test_gui.py` (29 testes) | a GUI saiu de 0 % para 61 % |
-| `tests/test_extension_integration.py` (13 testes) | os scripts da extensão carregados numa página real, num browser real |
-| `tests/test_extension_pins.js` (29 checks) | a transformação de URL dos pins, que decide qual imagem o usuário baixa |
-| `tests/test_extension_i18n.js` (40 checks) | as traduções, nos dois caminhos (com e sem `chrome.i18n`) |
-| `_compute_scroll_stability` e `_extract_boards_from_page` extraídos | a aritmética do scroll virou função pura testável; a extração de quadros deixou de estar presa dentro de um closure |
+## O que cada camada prova
 
-### 2.3 O que a GUI ainda não cobre
+- **Python:** parsing/metadados, CLI, cache, workers, rate limiter, GUI e scraper em Chromium contra fixtures locais.
+- **Cache e paralelismo (`test_cache_and_adaptive.py`):** `--cache-dir` grava e lê o cache no diretório informado; sem a opção vale o cache do sistema; e o gerenciador adaptativo altera o número real de tarefas em voo, não só a métrica.
+- **Integridade Python (`test_download_integrity.py`):** servidor HTTP real local; interrupção de resposta, retry seguido de resposta completa, resposta vazia e colisões de prefixo/temporários no cache.
+- **Despacho Python (`test_cli.py`):** URL de quadro chama `download_board`; usuário chama `download_user_boards`.
+- **Versões (`test_version_sync.py`):** derivações Rust divergentes são rejeitadas por `--check` e reparadas pelo sync em cópias isoladas dos arquivos.
+- **Node:** 40 verificações de i18n e 29 de helpers de URL/contagem, com objetos simulados.
+- **Integração da extensão Python:** injeta scripts na ordem do manifest em Chromium com fixture; não instala a extensão.
+- **Rust:** helpers de URL/contagem/tipo, parser de pins/quadros e fluxo HTTP perfil → quadro → imagem; limite por quadro, opções de cache e desativação do limitador, streams interrompidos/vazios, extração vazia, workers zero e colisões de cache.
+- **Cache de metadados Rust (`metadata_cache.rs`):** gravação atômica e reuso na reexecução, descarte de cache corrompido, compatibilidade de formato com o Python, isolamento por `--cache-dir` e ausência de arquivo quando o cache está desligado. A reexecução sem nova ida à página do pin é verificada pelo contador de requisições do servidor de fixture.
+- **Rate limiter Rust:** o teste verifica o contador de esperas do limitador, e não o relógio, para não depender da velocidade da máquina.
 
-Ficou de fora: o ciclo de download de verdade (a thread que chama o
-scraper), o diálogo de login manual e o *worker* em background. O resto da
-apresentação — lista de quadros, seleção, progresso, tratamento de erro, o
-fluxo de três etapas e a busca — está coberto.
-
-### 2.4 A rodada do redesenho da GUI
-
-A janela deixou de ser duas colunas e virou um fluxo de três etapas
-(perfil → escolher quadros → baixar). O redesenho veio com 26 testes
-novos em `tests/test_gui_steps.py`, que travam:
-
-- qual passo aparece quando (buscar quadros avança, não achar nenhum não avança)
-- o que cada passo mostra (campo de perfil, grade, progresso e log)
-- a busca: filtra por título, ignora maiúsculas, e o *Selecionar Todos*
-  marca **só o que está visível** na busca
-
-Os 29 testes da GUI anterior (`tests/test_gui.py`) continuam passando sem
-alteração — os nomes dos widgets não mudaram, só a organização visual.
-
-Depois disso a GUI ganhou mais três coisas, cada uma com teste:
-
-- **tema escuro único** — não sobrou regra do tema claro
-- **perfil sempre visível** — o campo mora na barra de etapas, e trava
-  durante o download
-- **miniatura quadrada** — `square_thumbnail()` encaixa a foto inteira no
-  quadrado (KeepAspectRatio) em vez de cortá-la (KeepAspectRatioByExpanding);
-  os testes medem a proporção do conteúdo dentro do quadrado
-
-### 2.1 O que o número de 16 % em `pinterest_board_dl.py` significa
-
-O módulo tem 783 statements, dos quais ~430 estão no caminho de coleta com
-Playwright (`_collect_pin_links_with_browser`, `collect_board_urls`,
-`download_board`, `download_user_boards`) — código que **exige um navegador
-real e o Pinterest online** para exercitar.
-
-O que a suíte **cobre** nesse módulo são as funções puras e o contrato:
-`parse_pin_count`, `normalize_url`, `safe_name`, `slugify`,
-`out_dir_for`, `split_user_board_from_url`, o contrato de `DownloadOptions`,
-o cache, e as **assinaturas** de `collect_pin_links`/`collect_board_urls`.
-
-O que a suíte **não cobre**: o caminho de scraping real, o download real,
-a interação com popups, o login manual, a detecção de perfil privado.
-
-### 2.2 Por que a GUI está em 0 %
-
-A GUI exige um display. Testá-la exigiria `pytest-qt` + `xvfb`, e o time
-de frontend nunca chegou a criar esses testes. **Limitação declarada, não
-omissão.** O CI não exercita a GUI — a garantia que existe para ela é de
-outro tipo: o job `smoke-import` importa `pinterest_board_gui` e falha se o
-módulo não importar (ver §5).
-
----
-
-## 3. Inventário dos 21 testes
-
-### 3.0 Mapa dos arquivos de teste
-
-| Arquivo | Testes | Depende de | Cobre |
-|---|---|---|---|
-| `tests/test_11_rate_limiting.py` | 10 | — | rate limiter (ONDA 5E) |
-| `tests/test_core_features.py` | 10 | — | constantes, cache, contrato, layout do pacote |
-| `tests/test_robustness.py` | 1 | — | parser de contagem de pins |
-| `tests/test_scraper.py` | 22 | **Chromium** | coleta de pins e extração de quadros |
-| `tests/test_gui.py` | 29 | **Qt (offscreen)** | apresentação da GUI |
-| `tests/test_extension_integration.py` | 13 | **Chromium** | scripts da extensão numa página real |
-| `tests/test_extension_i18n.js` | 40 checks | Node | traduções (dois caminhos) |
-| `tests/test_extension_pins.js` | 29 checks | Node | transformação de URL dos pins |
-| `tests/test_metadata_extraction.py` | 40 | — | extração de metadados de pins |
-| `tests/test_resolve_images.py` | 15 | — | cache, interceptação, fallback mobile |
-| `tests/test_cli.py` | 19 | — | superfície da CLI (`--version`, `--user`) |
-| `tests/test_gui_steps.py` | 39 | **Qt (offscreen)** | o fluxo de três etapas da GUI, a busca, o perfil sempre visível, a miniatura quadrada e o tema escuro |
-
-### 3.1 `tests/test_11_rate_limiting.py` — 10 testes (ONDA 5E)
-
-| Teste | Cobre |
-|---|---|
-| `test_rate_limiter_initialization` | estado inicial do singleton |
-| `test_rate_limiter_custom_config` | construtor com config customizada |
-| `test_rate_limiter_acquire_basic` | aquisição de permissão |
-| `test_rate_limiter_sliding_window` | janela deslizante de 1 s (5 req/s) |
-| `test_rate_limiter_report_429` | registro de 429 e backoff exponencial |
-| `test_rate_limiter_report_success` | reset do backoff após sucesso |
-| `test_rate_limiter_thread_safety` | concorrência com múltiplas threads |
-| `test_rate_limiter_get_stats` | estatísticas |
-| `test_rate_limiter_save_stats` | persistência em JSON |
-| `test_rate_limiter_singleton` | padrão singleton |
-
-### 3.2 `tests/test_core_features.py` — 10 testes
-
-| Teste | Cobre |
-|---|---|
-| `test_constants` | invariantes das constantes (timeout, retry, scroll) |
-| `test_cache_functions` | round-trip do cache de metadados |
-| `test_download_options` | defaults e customização de `DownloadOptions` |
-| `test_retry_logic` | cálculo dos delays de backoff |
-| `test_cli_help` | a CLI sobe, sai com 0 e expõe `--cache-dir` / `--no-cache` |
-| `test_browser_reuse` | `collect_pin_links`/`collect_board_urls` aceitam `browser` opcional |
-| `test_scroll_detection` | invariante do scroll (≥ 3 rondas) |
-| `test_package_layout` | **integridade do layout** (ver §4) |
-| `test_json_logger` | ciclo completo do logger estruturado (ONDA 5B) |
-| `test_adaptive_workers` | métricas, ajuste e persistência (ONDA 5C) |
-
-### 3.3 `tests/test_scraper.py` — 22 testes
-
-O primeiro teste do scraper de verdade. Usa fixtures de HTML local
-(`tests/fixtures/`) servidos por `file://` num Chromium real — sem rede.
-
-| Grupo | Cobre |
-|---|---|
-| `TestScrollStability` (7) | a aritmética de quando parar o scroll: progresso zera o contador, altura estável conta 1, altura mudou conta 0,5, "Mais como esse" no fim da página conta 2, e o estado só éAdvance quando houve progresso |
-| `TestCollectPinLinks` (4) | a coleta real: acha os 8 pins da fixture, ignora links que não são pin, respeita `max_pins`, devolve URLs absolutas do Pinterest |
-| `TestExtractBoards` (11) | a extração real: acha os quadros, exclui as abas de navegação, exclui slugs com `_`, ignora outros usuários, lê título (com e sem `<h2>`), thumbnail e contagem de pins, e o `pin_count_int` bate com o `parse_pin_count` |
-
-**As fixtures são o contrato.** Elas reproduzem o DOM que o scraper espera
-(`<a href="/pin/ID">`, `__PWS_DATA__`, `h2` para título, a linha de contagem
-de pins, os slugs de navegação). Se o scraper mudar o que espera do DOM, a
-fixture tem de mudar junto — e o teste avisa.
-
-### 3.4 `tests/test_gui.py` — 29 testes
-
-A GUI saiu de 0 % para 61 %. Roda com o platform plugin `offscreen`, sem
-display e sem `xvfb`.
-
-| Grupo | Cobre |
-|---|---|
-| `TestMainWindow` (3) | a janela constrói, tem as duas colunas, e o botão iniciar começa desabilitado |
-| `TestBoardList` (8) | a lista de quadros: quantidade, título + contagem, normalização da URL, limpeza de quebras de linha e espaços extras, lista vazia desabilita o início |
-| `TestProgressSlots` (10) | os slots de progresso: barra com o total, total zero, valor limitado ao máximo, conclusão, contagem de pins, erro e cancelamento |
-| `TestSelectionState` (5) | a seleção: começa desmarcada, marcar habilita o início, desmarcar desabilita, `selected_urls` acompanha os checkboxes |
-
-> O `on_error` abre um `QMessageBox` **modal** — em modo offscreen isso
-> trava o teste para sempre. O teste substitui o diálogo por um duble.
-
-### 3.5 `tests/test_extension_integration.py` — 13 testes
-
-Os scripts reais da extensão (`lib/i18n.js` → `lib/pin_utils.js` →
-`content.js`), carregados na ordem do manifest, numa página de fixture, num
-Chromium real.
-
-| Grupo | Cobre |
-|---|---|
-| `TestManifestContract` (4) | o manifest é válido, todo arquivo referenciado existe, e os helpers são carregados **antes** do `content.js` |
-| `TestScriptsLoad` (4) | as APIs são expostas, o content script roda sem erro, a barra é traduzida, e não há erro de JS na página |
-| `TestHarvesting` (5) | a contagem de imagens de pin, o fingerprint deduplicado, a normalização para `/originals/`, e a ausência de avatar/ícone/host externo |
-
-### 3.6 `tests/test_robustness.py` — 1 teste
-
-| Teste | Cobre |
-|---|---|
-| `test_parse_pin_count` | 12 formatos de contagem de pins (pt-BR e en) |
-
----
-
-## 4. O teste de integridade (`test_package_layout`)
-
-Substituiu `test_diagnostics_script`, que verificava um arquivo
-(`diagnostics.py`) removido de propósito no commit `9fb4c3e`.
-
-Cobre o **método de falha real** do projeto, não uma feature:
-
-1. Os cinco módulos do `src/` existem e são importáveis.
-2. Todo arquivo referenciado por `extension/manifest.json` — content
-   scripts, service worker, popup — **existe no repositório**.
-3. Todo `<script src=...>` do `popup.html` **existe no repositório**.
-
-**Teste negativo verificado:** removendo `extension/lib/i18n.js`, o teste
-falha com:
-
-```
-AssertionError: extension/manifest.json references 'lib/i18n.js' but it is
-not in the repository -- the extension would fail to load. Check that the
-file is tracked by git (see 'git check-ignore -v extension/lib/i18n.js').
-```
-
-Esse foi exatamente o bug que quebrou a release v2.0.x: o `.gitignore`
-herdado do setuptools contém `lib/`, que casa com `extension/lib/` em
-qualquer nível de diretório.
-
----
-
-## 5. Gates de CI (o que protege o que)
-
-O CI não é só a suíte. São quatro jobs, todos bloqueantes:
-
-| Job | Protege | Como |
-|---|---|---|
-| `test` | comportamento das funções puras | pytest em Python 3.10 / 3.11 / 3.12 |
-| `smoke-import` | **contrato de API** | importa os 5 módulos e confirma que 17 símbolos públicos ainda existem |
-| `extension` | **empacotamento** | manifest/popup referenciam só arquivos presentes **e versionados**; constrói o zip e confere `lib/i18n.js` dentro |
-| `lint` | estilo e tipos | `black --check`, `ruff check`, `mypy` — sem `\|\| true` |
-
-O job `smoke-import` é o que teria pegado o restructure para `src/` que
-quebrou todos os imports do projeto de uma vez.
-
----
-
-## 6. Limites declarados
-
-O que **esta suíte não garante** — leia antes de confiar em algo:
-
-1. **Nenhum teste toca a rede.** Nenhuma requisição ao Pinterest é feita.
-   Uma mudança no layout do Pinterest pode quebrar o scraper sem quebrar
-   nenhum teste — as fixtures são sintéticas, não HTML real capturado.
-2. **O browser é real, a página não é.** O scroll, os popups e o lazy-load
-   são exercitados contra uma fixture estática. O caminho contra o Pinterest
-   de verdade continua **não testado**.
-3. **O download real não é testado.** Nenhum teste baixa um arquivo, verifica
-   o conteúdo salvo ou confere a contagem final de pins.
-4. **A GUI não é testada de ponta a ponta.** A apresentação é coberta; o
-   ciclo de download (thread, worker, login manual) não é.
-5. **A extensão não é testada no navegador real com a extensão carregada.**
-   Os scripts são carregados via `add_script_tag`, o que não exercita o
-   `chrome.*` de verdade.
-6. **Não há medição de performance no CI.** As tabelas de "93 % mais rápido"
-   nos docs são de medições manuais antigas, não de um benchmark que rode
-   hoje.
-7. **Sem mutation testing.** Não sabemos se os testes falhariam se o código
-   quebrasse de forma sutil.
-8. **`test_scroll_detection` fixa um piso, não o valor.** `SCROLL_STABLE_ROUNDS`
-   pode mudar sem quebrar o teste — de propósito, para que ajuste de tuning
-   não quebre o pipeline.
-
----
-
-## 7. Como rodar
+## Executar
 
 ```bash
-# suíte completa (precisa do Chromium para os testes do scraper
-# e do platform offscreen para os da GUI)
+pip install -e ".[dev]"
 python -m playwright install chromium
-QT_QPA_PLATFORM=offscreen python -m pytest tests/ -v
-
-# um arquivo
-python -m pytest tests/test_11_rate_limiting.py -v
-
-# cobertura
-python -m coverage run --source=src -m pytest tests/ -q
-python -m coverage report -m
-python -m coverage html        # abre htmlcov/index.html
-
-# testes da extensão (Node puro, sem dependências)
+QT_QPA_PLATFORM=offscreen python -m pytest tests/ -q --cov=src --cov-report=term
 node tests/test_extension_i18n.js
 node tests/test_extension_pins.js
-
-# teste de integração da extensão (Chromium)
-python -m pytest tests/test_extension_integration.py -v
-
-# diagnóstico do ambiente (offline)
-python scripts/diagnose.py
-python scripts/diagnose.py --deep    # inclui subir o Chromium
-python scripts/diagnose.py --json     # saída machine-readable
-
-# lint (mesmos comandos do CI)
-black --check --line-length 120 src/ tests/ scripts/
+python scripts/sync_version.py --check
 ruff check src/ tests/ scripts/
-mypy src/pinterest_board_dl.py --ignore-missing-imports
+black --check src/ tests/ scripts/
+mypy src/pinterest_board_dl.py src/app_version.py
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
 
-### Por que `src/` aparece no path
+Requer Qt e bibliotecas do Chromium disponíveis. Os testes de browser podem ser pulados se Chromium estiver ausente; confira a contagem de skips. Use Rust stable atual via rustup: Cargo 1.75 não lê o lockfile v4. A matriz Python 3.10/3.11/3.12 está no workflow; esta revisão local foi executada em Python 3.12.
 
-Os módulos usam **flat imports** (`from json_logger import ...`), então
-`src/` precisa estar no `sys.path`. Isso é garantido em três lugares
-independentes, de propósito:
+## CI e empacotamento
 
-1. `tests/conftest.py` — cobre qualquer invocação do pytest;
-2. `pyproject.toml` → `[tool.pytest.ini_options] pythonpath = ["src"]` —
-   cobre pytest ≥ 7 a partir da raiz;
-3. o `sys.path.insert` de cada arquivo de teste — cobre a execução direta
-   (`python tests/test_x.py`), que o conftest não cobre.
+`.github/workflows/tests.yml` define a matriz Python, smoke imports, integridade da extensão, versão, lint e Rust. O job Rust verifica formatação, Clippy e testes com lockfile. Os workflows alterados ainda precisam executar remotamente após integração.
 
-> **Armadilha para quem mexer aqui:** se um teste novo for adicionado e
-> placed em outro diretório, ele **não** vai encontrar os módulos sem
-> repetir o `sys.path.insert`. É o mesmo mecanismo que quebrou a suíte
-> inteira quando o código migrou para `src/`.
+```bash
+bash scripts/build_release.sh
+```
 
----
+Esse comando gera ZIP Chrome, XPI experimental e source em `dist/`. O script verifica arquivos referenciados e a presença de Python, testes, manifests/crates Rust, spec PyInstaller e hooks no source. O workflow de release também define builds da CLI Rust para Linux e Windows. A execução local do empacotador não compila o desktop nem publica releases.
 
-## 8. Backlog de testes
+## Limites e próximos testes
 
-Prioridade para as próximas rodadas:
+1. **Pinterest atual:** fixtures são sintéticas; não há comprovação contra DOM/payloads de produção nem contas privadas/login.
+2. **Rust:** coleta apenas metadados do HTML inicial. Sem JavaScript, scroll, paginação, browser ou autenticação; cobertura não significa paridade Python.
+3. **Extensões instaladas:** APIs e testes com scripts injetados não cobrem o ciclo de vida real de uma extensão Chrome/Firefox. O XPI usa o manifest Chrome e não foi validado nem assinado.
+4. **Distribuição:** AppImage, DEB, Windows e os novos binários Rust não foram validados em máquinas limpas nesta revisão.
+5. **Arquivos anteriores:** a gravação temporária protege novos downloads; o cache ainda aceita arquivos antigos não vazios sem checksum e não repara retroativamente arquivos corrompidos.
+6. **Performance:** não há benchmark comparativo atual para afirmar superioridade Rust, ganho de velocidade ou limites de hardware.
+7. **Cache Python:** `--cache-dir` é encaminhado ao `resolve_images` e o padrão é o cache do sistema. Falta o cache versionado com invalidação segura previsto no plano de paridade.
 
-| # | Item | Por quê | Esforço |
-|---|---|---|---|
-| 0 | **Baixar a cobertura do scraper dos 32 % para 50 %** | o download real e o parsing do HTML do Pinterest continuam sem teste | 2 dias |
-| 1 | **Capturar HTML real do Pinterest** e usar como fixture | hoje as fixtures são sintéticas: um layout novo do Pinterest não é detectado | 2 h |
-| 2 | Teste de download real (baixa um pin, confere o arquivo) | o download é a única parte sem nenhum teste | 1 dia |
-| 3 | Exercitar a extensão carregada de verdade (Playwright com extensão) | hoje os scripts são injetados à mão, o `chrome.*` não é real | 1–2 dias |
-| 4 | Mutation testing (`mutmut`) | medir a força real da suíte | 4 h |
-| 5 | Benchmark automatizado | as métricas de performance nos docs estão desatualizadas | 1 dia |
-| 6 | Cobrir o `download_media` e o `resolve_images` | 21 % do núcleo ainda é o maior buraco | 1 dia |
+Capturar fixtures reais e testar extensão instalada/artefatos em máquinas limpas são as próximas prioridades. Os números antigos de 21/85/202 testes em relatórios `ONDA*` pertencem ao histórico.

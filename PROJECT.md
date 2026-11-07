@@ -1,8 +1,8 @@
 # PROJECT.md — Pinterest Pro Downloader
 
 **Repositório:** `yuri-schmaltz/pinterest_downloader`
-**Licença:** MIT · **Python:** ≥ 3.10 · **Rust:** ≥ 1.80 · **Última atualização:** 2026-10-29
-**Estado:** v2.0.5 publicada (2026-10-29) · branch `feat/rust-core` com a reescrita do núcleo e CLI em Rust puro (PR #11)
+**Licença:** MIT · **Python:** ≥ 3.10 · **Rust:** stable atual via rustup (MSRV não validado) · **Última atualização:** 2026-11-06
+**Estado:** versão declarada 2.0.5; PR #11 integrado em `67329b1`. Revisão local após `688243c`; publicação/CI remota não revalidadas.
 
 ---
 
@@ -13,14 +13,13 @@ compartilham o mesmo objetivo:
 
 | Produto | Entry point | Natureza |
 |---|---|---|
-| **Rust CLI** | `crates/pinterest-cli` → `pinterest-cli` | binário nativo de alta performance (Rust puro, Tokio, reqwest) |
+| **Rust CLI** | `crates/pinterest-cli` → `pinterest-cli` | binário nativo HTTP, limitado ao HTML inicial (Tokio, reqwest) |
 | **Python CLI** | `src/pinterest_board_dl.py` → `main()` | linha de comando, scriptável (Playwright + requests) |
 | **Python GUI** | `src/pinterest_board_gui.py` → `run()` | desktop PyQt6, fluxo de três etapas (perfil → quadros → baixar) |
 | **Extensão** | `extension/manifest.json` (MV3) | navegador, clica e baixa o que está visível |
 
 A extensão é JavaScript puro (MV3) para execução no navegador sem dependências.
-A CLI em Rust oferece a máxima eficiência de I/O assíncrono e baixo uso de memória,
-enquanto a suíte Python provê a GUI rica em PyQt6 e o scraper Playwright.
+A CLI Rust usa I/O assíncrono, mas não tem benchmark comparativo nem paridade com o scraper Playwright. Python fornece coleta dinâmica e GUI PyQt6.
 
 ---
 
@@ -62,14 +61,20 @@ enquanto a suíte Python provê a GUI rica em PyQt6 e o scraper Playwright.
 | i18n en / es / pt-BR | `extension/lib/i18n.js` + `_locales/` | ✅ |
 | "Load unpacked" / pacote Chrome | `scripts/build_release.sh` | ✅ |
 
-### 2.4 Núcleo de Alta Performance (Rust)
+### 2.4 Núcleo Rust
 
-| Feature | Crate / Módulo | Estado | Observação |
-|---|---|---|---|
-| Token Bucket Rate Limiter | `pinterest-core::rate_limiter` | ✅ | Recarga suave, lock assíncrono via Tokio, jitter backoff |
-| Fast DOM / PWS Parser | `pinterest-core::parser` | ✅ | Extrai pins de `<script id="__PWS_DATA__">`, metatags `og:image` e fallback DOM |
-| Async Stream Downloader | `pinterest-core::downloader` | ✅ | `reqwest` streaming, concorrência limitada via `tokio::sync::Semaphore` |
-| Native Rust CLI | `pinterest-cli` | ✅ | Parsing robusto com `clap` (derive), barras com `indicatif`, `--json-log` |
+| Recurso | Módulo | Comportamento |
+|---|---|---|
+| Coleta HTTP | `downloader::download_target` | HTML inicial de quadro ou perfil; perfis visitam quadros do JSON embutido |
+| Parser JSON | `parser` | Pins e quadros em `__PWS_DATA__`, fallback de resolução orig/736x/474x |
+| Download | `downloader` | Streaming, concorrência limitada, retry, arquivo temporário antes de publicação |
+| Rate limiter | `rate_limiter` | Token bucket, backoff HTTP 429; sem jitter; expõe quantas vezes segurou uma requisição |
+| Cache de metadados | `cache` | `.pinterest_cache.json` por diretório, gravação atômica, cache corrompido é descartado; formato idêntico ao Python |
+| Motor compartilhado | `engine` | Modos auto/browser/http, eventos tipados, cancelamento, códigos de saída |
+| Browser | `pinterest-browser` | Chromium/CDP: navegação, JS, scroll, cookies de sessão, perfis temporários isolados |
+| CLI | `pinterest-cli` | Limites positivos, opções de cache/taxa aplicadas, erro se extração vazia ou download parcial |
+
+O modo HTTP explícito produz um snapshot de completude desconhecida e não é completo por construção. O cache de metadados ainda não tem expiração nem invalidação, e não há paralelismo entre quadros nem workers adaptativos no Rust.
 
 ---
 
@@ -113,7 +118,7 @@ O argumento posicional aceita **usuário** ou **URL de perfil**. O modo
 ```python
 from pinterest_board_dl import (
     # resultado
-    BoardDownloadResult,          # NamedTuple: (downloaded, total, verified, ...)
+    BoardDownloadResult,          # NamedTuple: (board_url, downloaded, total, output_dir)
     DownloadOptions,              # dataclass de configuração
     PrivateProfileError,          # perfil privado sem login
     # coleta
@@ -138,7 +143,7 @@ from adaptive_workers import AdaptiveWorkerManager, WorkerMetrics, get_adaptive_
 from json_logger import JSONLogger, LogEntry, get_logger, reset_logger
 ```
 
-**Invariantes de módulo:** os cinco módulos são instalados como *top-level*
+**Invariantes de módulo:** os módulos são instalados como *top-level*
 (flat imports: `from json_logger import ...`). Não são um pacote — não
 importe como `pinterest_board_dl.json_logger`.
 
@@ -168,22 +173,31 @@ Contrato declarado em `extension/manifest.json`:
 
 ### 4.5 CLI Rust
 
-```
-pinterest-cli [OPTIONS] <TARGET>
+```text
+pinterest-cli [OPTIONS] [URL_OU_USUARIO]
 
-Arguments:
-  <TARGET>  Pinterest user profile, board URL, or local HTML file
-
-Options:
-  -o, --output <DIR>            Target directory [default: downloads]
-  -m, --max-pins <N>            Limit max pins to scrape
-  -c, --concurrency <N>         Concurrent downloads [default: 4]
-  -r, --rate-limit <PER_SEC>    Max download requests per second [default: 5.0]
-      --dry-run                 Simulate without saving files
-      --json-log                Output structured JSON log entries
-  -h, --help                    Print help
-  -V, --version                 Print version
+-u, --user <USER>          Usuário alternativo ao argumento posicional
+-o, --output <OUTPUT>      Destino [default: downloads]
+-w, --workers <WORKERS>    Downloads simultâneos [default: 8], maior que zero
+    --no-cache            Força download de mídia, ignorando arquivos existentes
+    --no-metadata-cache   Não usa o cache de metadados de pins
+    --cache-dir <DIR>     Diretório do cache de metadados [default: cache do sistema]
+    --no-rate-limit       Desativa o token bucket
+    --max-pins <MAX_PINS>  Limite por quadro, maior que zero
+    --mode <MODE>         auto | browser | http [default: auto]
+    --headful             Browser visível
+    --manual-login        Aguarda confirmação após login
+    --json-log            Eventos JSONL em stdout
+    --log-file <FILE>     Mesmo evento JSONL em arquivo
+-h, --help
+-V, --version
 ```
+
+Sem alvo, extração vazia ou falha em algum download: saída diferente de zero.
+Mídias ficam em `<output>/<usuario>_<quadro>/`. O cache de metadados é
+`.pinterest_cache.json` no diretório informado em `--cache-dir` (cache do sistema
+por padrão) e tem o mesmo formato do Python, de modo que o diretório pode ser
+compartilhado entre as duas CLIs.
 
 ---
 
@@ -193,9 +207,12 @@ Options:
 .
 ├── Cargo.toml                    # Cargo workspace definition
 ├── crates/
-│   ├── pinterest-core/           # Núcleo puro em Rust (parser, rate-limiter, downloader)
+│   ├── pinterest-core/           # Núcleo puro em Rust (parser, cache, rate-limiter, downloader, motor)
 │   │   ├── Cargo.toml
-│   │   └── src/{lib.rs, downloader.rs, parser.rs, rate_limiter.rs}
+│   │   └── src/{lib.rs, cache.rs, collector.rs, downloader.rs, engine.rs, models.rs, parser.rs, rate_limiter.rs, runtime/}
+│   ├── pinterest-browser/        # Ciclo de vida do Chromium e snapshots CDP
+│   │   ├── Cargo.toml
+│   │   └── src/lib.rs
 │   └── pinterest-cli/            # CLI nativa em Rust (clap, indicatif)
 │       ├── Cargo.toml
 │       └── src/main.rs
@@ -211,7 +228,7 @@ Options:
 │   ├── lib/pin_utils.js
 │   ├── content.js  popup.js  popup.html  background.js
 │   └── _locales/{en,es,pt_BR}/
-├── tests/                        # 202 testes em Python + 69 checks Node
+├── tests/                        # suíte Python e 69 checks Node (ver TEST_INFRA.md)
 │   └── conftest.py               #   coloca src/ no sys.path
 ├── scripts/
 │   ├── diagnose.py               #   diagnóstico de ambiente (offline)
@@ -241,7 +258,9 @@ Options:
 | `v2.0.4` | **sim** ✅ | AppImage 377 MB · .deb 338 MB · zip Windows 422 MB · zip Chrome · xpi · source 1,1 MB | ✅ **completa e verificada**, buildada a partir da `main` |
 | `v2.0.5` | **sim** ✅ | AppImage 380 MB · .deb 340 MB · zip Windows 425 MB · zip Chrome · xpi · source 1,2 MB | ✅ **completa e verificada**, buildada a partir da `main` (`5a41f3e`) |
 
-### 6.1 A `v2.0.5`
+### 6.1 Histórico da `v2.0.5`
+
+Os registros abaixo são históricos. Artefatos publicados e CI remota não foram revalidados na revisão de 2026-11-06. Os workflows Rust novos são alterações locais.
 
 A `v2.0.5` traz a **nova interface gráfica (GUI)** redesenhada em três
 etapas com **tema escuro**, miniaturas quadradas sem distorção e o refatoramento
