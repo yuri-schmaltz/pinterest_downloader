@@ -1,80 +1,244 @@
-use clap::Parser;
-use pinterest_core::{DownloadOptions, Downloader};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use clap::{Parser, ValueEnum};
+use pinterest_core::{
+    collector::CollectionOptions,
+    engine::{self, CollectionMode, RunOptions},
+    runtime::Completeness,
+    DownloadOptions, Operation, PinterestError, RunEvent,
+};
+use std::{path::PathBuf, time::Duration};
+use tokio::io::AsyncWriteExt;
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum Mode {
+    #[default]
+    Auto,
+    Browser,
+    Http,
+}
 
 #[derive(Parser, Debug)]
-#[command(name = "pinterest-dl")]
-#[command(version = "2.0.5")]
-#[command(about = "High performance Pinterest Downloader em Rust puro", long_about = None)]
+#[command(
+    name = "pinterest-cli",
+    version,
+    about = "Baixa quadros do Pinterest com coleta Chromium ou snapshot HTTP"
+)]
 struct Cli {
-    /// URL do quadro ou nome de usuário
-    #[arg(value_name = "URL_OU_USUARIO")]
+    /// URL de quadro/perfil ou nome de usuário
+    #[arg(value_name = "URL_OU_USUARIO", conflicts_with = "user")]
     target: Option<String>,
-
-    /// Nome de usuário alternativo via flag
     #[arg(short, long)]
     user: Option<String>,
-
-    /// Diretório de destino
-    #[arg(short, long, default_value = "downloads")]
+    /// Destino (layout Rust atual: usuario_quadro)
+    #[arg(short, long, alias = "out", default_value = "downloads")]
     output: PathBuf,
-
-    /// Número de downloads simultâneos
     #[arg(short, long, default_value_t = 8)]
     workers: usize,
-
-    /// Desativar cache local
+    /// Ignora arquivos de mídia existentes (semântica Rust preservada)
     #[arg(long)]
     no_cache: bool,
-
-    /// Desativar rate limiting
+    /// Não usa o cache de metadados de pins (resolução sempre pela rede)
+    #[arg(long)]
+    no_metadata_cache: bool,
+    /// Diretório do cache de metadados (default: cache do sistema)
+    #[arg(long)]
+    cache_dir: Option<PathBuf>,
     #[arg(long)]
     no_rate_limit: bool,
-
-    /// Limite máximo de pins para baixar
     #[arg(long)]
     max_pins: Option<usize>,
+    /// Auto usa Chromium; HTTP explícito tem completude desconhecida
+    #[arg(long, value_enum, default_value_t = Mode::Auto)]
+    mode: Mode,
+    #[arg(long)]
+    browser_executable: Option<PathBuf>,
+    #[arg(long)]
+    headful: bool,
+    /// Aguarda confirmação após login no browser visível
+    #[arg(long)]
+    manual_login: bool,
+    /// Desativa sandbox explicitamente em ambientes isolados que o exigem
+    #[arg(long)]
+    no_sandbox: bool,
+    #[arg(long, default_value_t = 1.2)]
+    scroll_pause: f64,
+    #[arg(long, default_value_t = 150)]
+    collection_timeout: u64,
+    /// Eventos JSONL em stdout; progresso humano vai para stderr
+    #[arg(long)]
+    json_log: bool,
+    /// Arquivo JSONL com os mesmos eventos tipados
+    #[arg(long)]
+    log_file: Option<PathBuf>,
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new("info"))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
-
+async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
-    let target = cli.user.or(cli.target);
+    match execute(cli).await {
+        Ok(code) => std::process::ExitCode::from(code),
+        Err((code, message)) => {
+            eprintln!("Erro: {message}");
+            std::process::ExitCode::from(code)
+        }
+    }
+}
 
-    let Some(target_input) = target else {
-        eprintln!("Erro: Forneça a URL do quadro ou usuário (use --help para ajuda)");
-        std::process::exit(1);
+async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
+    let target = cli
+        .user
+        .or(cli.target)
+        .ok_or_else(|| (2, "Informe URL ou usuário; use --help".into()))?;
+    if cli.workers == 0
+        || cli.max_pins == Some(0)
+        || !cli.scroll_pause.is_finite()
+        || cli.scroll_pause <= 0.0
+        || cli.scroll_pause > 3600.0
+        || cli.collection_timeout == 0
+    {
+        return Err((
+            2,
+            "Workers, limite, pausa e timeout devem ser positivos; pausa máxima: 3600s".into(),
+        ));
+    }
+    if matches!(cli.mode, Mode::Http) && (cli.manual_login || cli.headful) {
+        return Err((
+            2,
+            "Login/browser visível exigem --mode browser ou auto".into(),
+        ));
+    }
+    let mut collection = CollectionOptions::default();
+    collection.browser.executable = cli.browser_executable;
+    collection.browser.headless = !cli.headful;
+    collection.browser.no_sandbox = cli.no_sandbox;
+    collection.scroll_pause = Duration::from_secs_f64(cli.scroll_pause);
+    collection.max_duration = Duration::from_secs(cli.collection_timeout);
+    collection.manual_login = cli.manual_login;
+    let options = RunOptions {
+        download: DownloadOptions {
+            out_root: cli.output,
+            workers: cli.workers,
+            use_cache: !cli.no_cache,
+            rate_limiting: !cli.no_rate_limit,
+            max_pins: cli.max_pins,
+            cache_dir: cli.cache_dir,
+            metadata_cache: !cli.no_metadata_cache,
+        },
+        collection,
+        mode: match cli.mode {
+            Mode::Auto => CollectionMode::Auto,
+            Mode::Browser => CollectionMode::Browser,
+            Mode::Http => CollectionMode::Http,
+        },
     };
-
-    println!("==================================================");
-    println!("  Pinterest Downloader (Pure Rust v2.0.5)");
-    println!("  Target: {}", target_input);
-    println!("==================================================");
-
-    let downloader = Downloader::new()?;
-    let options = DownloadOptions {
-        out_root: cli.output,
-        workers: cli.workers,
-        use_cache: !cli.no_cache,
-        rate_limiting: !cli.no_rate_limit,
-        max_pins: cli.max_pins,
+    let (operation, mut events) = Operation::new(256);
+    let presentation_operation = operation.clone();
+    let log = if let Some(path) = cli.log_file {
+        Some(
+            tokio::fs::File::create(path)
+                .await
+                .map_err(|error| (1, error.to_string()))?,
+        )
+    } else {
+        None
     };
-
-    println!("Inicializando download em {:?} com {} workers...", options.out_root, options.workers);
-
-    // Exemplo de integração direta com o downloader em Rust
-    let pin_map: HashMap<String, String> = HashMap::new();
-    let result = downloader.download_board_images(&target_input, pin_map, &options).await?;
-
-    println!("\nDownload finalizado com sucesso!");
-    println!("Quadros/Imagens salvas em: {:?}", result.output_dir);
-
-    Ok(())
+    let json = cli.json_log;
+    let presenter = tokio::spawn(async move {
+        let mut log = log;
+        let (login_sender, mut login_input) = tokio::sync::mpsc::channel(1);
+        // Tokio stdin uses blocking reads that can delay runtime shutdown until Enter.
+        // A detached OS thread permits Ctrl+C to finish while a login prompt is pending.
+        let mut awaiting_login = false;
+        loop {
+            tokio::select! {
+                line = login_input.recv(), if awaiting_login => {
+                    match line {
+                        Some(true) => { presentation_operation.resume_login(); awaiting_login = false; },
+                        _ => { presentation_operation.cancel(); awaiting_login = false; },
+                    }
+                },
+                event = events.recv() => {
+                    let Some(event) = event else { break; };
+                    let serialized = serde_json::to_string(&event).map_err(|error| error.to_string())?;
+                    if json {
+                        let mut stdout = tokio::io::stdout();
+                        stdout.write_all(format!("{serialized}\n").as_bytes()).await.map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
+                    }
+                    if let Some(file) = &mut log {
+                        file.write_all(serialized.as_bytes()).await.map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
+                        file.write_all(b"\n").await.map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
+                    }
+                    match &event.event {
+                        RunEvent::LoginRequired { url } => {
+                            eprintln!("Faça login no browser para {url}; pressione Enter para continuar (Ctrl+C cancela).");
+                            awaiting_login = true;
+                            let sender = login_sender.clone();
+                            std::thread::spawn(move || {
+                                let mut input = String::new();
+                                let confirmed = std::io::stdin().read_line(&mut input).is_ok_and(|bytes| bytes > 0);
+                                let _ = sender.blocking_send(confirmed);
+                            });
+                        },
+                        RunEvent::BoardStarted { board_url } if !json => eprintln!("Quadro: {board_url}"),
+                        RunEvent::DownloadProgress { current, total } if !json => eprintln!("Mídias: {current}/{total}"),
+                        RunEvent::Warning { message } => eprintln!("Aviso: {message}"),
+                        RunEvent::Failed { message, .. } => eprintln!("Falha: {message}"),
+                        _ => {},
+                    }
+                    if matches!(event.event, RunEvent::Finished { .. } | RunEvent::Failed { .. } | RunEvent::Cancelled) { break; }
+                }
+            }
+        }
+        if let Some(file) = &mut log {
+            file.flush().await.map_err(|error| error.to_string())?;
+        }
+        Ok::<_, String>(())
+    });
+    let cancel = operation.clone();
+    let signal = tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            cancel.cancel();
+        }
+    });
+    let result = engine::run_target(&target, options, operation.clone()).await;
+    signal.abort();
+    presenter
+        .await
+        .map_err(|error| (1, error.to_string()))?
+        .map_err(|message| (1, message))?;
+    drop(operation);
+    match result {
+        Ok(report) => {
+            if !json {
+                eprintln!(
+                    "Concluído: {} novos, {} reutilizados, {} falhas",
+                    report.totals.downloaded, report.totals.reused, report.totals.failed
+                );
+            }
+            if report.totals.failed > 0
+                || report.discovery_completeness == Completeness::Unknown
+                || report
+                    .boards
+                    .iter()
+                    .any(|board| board.completeness == Completeness::Unknown)
+            {
+                Ok(6)
+            } else {
+                Ok(0)
+            }
+        }
+        Err(error) => {
+            let code = match error {
+                PinterestError::Cancelled => 130,
+                PinterestError::Browser(_) => 3,
+                PinterestError::PrivateProfile(_) | PinterestError::AuthenticationRequired(_) => 4,
+                PinterestError::InvalidUrl(_) => 2,
+                PinterestError::Extraction(_) => 7,
+                _ => 1,
+            };
+            Err((code, engine::public_error_message(&error)))
+        }
+    }
 }
