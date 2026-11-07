@@ -304,3 +304,38 @@ jobs:
         with:
           files: pinterest-board-downloader-x64.zip
           generate_release_notes: true
+
+  build-rust:
+    name: Build Rust CLI (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x86_64
+            executable: pinterest-cli
+          - os: windows-latest
+            platform: windows-x86_64
+            executable: pinterest-cli.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/sync_version.py --check --tag
+      - run: cargo test --workspace --locked
+      - run: cargo build --release --locked -p pinterest-cli
+      - name: Package Rust CLI
+        shell: bash
+        run: |
+          mkdir -p rust-dist
+          cp "target/release/${{ matrix.executable }}" rust-dist/
+          cp LICENSE rust-dist/
+          tar -czf "pinterest-cli-${{ matrix.platform }}.tar.gz" -C rust-dist .
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: pinterest-cli-${{ matrix.platform }}.tar.gz

@@ -1,3 +1,5 @@
+> **Registro histórico.** Métricas e afirmações deste documento se referem à época da implementação. Para o estado atual, consulte [README](../README.md), [PROJECT](../PROJECT.md) e [TEST_INFRA](../TEST_INFRA.md).
+
 > **Documento histórico — 12 de janeiro de 2026.**
 > Descreve o estado do projeto na época da ONDA 1 a 5E. O código evoluiu
 > bastante desde então: o repositório foi reestruturado para `src/`, a suíte
@@ -16,8 +18,8 @@
 
 # 📋 RESUMO DE IMPLEMENTAÇÃO — ONDAS 1, 2, 3, 4, 5B, 5C, 5D E 5E
 
-**Data:** 12 de janeiro de 2026  
-**Status:** ✅ COMPLETO (ONDAS 1-5E)  
+**Data:** 12 de janeiro de 2026
+**Status:** ✅ COMPLETO (ONDAS 1-5E)
 **Commits:** 11+ (ad9cc87 ... bccc424 + ONDA 5D/5E)
 
 ---
@@ -55,8 +57,8 @@
 - Adicionado: `pins/` (diretório de downloads)
 
 ### Teste de Smoke
-✅ `python -c "from pinterest_board_dl import *"` — OK  
-✅ `python src/pinterest_board_dl.py --help` — OK  
+✅ `python -c "from pinterest_board_dl import *"` — OK
+✅ `python src/pinterest_board_dl.py --help` — OK
 ✅ Constantes verificadas: PASS
 
 ---
@@ -100,7 +102,7 @@ for attempt in range(max_retries + 1):
 ```python
 def load_pin_cache() -> Dict[str, str]:
     """Carrega cache de pin_url -> og:image_url."""
-    
+
 def save_pin_cache(cache: Dict[str, str]) -> None:
     """Salva cache em .pinterest_cache.json."""
 ```
@@ -219,7 +221,7 @@ PERFORMANCE_AUDIT_REPORT.md         (+969 linhas)
 
 **Problema Identificado:**
 - `collect_pin_links()` criava novo browser a cada board → ~3s overhead
-- `collect_board_urls()` criava novo browser → ~2s overhead  
+- `collect_board_urls()` criava novo browser → ~2s overhead
 - Para 5 boards: **15s desperdício** só em Chromium startup
 
 **Solução:**
@@ -681,16 +683,16 @@ def fetch_og_image(url: str, session: requests.Session, use_rate_limit: bool = F
         limiter = get_rate_limiter()
         if not limiter.acquire(timeout=30.0):
             return None  # Timeout
-    
+
     try:
         resp = session.get(url, ...)
         if resp.status_code == 429 and use_rate_limit:
             limiter.report_429()
             return None
-        
+
         if use_rate_limit:
             limiter.report_success()
-        
+
         # ... resto do código ...
 ```
 
@@ -704,7 +706,7 @@ def resolve_images(..., rate_limiting: bool = False):
 
 **CLI Flag:**
 ```python
-ap.add_argument("--rate-limiting", action="store_true", 
+ap.add_argument("--rate-limiting", action="store_true",
                 help="Ativa limitação inteligente de requisições (ONDA 5E)")
 ```
 

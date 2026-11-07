@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 pub struct RateLimiter {
     state: Arc<Mutex<RateLimiterState>>,
     consecutive_429: Arc<AtomicU64>,
+    waits: Arc<AtomicU64>,
 }
 
 #[derive(Debug)]
@@ -31,7 +32,17 @@ impl RateLimiter {
                 backoff_until: None,
             })),
             consecutive_429: Arc::new(AtomicU64::new(0)),
+            waits: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// How many times the limiter had to hold a caller back.
+    ///
+    /// Zero means every caller found a token ready. This is the observable
+    /// difference between a rate-limited run and a bypassed one, without
+    /// depending on wall-clock timing.
+    pub fn waits(&self) -> u64 {
+        self.waits.load(Ordering::SeqCst)
     }
 
     pub async fn acquire(&self) {
@@ -51,7 +62,8 @@ impl RateLimiter {
                 } else {
                     // Token bucket
                     let elapsed = (now - state.last_update).as_secs_f64();
-                    state.tokens = (state.tokens + elapsed * state.refill_rate_per_sec).min(state.max_tokens);
+                    state.tokens =
+                        (state.tokens + elapsed * state.refill_rate_per_sec).min(state.max_tokens);
                     state.last_update = now;
 
                     if state.tokens >= 1.0 {
@@ -65,6 +77,7 @@ impl RateLimiter {
             };
 
             if !delay.is_zero() {
+                self.waits.fetch_add(1, Ordering::SeqCst);
                 tokio::time::sleep(delay).await;
             }
         }

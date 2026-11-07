@@ -75,7 +75,7 @@ def test_download_options():
     # Default
     opts1 = DownloadOptions()
     assert opts1.use_cache is True, "Default use_cache should be True"
-    assert opts1.cache_dir == ".", "Default cache_dir should be '.'"
+    assert opts1.cache_dir is None, "Default cache_dir should be None (system cache)"
 
     # Custom
     opts2 = DownloadOptions(

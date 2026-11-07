@@ -1,3 +1,5 @@
+> **Registro histórico.** Métricas e afirmações deste documento se referem à época da implementação. Para o estado atual, consulte [README](../README.md), [PROJECT](../PROJECT.md) e [TEST_INFRA](../TEST_INFRA.md).
+
 > **Documento histórico — 12 de janeiro de 2026.**
 > Descreve o estado do projeto na época da ONDA 5E. O código evoluiu
 > bastante desde então: o repositório foi reestruturado para `src/`, a suíte
@@ -81,23 +83,23 @@ class DownloadOptions:
 
 #### **fetch_og_image() Modificado**
 ```python
-def fetch_og_image(url: str, session: requests.Session, 
+def fetch_og_image(url: str, session: requests.Session,
                    use_rate_limit: bool = False) -> str | None:
     if use_rate_limit:
         limiter = get_rate_limiter()
         if not limiter.acquire(timeout=30.0):
             return None  # Timeout aguardando rate limit
-    
+
     try:
         resp = session.get(url, timeout=TIMEOUT_HTTP_GET)
-        
+
         if resp.status_code == 429 and use_rate_limit:
             limiter.report_429()  # Exponential backoff
             return None
-        
+
         if use_rate_limit:
             limiter.report_success()  # Gradual reset
-        
+
         # ... resto do código ...
 ```
 
@@ -455,6 +457,6 @@ limiter = get_rate_limiter()
 
 ---
 
-**Guia criado em:** 12 de janeiro de 2026  
-**Versão:** 1.0.0  
+**Guia criado em:** 12 de janeiro de 2026
+**Versão:** 1.0.0
 **Autor:** GitHub Copilot

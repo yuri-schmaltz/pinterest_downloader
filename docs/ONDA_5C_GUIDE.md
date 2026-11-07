@@ -1,3 +1,5 @@
+> **Registro histórico.** Métricas e afirmações deste documento se referem à época da implementação. Para o estado atual, consulte [README](../README.md), [PROJECT](../PROJECT.md) e [TEST_INFRA](../TEST_INFRA.md).
+
 > **Documento histórico — 12 de janeiro de 2026.**
 > Descreve o estado do projeto na época da ONDA 5C. O código evoluiu
 > bastante desde então: o repositório foi reestruturado para `src/`, a suíte
@@ -304,7 +306,7 @@ python src/pinterest_board_dl.py --user yuri_schmaltz --workers 32 --adaptive-wo
 
 # Observar em .worker_metrics.json qual workers foi mais eficiente
 jq '.metrics | group_by(.active_workers) | map({
-  workers: .[0].active_workers, 
+  workers: .[0].active_workers,
   count: length,
   avg_success: (map(.success_rate) | add/length | . * 100 | round)
 })' .worker_metrics.json
@@ -353,5 +355,5 @@ echo "=== Fixed ===" && jq '.logs[-1] | {phase, duration_ms}' log_fixed.json
 
 ---
 
-**Última atualização:** 12 de janeiro de 2026  
+**Última atualização:** 12 de janeiro de 2026
 **Status:** ✅ ONDA 5C Completa

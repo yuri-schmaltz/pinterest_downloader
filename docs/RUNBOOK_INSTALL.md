@@ -1,6 +1,8 @@
+> Atualização de 2026-11-06: os exemplos Python são operacionais; os requisitos de hardware abaixo são orientações históricas, sem benchmark. O XPI é experimental, não assinado e ainda precisa de manifest/validação Firefox. Para Rust, consulte o [README](../README.md).
+
 # 📖 Runbook: Instalação e Configuração
 
-**App:** Pinterest Board Downloader v2.0.3
+**App:** Pinterest Board Downloader v2.0.5
 **Suporte:** Linux (Ubuntu/Debian/Fedora), Windows 10/11, macOS
 
 > Este runbook foi reescrito em 2026-10-22. A versão anterior apontava para
@@ -170,7 +172,7 @@ pinterest-board-dl <URL> --workers 32 --adaptive-workers --rate-limiting --json-
           └── *.jpg
 ```
 
-Para usar outro local de cache: `--cache-dir /caminho`.
+`--cache-dir` aponta o resolvedor de metadados para outro diretório. Sem a opção, o cache fica no caminho do sistema, como acima.
 
 ---
 

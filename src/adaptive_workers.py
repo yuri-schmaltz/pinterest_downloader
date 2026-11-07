@@ -7,7 +7,7 @@ ONDA 5C - Adaptive Workers
 
 import json
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -63,7 +63,7 @@ class AdaptiveWorkerManager:
 
     def _get_timestamp(self) -> str:
         """Retorna timestamp ISO 8601."""
-        return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+        return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="milliseconds") + "Z"
 
     def _load_metrics(self) -> None:
         """Carrega histórico de métricas se existir."""

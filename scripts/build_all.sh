@@ -21,7 +21,7 @@ mkdir -p $STAGING_DIR/DEBIAN
 
 # Copy files
 cp -r dist/$APP_NAME/* $STAGING_DIR/usr/bin/
-# The main binary needs to be directly in /usr/bin for easy access, 
+# The main binary needs to be directly in /usr/bin for easy access,
 # but PyInstaller in 'onedir' mode puts many files there.
 # We'll create a wrapper or move everything to /opt later if needed.
 # For now, let's keep it simple.

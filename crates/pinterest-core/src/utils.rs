@@ -4,17 +4,26 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 pub static USER_BOARDS_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^https?://(?:[a-z]{2}\.)?pinterest\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)/([^/]+)/?$").unwrap()
+    Regex::new(
+        r"(?i)^https?://(?:[a-z]{2}\.)?pinterest\.(?:com|[a-z]{2,3}(?:\.[a-z]{2})?)/([^/]+)/?$",
+    )
+    .unwrap()
 });
 
-static PIN_COUNT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"([\d.,]+)\s*(mil|k|m)?").unwrap()
-});
+static PIN_COUNT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"([\d.,]+)\s*(mil|k|m)?").unwrap());
 
 pub fn normalize_url(raw: &str) -> String {
     let mut clean = raw.trim().to_string();
     if !clean.starts_with("http://") && !clean.starts_with("https://") {
-        clean = format!("https://{}", clean);
+        clean = if clean.split('/').next().unwrap_or("").contains('.') {
+            format!("https://{clean}")
+        } else {
+            format!(
+                "https://www.pinterest.com/{}",
+                clean.trim_start_matches('/')
+            )
+        };
     }
     if let Some(pos) = clean.find('?') {
         clean.truncate(pos);
@@ -38,7 +47,7 @@ pub fn parse_pin_count(raw: &str) -> Option<u64> {
         decimal_str.parse().ok()?
     } else {
         // Sem multiplicador (ex: "1.200" ou "1,200 pins"), remove separador de milhar
-        let clean_num = raw_num.replace('.', "").replace(',', "");
+        let clean_num = raw_num.replace(['.', ','], "");
         clean_num.parse().ok()?
     };
 
