@@ -4,9 +4,14 @@
 <main data-test-id="board-feed"><div id="pins"></div><div style="height:1800px"></div></main>
 <script>
 let page = 0, loading = false;
+// The delay lets a test reproduce a slow feed: the page looks unchanged
+// while the first payload is still on its way. The signal is the path,
+// because the collector strips query strings from the target URL.
+const delay = location.pathname.includes('/slow/') ? 3000 : 100;
 async function loadNext() {
     if (loading || page === 2) return;
     loading = true;
+    await new Promise(resolve => setTimeout(resolve, delay));
     const response = await fetch('/resource/BoardFeedResource/get/?page=' + (++page));
     const payload = await response.json();
     // Simulate a virtualized feed: earlier cards disappear from the DOM.
@@ -30,6 +35,6 @@ async function loadNext() {
     }
     loading = false;
 }
-setTimeout(loadNext, 100);
-window.addEventListener('scroll', () => setTimeout(loadNext, 100));
+setTimeout(loadNext, delay);
+window.addEventListener('scroll', () => setTimeout(loadNext, delay));
 </script></body></html>

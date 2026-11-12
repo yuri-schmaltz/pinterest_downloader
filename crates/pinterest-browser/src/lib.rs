@@ -186,7 +186,9 @@ impl BrowserSession {
 
     pub async fn close(mut self) -> Result<()> {
         // Shutdown is independent of cancellation and always reaps our child.
-        let graceful = tokio::time::timeout(Duration::from_secs(3), self.browser.close()).await;
+        // The graceful window is generous because a loaded machine can be slow
+        // to answer; the forced path below is the backstop.
+        let graceful = tokio::time::timeout(Duration::from_secs(10), self.browser.close()).await;
         let mut forced = !matches!(graceful, Ok(Ok(_)));
         if !forced {
             forced = !matches!(
@@ -195,9 +197,21 @@ impl BrowserSession {
             );
         }
         if forced {
-            match tokio::time::timeout(Duration::from_secs(1), self.browser.kill()).await {
+            match tokio::time::timeout(Duration::from_secs(5), self.browser.kill()).await {
                 Ok(Some(Ok(()))) | Ok(None) => {}
-                Ok(Some(Err(error))) => return Err(BrowserError::Io(error)),
+                Ok(Some(Err(error))) => {
+                    // The browser may have exited between the wait and the kill.
+                    // A process that is already gone was reaped, which is
+                    // exactly what this method exists to guarantee, so a failed
+                    // kill is not an error in that case.
+                    let already_gone = matches!(
+                        tokio::time::timeout(Duration::from_secs(1), self.browser.wait()).await,
+                        Ok(Ok(Some(_)))
+                    );
+                    if !already_gone {
+                        return Err(BrowserError::Io(error));
+                    }
+                }
                 Err(_) => return Err(BrowserError::Timeout),
             }
         }
@@ -232,6 +246,10 @@ pub struct PageSnapshot {
     pub height: u64,
     pub at_bottom: bool,
     pub end_of_feed: bool,
+    /// Whether the document finished parsing. A page that is still loading can
+    /// look identical to an empty one, so this decides when it is safe to
+    /// conclude that nothing changed.
+    pub document_ready: bool,
     pub login_required: bool,
     pub network: Vec<NetworkPayload>,
     pub network_truncated: bool,
@@ -293,6 +311,10 @@ impl BrowserPage {
                         let mime = response.response.mime_type.to_ascii_lowercase();
                         if mime.contains("json") {
                             pending.insert(response.request_id.clone(), response.response.url.clone());
+                            // Count the request as in flight as soon as its headers
+                            // arrive, so a caller that is still waiting for the
+                            // payload knows the content is not final yet.
+                            captured.lock().await.pending = pending.len();
                         }
                     },
                     response = finished.next() => {
@@ -376,6 +398,7 @@ impl BrowserPage {
                     thumbnail: a.querySelector('img')?.src || '',
                     recommendation: Boolean(a.closest('[data-test-id*="related"], [data-test-id*="recommend"], [data-parity="recommendations"]'))})),
                 end_of_feed: Boolean(document.querySelector('[data-test-id="board-feed-end"]')),
+                document_ready: document.readyState !== 'loading',
                 login_required: /\/(login|signup)\/?$/.test(location.pathname) || Boolean(document.querySelector('[data-test-id="login-form"], form[action*="/login/"]')),
                 height: Math.ceil(root.scrollHeight), at_bottom: root.scrollTop + innerHeight >= root.scrollHeight - 20};
         })()"#).await?;
@@ -392,6 +415,7 @@ impl BrowserPage {
             height: value["height"].as_u64().unwrap_or_default(),
             at_bottom: value["at_bottom"].as_bool().unwrap_or(false),
             end_of_feed: value["end_of_feed"].as_bool().unwrap_or(false),
+            document_ready: value["document_ready"].as_bool().unwrap_or(false),
             login_required: value["login_required"].as_bool().unwrap_or(false),
             network: entries,
             network_truncated: truncated,

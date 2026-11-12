@@ -145,3 +145,49 @@ async fn cancellation_interrupts_javascript_and_still_closes_browser() {
     #[cfg(not(target_os = "linux"))]
     let _ = pid;
 }
+
+#[tokio::test]
+#[ignore = "requires Chromium; run explicitly or via browser CI job"]
+async fn closing_a_browser_that_already_exited_succeeds() {
+    // Closing must never fail because the browser died on its own: reaping an
+    // exited process is the outcome close() exists to guarantee. This failed
+    // intermittently on a loaded runner, where the graceful window expired,
+    // the process had already left, and the forced kill reported the error.
+    let mut browser = BrowserSession::launch(
+        BrowserOptions {
+            no_sandbox: true,
+            ..Default::default()
+        },
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    let pid = browser.process_id().unwrap();
+
+    // Terminate the browser behind the session's back.
+    let killed = if cfg!(windows) {
+        std::process::Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    } else {
+        std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    };
+    if !killed {
+        // The platform refused to kill it; there is nothing to assert here.
+        return;
+    }
+    // Give the process time to actually leave the table.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    browser.close().await.unwrap();
+}

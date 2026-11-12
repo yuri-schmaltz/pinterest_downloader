@@ -91,6 +91,26 @@ async fn limit_stops_per_board_and_empty_feed_is_a_distinct_success() {
 
 #[tokio::test]
 #[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn a_slow_feed_is_not_reported_as_an_empty_board() {
+    // The page looks unchanged while the first payload is still on its way.
+    // A collector that concludes "stable" on that silence reports an empty
+    // board, which is a wrong answer rather than an incomplete one. It has to
+    // wait for the request that is in flight.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let board = collector
+        .collect_board(&format!("{}/alice/slow/art/", server.url))
+        .await
+        .unwrap();
+    assert!(
+        !board.pin_links.is_empty(),
+        "a slow feed was reported as an empty board"
+    );
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
 async fn runner_transfers_browser_cookies_downloads_and_reports_cache_hits() {
     let server = fixture::serve().await;
     let directory = tempfile::tempdir().unwrap();
@@ -202,7 +222,9 @@ async fn cancelled_run_drains_terminal_event_and_closes_browser() {
         false
     });
     let result = tokio::time::timeout(
-        Duration::from_secs(5),
+        // A cold Windows runner needs a while to start Chromium; the test
+        // checks cancellation semantics, not how fast the browser boots.
+        Duration::from_secs(60),
         run_target(
             &format!("{}/alice/art/", server.url),
             RunOptions {

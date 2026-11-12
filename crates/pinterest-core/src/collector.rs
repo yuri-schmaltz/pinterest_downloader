@@ -159,7 +159,20 @@ impl Collector {
                 }
                 // Require quiet rounds even after an explicit end marker: network body
                 // capture may still be queued behind loadingFinished on the CDP stream.
-                if links.len() == previous_count && snapshot.height == previous_height {
+                //
+                // A board that has not produced a single link yet has not proven
+                // itself stable: the feed may simply not have arrived, and a
+                // silent page is exactly what a slow feed looks like. Only an
+                // explicit end marker or a board that already yielded pins can
+                // end the collection. The same holds while the document is still
+                // parsing or a JSON payload is still on its way.
+                let provable = end_seen || !links.is_empty();
+                if provable
+                    && snapshot.document_ready
+                    && snapshot.pending_requests == 0
+                    && links.len() == previous_count
+                    && snapshot.height == previous_height
+                {
                     stable += 1;
                 } else {
                     stable = 0;
