@@ -52,7 +52,7 @@ pub fn parse_pin_count(raw: &str) -> Option<u64> {
     };
 
     let multiplier = match multiplier_str {
-        Some("mil") | Some("k") => 1_000.0,
+        Some("mil" | "k") => 1_000.0,
         Some("m") => 1_000_000.0,
         _ => 1.0,
     };

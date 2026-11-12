@@ -71,6 +71,8 @@ pub struct DownloadOptions {
     pub cache_dir: Option<PathBuf>,
     /// Whether the pin metadata cache is read and written.
     pub metadata_cache: bool,
+    /// Whether the number of tasks in flight follows the machine load.
+    pub adaptive: bool,
 }
 
 impl Default for DownloadOptions {
@@ -84,6 +86,7 @@ impl Default for DownloadOptions {
             boards_workers: 1,
             cache_dir: None,
             metadata_cache: true,
+            adaptive: false,
         }
     }
 }

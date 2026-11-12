@@ -45,8 +45,15 @@ struct Cli {
     /// Diretório do cache de metadados (default: cache do sistema)
     #[arg(long)]
     cache_dir: Option<PathBuf>,
-    #[arg(long)]
+    /// Desativa o limitador de taxa
+    #[arg(long, alias = "no-rate-limiting")]
     no_rate_limit: bool,
+    /// Ativa o limitador de taxa (o mesmo que desligar --no-rate-limit)
+    #[arg(long)]
+    rate_limiting: bool,
+    /// Ajusta o numero de tarefas em voo conforme a carga da maquina
+    #[arg(long)]
+    adaptive_workers: bool,
     #[arg(long)]
     max_pins: Option<usize>,
     /// Auto usa Chromium; HTTP explícito tem completude desconhecida
@@ -107,6 +114,9 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
             "Workers, quadros em paralelo, limite, pausa e timeout devem ser positivos; pausa máxima: 3600s".into(),
         ));
     }
+    if cli.rate_limiting && cli.no_rate_limit {
+        return Err((2, "--rate-limiting e --no-rate-limit se contradizem".into()));
+    }
     if matches!(cli.mode, Mode::Http) && (cli.manual_login || cli.headful) {
         return Err((
             2,
@@ -126,7 +136,8 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
             workers: cli.workers,
             boards_workers: cli.boards_workers,
             use_cache: !cli.no_cache,
-            rate_limiting: !cli.no_rate_limit,
+            rate_limiting: cli.rate_limiting || !cli.no_rate_limit,
+            adaptive: cli.adaptive_workers,
             max_pins: cli.max_pins,
             cache_dir: cli.cache_dir,
             metadata_cache: !cli.no_metadata_cache,
@@ -159,10 +170,12 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
         loop {
             tokio::select! {
                 line = login_input.recv(), if awaiting_login => {
-                    match line {
-                        Some(true) => { presentation_operation.resume_login(); awaiting_login = false; },
-                        _ => { presentation_operation.cancel(); awaiting_login = false; },
+                    if matches!(line, Some(true)) {
+                        presentation_operation.resume_login();
+                    } else {
+                        presentation_operation.cancel();
                     }
+                    awaiting_login = false;
                 },
                 event = events.recv() => {
                     let Some(event) = event else { break; };

@@ -297,7 +297,7 @@ impl Collector {
                     let raw = serde_json::json!({"url":link.href,"name":link.title});
                     let mut parsed = extract_boards_from_pws(&raw, username);
                     for board in &mut parsed {
-                        board.thumbnail_url = link.thumbnail.clone();
+                        board.thumbnail_url.clone_from(&link.thumbnail);
                     }
                     entries.extend(parsed);
                 }
@@ -311,11 +311,11 @@ impl Collector {
                             .entry(board.url.clone())
                             .and_modify(|existing: &mut BoardMetadata| {
                                 if existing.thumbnail_url.is_empty() {
-                                    existing.thumbnail_url = board.thumbnail_url.clone();
+                                    existing.thumbnail_url.clone_from(&board.thumbnail_url);
                                 }
                                 if existing.pin_count_int.is_none() {
                                     existing.pin_count_int = board.pin_count_int;
-                                    existing.pin_count = board.pin_count.clone();
+                                    existing.pin_count.clone_from(&board.pin_count);
                                 }
                             })
                             .or_insert(board);

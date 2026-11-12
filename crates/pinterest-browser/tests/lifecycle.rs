@@ -85,7 +85,7 @@ async fn captures_dynamic_json_reuses_session_and_reaps_browser() {
                 .unwrap(),
             1
         );
-        assert!(!page.cookies().await.unwrap().is_empty());
+        assert_ne!(page.cookies().await.unwrap().len(), 0);
         page.close().await.unwrap();
         let second = browser.new_page().await.unwrap();
         second
@@ -171,16 +171,14 @@ async fn closing_a_browser_that_already_exited_succeeds() {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
+            .is_ok_and(|status| status.success())
     } else {
         std::process::Command::new("kill")
             .args(["-9", &pid.to_string()])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
+            .is_ok_and(|status| status.success())
     };
     if !killed {
         // The platform refused to kill it; there is nothing to assert here.

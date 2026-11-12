@@ -198,7 +198,7 @@ impl BrowserSession {
         }
         if forced {
             match tokio::time::timeout(Duration::from_secs(5), self.browser.kill()).await {
-                Ok(Some(Ok(()))) | Ok(None) => {}
+                Ok(Some(Ok(())) | None) => {}
                 Ok(Some(Err(error))) => {
                     // The browser may have exited between the wait and the kill.
                     // A process that is already gone was reaped, which is

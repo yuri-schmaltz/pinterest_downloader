@@ -21,6 +21,7 @@ futures = "0.3"
 sanitize-filename = "0.5"
 tempfile = "3"
 httpdate = "1"
+sysinfo = { version = "0.40", default-features = false, features = ["system", "component"] }
 scraper = "0.26"
 tokio-util = { version = "0.7", features = ["rt"] }
 pinterest-browser = { path = "../pinterest-browser", optional = true }

@@ -1,6 +1,7 @@
 //! Shared operation runner for native presentation layers.
 
 use crate::{
+    adaptive::AdaptiveController,
     cache::{resolve_cache_dir, PinCache},
     collector::{CollectedBoard, CollectionOptions, Collector},
     parser::{extract_boards_from_html, extract_pws_metadata_from_html},
@@ -11,7 +12,9 @@ use crate::{
 use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Mutex;
 use url::Url;
 
@@ -320,6 +323,81 @@ async fn collect_http_board(
     })
 }
 
+/// The adaptive controller for a phase, when the option asks for one.
+///
+/// The range mirrors the Python manager: at most the configured number of
+/// workers, and at least four of them.
+fn adaptive_controller(options: &DownloadOptions) -> Option<Arc<AdaptiveController>> {
+    if !options.adaptive {
+        return None;
+    }
+    let max_workers = options.workers.max(1);
+    Some(Arc::new(AdaptiveController::new(
+        crate::adaptive::AdaptiveConfig {
+            min_workers: 4.min(max_workers),
+            max_workers,
+            ..Default::default()
+        },
+    )))
+}
+
+/// Runs the tasks with a window that the adaptive controller can move.
+///
+/// The window is the number of tasks in flight. Raising it starts work
+/// sooner; lowering it stops new work from starting until the running
+/// tasks drain. Work that is already running is never interrupted, because
+/// a download that is half done is worth more than one that was thrown
+/// away. Without a controller the window stays where it was.
+async fn run_dynamic<T, O, F, Fut, S>(
+    items: Vec<T>,
+    initial: usize,
+    controller: Option<Arc<AdaptiveController>>,
+    success: S,
+    mut task: F,
+) -> Vec<Result<O>>
+where
+    F: FnMut(T) -> Fut,
+    Fut: Future<Output = Result<O>>,
+    S: Fn(&Result<O>) -> bool,
+{
+    let mut pending = futures::stream::FuturesUnordered::new();
+    let mut iter = items.into_iter();
+    let mut results: Vec<Result<O>> = Vec::with_capacity(initial);
+    // With a controller the window starts where the controller says, which
+    // is the conservative minimum. Without one it stays at the configured
+    // number of workers.
+    let mut limit = match &controller {
+        Some(controller) => controller.current_workers().await.max(1),
+        None => initial.max(1),
+    };
+    let mut completed = 0usize;
+
+    loop {
+        while pending.len() < limit {
+            let Some(item) = iter.next() else { break };
+            let future = task(item);
+            pending.push(async move {
+                let started = Instant::now();
+                let value = future.await;
+                (value, started.elapsed())
+            });
+        }
+        let Some((value, elapsed)) = pending.next().await else {
+            break;
+        };
+        completed += 1;
+        if let Some(controller) = &controller {
+            controller.record(elapsed, success(&value)).await;
+            if completed % 10 == 0 {
+                controller.adjust().await;
+                limit = controller.current_workers().await.max(1);
+            }
+        }
+        results.push(value);
+    }
+    results
+}
+
 async fn download_collected(
     mut board: CollectedBoard,
     options: &DownloadOptions,
@@ -352,33 +430,42 @@ async fn download_collected(
         PinCache::disabled()
     }));
     let cache_enabled = options.metadata_cache;
-    let mut resolutions = stream::iter(unresolved.into_iter().map(|(id, link)| {
-        let cache = Arc::clone(&cache);
-        async move {
-            if cache_enabled {
-                let cached = cache.lock().await.get(&link).map(str::to_string);
-                if let Some(media_url) = cached {
-                    return Ok(Some(crate::PinMetadata {
-                        id,
-                        url: link,
-                        image_url: media_url,
-                        title: String::new(),
-                    }));
+    let resolution_controller = adaptive_controller(options);
+    let resolutions = run_dynamic(
+        unresolved,
+        options.workers,
+        resolution_controller,
+        |result| matches!(result, Ok(Some(_))),
+        |(id, link)| {
+            let cache = Arc::clone(&cache);
+            let downloader = &downloader;
+            let options = &options;
+            async move {
+                if cache_enabled {
+                    let cached = cache.lock().await.get(&link).map(str::to_string);
+                    if let Some(cached) = cached {
+                        return Ok(Some(crate::PinMetadata {
+                            id,
+                            url: link,
+                            image_url: cached,
+                            title: String::new(),
+                        }));
+                    }
                 }
-            }
-            let resolved = downloader
-                .resolve_pin(&link, &id, options.rate_limiting)
-                .await?;
-            if cache_enabled {
-                if let Some(pin) = &resolved {
-                    cache.lock().await.insert(&link, &pin.image_url);
+                let resolved = downloader
+                    .resolve_pin(&link, &id, options.rate_limiting)
+                    .await?;
+                if cache_enabled {
+                    if let Some(pin) = &resolved {
+                        cache.lock().await.insert(&link, &pin.image_url);
+                    }
                 }
+                Ok(resolved)
             }
-            Ok(resolved)
-        }
-    }))
-    .buffer_unordered(options.workers);
-    while let Some(result) = resolutions.next().await {
+        },
+    )
+    .await;
+    for result in resolutions {
         operation.check_cancelled()?;
         match result {
             Ok(Some(pin)) => {
@@ -408,7 +495,6 @@ async fn download_collected(
             )
             .await;
     }
-    drop(resolutions);
     if cache_enabled {
         // A cache write failure must not fail the run: the downloads already
         // happened and the next run simply resolves the pins again.
@@ -429,16 +515,23 @@ async fn download_collected(
         resolved: board.pins.len(),
         ..Default::default()
     };
-    let mut pending = stream::iter(board.pins.into_values().map(|pin| {
-        let out_dir = &out_dir;
-        async move {
-            downloader
-                .download_pin(&pin.image_url, out_dir, &pin.id, options)
-                .await
-        }
-    }))
-    .buffer_unordered(options.workers);
-    while let Some(result) = pending.next().await {
+    let download_controller = adaptive_controller(options);
+    let pending = run_dynamic(
+        board.pins.into_values().collect::<Vec<_>>(),
+        options.workers,
+        download_controller,
+        |result: &Result<crate::downloader::MediaDownload>| result.is_ok(),
+        |pin| {
+            let out_dir = &out_dir;
+            async move {
+                downloader
+                    .download_pin(&pin.image_url, out_dir, &pin.id, options)
+                    .await
+            }
+        },
+    )
+    .await;
+    for result in pending {
         operation.check_cancelled()?;
         match result {
             Ok(media) => {
@@ -480,7 +573,6 @@ async fn download_collected(
             )
             .await;
     }
-    drop(pending);
     totals.failed += totals.discovered.saturating_sub(totals.resolved);
     if board.completeness == Completeness::Unknown {
         operation.emit(RunEvent::Warning { message: "A coleta terminou sem comprovar o fim do quadro; resultado parcial/desconhecido".into() }, Some(&board.board_url), None).await;

@@ -96,7 +96,7 @@ fn pin_from_pws_dict(d: &serde_json::Map<String, Value>) -> Option<PinMetadata> 
 
     Some(PinMetadata {
         id: pid.to_string(),
-        url: format!("https://www.pinterest.com/pin/{}/", pid),
+        url: format!("https://www.pinterest.com/pin/{pid}/"),
         image_url,
         title,
     })
