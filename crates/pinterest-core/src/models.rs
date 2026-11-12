@@ -6,6 +6,12 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum PinterestError {
+    #[error("Operation cancelled")]
+    Cancelled,
+
+    #[error("Browser error: {0}")]
+    Browser(String),
+
     #[error("Network error: {0}")]
     Network(#[from] reqwest::Error),
 
@@ -14,6 +20,9 @@ pub enum PinterestError {
 
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
+
+    #[error("Authentication required: {0}. Use a visible browser and manual login.")]
+    AuthenticationRequired(String),
 
     #[error("Private profile detected: '{0}'. Manual login is required.")]
     PrivateProfile(String),
@@ -54,6 +63,10 @@ pub struct DownloadOptions {
     pub use_cache: bool,
     pub rate_limiting: bool,
     pub max_pins: Option<usize>,
+    /// Directory of the pin metadata cache. `None` uses the platform default.
+    pub cache_dir: Option<PathBuf>,
+    /// Whether the pin metadata cache is read and written.
+    pub metadata_cache: bool,
 }
 
 impl Default for DownloadOptions {
@@ -64,6 +77,8 @@ impl Default for DownloadOptions {
             use_cache: true,
             rate_limiting: true,
             max_pins: None,
+            cache_dir: None,
+            metadata_cache: true,
         }
     }
 }

@@ -8,7 +8,7 @@ import json
 import sys
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -45,7 +45,7 @@ class JSONLogger:
 
     def _get_timestamp(self) -> str:
         """Retorna timestamp ISO 8601."""
-        return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+        return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="milliseconds") + "Z"
 
     def _log(self, entry: LogEntry) -> None:
         """Registra entry."""

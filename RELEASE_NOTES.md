@@ -11,7 +11,7 @@ letterbox e melhorias fundamentais de compatibilidade e scraper.
 
 ### CLI e Scraper
 - Novas flags de linha de comando: --version e --user suportadas nativamente.
-- Refatoração de modularidade no scraper: extração de handle_response e 
+- Refatoração de modularidade no scraper: extração de handle_response e
 resolve_images.
 - Compatibilidade multiplataforma refinada: suporte a ambientes Windows (resolução de UTF-8 em leituras e precisão de timers de log com time.perf_counter()).
 

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Dynamic fixture board</title></head>
+<body>
+<main data-test-id="board-feed"><div id="pins"></div><div style="height:1800px"></div></main>
+<script>
+let page = 0, loading = false;
+// The delay lets a test reproduce a slow feed: the page looks unchanged
+// while the first payload is still on its way. The signal is the path,
+// because the collector strips query strings from the target URL.
+const delay = location.pathname.includes('/slow/') ? 3000 : 100;
+async function loadNext() {
+    if (loading || page === 2) return;
+    loading = true;
+    await new Promise(resolve => setTimeout(resolve, delay));
+    const response = await fetch('/resource/BoardFeedResource/get/?page=' + (++page));
+    const payload = await response.json();
+    // Simulate a virtualized feed: earlier cards disappear from the DOM.
+    const list = document.querySelector('#pins');
+    list.replaceChildren();
+    for (const pin of payload.resource_response.data) {
+        const a = document.createElement('a');
+        a.href = '/pin/' + pin.id + '/';
+        a.textContent = pin.title;
+        const img = document.createElement('img');
+        img.src = pin.images.orig.url;
+        a.appendChild(img);
+        list.appendChild(a);
+    }
+    document.cookie = 'fixture_cookie=ok; path=/; SameSite=Lax';
+    document.body.dataset.loaded = page;
+    if (page === 2) {
+        const end = document.createElement('div');
+        end.dataset.testId = 'board-feed-end';
+        list.appendChild(end);
+    }
+    loading = false;
+}
+setTimeout(loadNext, delay);
+window.addEventListener('scroll', () => setTimeout(loadNext, delay));
+</script></body></html>

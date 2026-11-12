@@ -14,9 +14,10 @@ A fonte da verdade e extension/manifest.json:
   - tem que ser uma versao valida de Chrome (ate 4 numeros, cada um ate 65535)
   - a versao que o usuario ve na loja de extensoes
 
-Duas outras copias sao DERIVADAS e nunca editadas a mao:
+As outras copias sao DERIVADAS e nunca editadas a mao:
   - pyproject.toml   (a versao do pacote Python)
   - src/_version.py  (a versao que o app mostra em --version)
+  - crates/*/Cargo.toml e entradas do workspace no Cargo.lock (Rust)
 
 Por que o app nao pergunta pro pacote instalado: num `pip install -e .`
 a metadata fica congelada na instalacao, entao apos um bump de versao ela
@@ -38,6 +39,10 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "extension" / "manifest.json"
 PYPROJECT = ROOT / "pyproject.toml"
 GENERATED = ROOT / "src" / "_version.py"
+RUST_MANIFESTS = [
+    ROOT / "crates" / crate / "Cargo.toml" for crate in ("pinterest-core", "pinterest-cli", "pinterest-browser")
+]
+CARGO_LOCK = ROOT / "Cargo.lock"
 
 # O arquivo gerado. O cabecalho avisa que ele e gerado: um dev que editar
 # a mao vai ter o trabalho sobrescrito no proximo sync.
@@ -104,6 +109,35 @@ def write_generated_version(version: str) -> bool:
     return True
 
 
+def sync_rust_versions(version: str, check: bool) -> bool:
+    """Keep crate metadata and local workspace lock entries aligned with the manifest."""
+    ok = True
+    for path in RUST_MANIFESTS:
+        text = path.read_text()
+        updated = re.sub(r'^version\s*=\s*"[^"\n]+"', f'version = "{version}"', text, count=1, flags=re.MULTILINE)
+        if updated != text:
+            if check:
+                print(f"DIVERGENCIA: {path.relative_to(ROOT)} deve estar em {version}")
+                ok = False
+            else:
+                path.write_text(updated)
+    text = CARGO_LOCK.read_text()
+    updated = re.sub(
+        r'(\[\[package\]\]\nname = "pinterest-(?:core|cli|browser)"\nversion = )"[^"\n]+"',
+        lambda match: f'{match.group(1)}"{version}"',
+        text,
+    )
+    if updated != text:
+        if check:
+            print(f"DIVERGENCIA: Cargo.lock deve estar em {version}")
+            ok = False
+        else:
+            CARGO_LOCK.write_text(updated)
+    if ok:
+        print(f"OK: versoes Rust em {version}")
+    return ok
+
+
 def current_git_tag() -> str | None:
     """Tag do HEAD, se houver."""
     import subprocess
@@ -164,6 +198,8 @@ def main() -> int:
             print(f"CORRIGIDO: src/_version.py estava em {generated_version}, agora {manifest_version}")
     else:
         print(f"OK: src/_version.py esta em {manifest_version}")
+
+    ok = sync_rust_versions(manifest_version, args.check) and ok
 
     if args.tag:
         tag = current_git_tag()

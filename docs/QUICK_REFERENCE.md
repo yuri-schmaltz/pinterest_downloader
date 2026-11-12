@@ -1,161 +1,82 @@
-# 🎯 QUICK REFERENCE
+# Referência rápida
 
-Referência rápida de comandos e flags do **Pinterest Pro Downloader v2.0.3**.
+Atualizada em **2026-11-06**, versão declarada 2.0.5. Para limites e arquitetura, veja [README](../README.md) e [PROJECT](../PROJECT.md).
 
-> Reescrito em 2026-10-22. A versão anterior era um resumo da "ONDA 1 e 2"
-> (janeiro de 2026) e apontava para `python test_patches.py`, que nunca
-> existiu.
-
----
-
-## TL;DR
+## Python
 
 ```bash
-# diagnóstico (1s, offline)
-python scripts/diagnose.py
-
-# suíte
-python -m pytest tests/ -q          # 21 passed
-
-# um quadro
 pinterest-board-dl https://www.pinterest.com/usuario/quadro/
-
-# todos os quadros de um usuário
-pinterest-board-dl --user usuario_pinterest
-
-# com tudo ligado
-pinterest-board-dl <URL> --workers 32 --adaptive-workers --rate-limiting --json-log
+pinterest-board-dl --user usuario --adaptive-workers --rate-limiting
+pinterest-board-dl usuario --headful --manual-login
+pinterest-board-gui
+pinterest-board-dl --help
 ```
 
----
-
-## Flags da CLI
-
-| Flag | Default | Efeito |
+| Opção | Default | Efeito |
 |---|---|---|
-| `-o, --out DIR` | `./pins` | pasta de saída |
-| `--user NOME` | — | baixa todos os quadros públicos do usuário |
-| `--max-pins N` | sem limite | limita pins por quadro |
-| `--workers N` | 16 | paralelismo de resolução/download |
-| `--boards-workers N` | 1 | paralelismo entre quadros (2–3; cada um abre um Chromium) |
-| `--scroll-pause S` | 1.2 | pausa entre rolagens |
-| `--cache-dir DIR` | `~/.cache/pinterest-downloader` | diretório do cache |
-| `--no-cache` | desligado | ignora o cache de metadados |
-| `--adaptive-workers` | desligado | ajusta workers por CPU/RAM |
-| `--rate-limiting` | desligado | proteção contra HTTP 429 |
-| `--json-log` | desligado | log estruturado |
-| `--log-file F` | `download_log.json` | onde gravar o log JSON |
-| `--headful` | desligado | navegador visível (debug/login) |
-| `--manual-login` | desligado | pausa para login manual |
+| `-o, --out DIR` | `pins` | Pasta de saída |
+| `--workers N` | 16 | Paralelismo de resolução/download |
+| `--boards-workers N` | 1 | Paralelismo entre quadros, cada um abre um Chromium |
+| `--max-pins N` | sem limite | Limite por quadro |
+| `--scroll-pause S` | 1.2 | Pausa entre rolagens |
+| `--cache-dir DIR` | cache do sistema | Diretório do cache de metadados (XDG/AppData quando omitido) |
+| `--no-cache` | desligado | Ignora cache de metadados; reaproveita mídias existentes |
+| `--adaptive-workers` | desligado | Ajusta workers por CPU/RAM |
+| `--rate-limiting` | desligado | Ativa rate limiter |
+| `--json-log` | desligado | Log estruturado |
+| `--log-file F` | `download_log.json` | Destino do log |
+| `--headful` | desligado | Browser visível |
+| `--manual-login` | desligado | Login manual |
 
-O argumento posicional aceita **usuário** ou **URL de perfil**. URL de quadro
-(`/user/board/`) é detectada sozinha.
+O cache de metadados é lido e gravado por `resolve_images` no diretório informado em `--cache-dir`. Quando a opção é omitida, vale o cache do sistema (XDG em Linux/macOS, `LOCALAPPDATA` no Windows). O arquivo é `.pinterest_cache.json` dentro desse diretório.
 
----
+## Rust
 
-## Comandos de desenvolvimento
+Use Rust stable atual via rustup e o lockfile versionado.
 
 ```bash
-# testes
-python -m pytest tests/ -v
-python -m pytest tests/test_11_rate_limiting.py -v
+cargo build --release --locked
+./target/release/pinterest-cli https://www.pinterest.com/usuario/quadro/ -w 8 --max-pins 20
+./target/release/pinterest-cli --user usuario --output downloads
+./target/release/pinterest-cli --help
+```
 
-# cobertura
-python -m coverage run --source=src -m pytest tests/ -q
-python -m coverage report -m
-python -m coverage html
+| Opção | Default | Efeito |
+|---|---|---|
+| `-u, --user USER` | — | Alternativa ao alvo posicional |
+| `-o, --output DIR` | `downloads` | Pasta de saída |
+| `-w, --workers N` | 8 | Downloads concorrentes, N > 0 |
+| `--max-pins N` | sem limite | Limite por quadro, N > 0 |
+| `--mode MODE` | `auto` | `auto`, `browser` ou `http` |
+| `--headful` | desligado | Browser visível |
+| `--manual-login` | desligado | Aguarda confirmação após login |
+| `--no-cache` | desligado | Força download de mídia, ignorando arquivos existentes |
+| `--no-metadata-cache` | desligado | Não usa o cache de metadados de pins |
+| `--cache-dir DIR` | cache do sistema | Diretório do cache de metadados |
+| `--no-rate-limit` | desligado | Desativa o limitador |
+| `--json-log` / `--log-file F` | desligado | Eventos JSONL em stdout e em arquivo |
 
-# lint (idêntico ao CI)
-black --check --line-length 120 src/ tests/ scripts/
-ruff check src/ tests/ scripts/
-mypy src/pinterest_board_dl.py --ignore-missing-imports
+Rust usa Chromium no modo `auto` e `browser`; o modo `http` explícito é um snapshot
+do HTML inicial e tem completude desconhecida. O cache de metadados é
+`.pinterest_cache.json` no diretório informado em `--cache-dir` e tem o mesmo
+formato do Python, de modo que o diretório pode ser compartilhado entre as duas
+CLIs. A ausência de pins é um erro, e não uma conclusão bem-sucedida.
 
-# diagnóstico
-python scripts/diagnose.py
+## Verificação e build
+
+```bash
 python scripts/diagnose.py --deep
-python scripts/diagnose.py --json
-
-# build da extensão
-bash scripts/build_release.sh          # gera dist/*.zip, *.xpi, *.tar.gz
-
-# build do app desktop
-PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright \
-  pyinstaller --noconfirm --clean PinterestDownloader.spec
-
-# debug manual do scraper (abre o browser, tira screenshot)
-python scripts/debug_pinterest.py --url https://www.pinterest.com/user/board/ --out /tmp/shot.png
+QT_QPA_PLATFORM=offscreen python -m pytest tests/ -q --cov=src
+node tests/test_extension_i18n.js
+node tests/test_extension_pins.js
+python scripts/sync_version.py --check
+ruff check src/ tests/ scripts/
+black --check src/ tests/ scripts/
+mypy src/pinterest_board_dl.py src/app_version.py
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+bash scripts/build_release.sh
 ```
 
----
-
-## Constantes do núcleo
-
-Definidas em `src/pinterest_board_dl.py`:
-
-```python
-PINTEREST_BASE_URL = "https://www.pinterest.com"
-
-TIMEOUT_HTTP_GET = 25              # segundos (requests)
-TIMEOUT_IMAGE_DOWNLOAD = 60        # segundos (requests)
-TIMEOUT_PAGE_LOAD = 90_000         # ms (Playwright)
-TIMEOUT_DOM_READY = 15_000         # ms (Playwright)
-
-DOWNLOAD_RETRY_DELAY = 1.0         # base do backoff exponencial
-DOWNLOAD_MAX_RETRIES = 1           # retries além da tentativa inicial
-
-SCROLL_STABLE_ROUNDS = 20          # rondas estáveis para considerar o fim
-SCROLL_HEIGHT_CHECK = True         # detecta a página pela altura
-```
-
-> `SCROLL_STABLE_ROUNDS` já foi 6 → 3 → 20. Acompanhe no histórico:
-> `git log -p -S SCROLL_STABLE_ROUNDS src/pinterest_board_dl.py`
-
----
-
-## Arquivos e diretórios
-
-| Caminho | Conteúdo |
-|---|---|
-| `~/.cache/pinterest-downloader/.pinterest_cache.json` | cache pin → url da imagem |
-| `./rate_limit_stats.json` | estatísticas de 429 (gravado no diretório atual) |
-| `./.worker_metrics.json` | métricas dos adaptive workers (diretório atual) |
-| `./pins/<usuario>/<quadro>/` | imagens baixadas |
-| `./download_log.json` | log estruturado (quando `--json-log`) |
-
-> O cache de metadados vai para o diretório de cache do sistema
-> (`~/.cache` no Linux, `%LOCALAPPDATA%` no Windows) e pode ser redigido com
-> `--cache-dir`. Já os arquivos de estatísticas e métricas usam caminho
-> relativo e saem no **diretório de onde você chamou o comando**.
-
----
-
-## Estrutura do código
-
-```
-src/pinterest_board_dl.py     núcleo: scraper + CLI
-src/pinterest_board_gui.py    GUI PyQt6
-src/json_logger.py            log estruturado
-src/adaptive_workers.py       workers por CPU/RAM
-src/rate_limiter.py           sliding window + backoff 429
-extension/                    extensão MV3
-tests/                        21 testes
-```
-
-**Flat imports:** os módulos se importam como `from json_logger import ...`,
-então `src/` precisa estar no `sys.path`. Ao criar um teste novo, repita:
-
-```python
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-```
-
----
-
-## Links
-
-| Documento | Assunto |
-|---|---|
-| [../PROJECT.md](../PROJECT.md) | features, marcos, contratos de interface |
-| [../PLANO-ESTABILIZACAO.md](../PLANO-ESTABILIZACAO.md) | prioridades P0–P3 |
-| [../TEST_INFRA.md](../TEST_INFRA.md) | cobertura real e limites |
-| [RUNBOOK_INSTALL.md](RUNBOOK_INSTALL.md) | instalação passo a passo |
-| [RUNBOOK_TROUBLESHOOTING.md](RUNBOOK_TROUBLESHOOTING.md) | problemas comuns |
+`build_release.sh` gera ZIP Chrome, XPI experimental e source completo em `dist/`. Os builds desktop e os binários Rust têm etapas próprias no workflow de release. Os módulos Python são instalados como top-level; pytest já configura `src/` no path.

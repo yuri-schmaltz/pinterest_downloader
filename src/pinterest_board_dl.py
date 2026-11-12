@@ -11,10 +11,11 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import unicodedata
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, NamedTuple, TypedDict
@@ -217,7 +218,7 @@ class DownloadOptions:
     scroll_pause: float = 1.2
     workers: int = 16
     boards_workers: int = 1
-    cache_dir: str = "."  # Diretório para .pinterest_cache.json
+    cache_dir: str | None = None  # None = cache do sistema (XDG/AppData)
     use_cache: bool = True  # Habilitar/desabilitar cache
     adaptive_workers: bool = False  # ONDA 5C: Ajuste dinâmico de workers
     rate_limiting: bool = False  # ONDA 5E: Rate limiting inteligente
@@ -396,7 +397,9 @@ def _is_media_already_downloaded(out_dir: str, base_name: str) -> bool:
         return False
     stem = Path(base_name).stem
     for existing_file in os.listdir(out_dir):
-        if existing_file.startswith(stem):
+        if Path(existing_file).suffix.lower() in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".mp4"} and (
+            existing_file == base_name or Path(existing_file).stem == stem
+        ):
             filepath = os.path.join(out_dir, existing_file)
             if os.path.isfile(filepath) and os.path.getsize(filepath) > 0:
                 return True
@@ -417,22 +420,29 @@ def download_media(
         return True
 
     for attempt in range(max_retries + 1):
+        temporary_path = None
         try:
             with session.get(media_url, stream=True, timeout=TIMEOUT_IMAGE_DOWNLOAD) as r:
                 r.raise_for_status()
                 os.makedirs(out_dir, exist_ok=True)
 
                 ext = _detect_media_extension(r.headers.get("Content-Type", ""))
-                final_filename = base_name if base_name.endswith(ext) else f"{base_name}{ext}"
+                final_filename = str(Path(base_name).with_suffix(ext))
                 dest = os.path.join(out_dir, final_filename)
 
                 if os.path.exists(dest) and os.path.getsize(dest) > 0:
                     return True
 
-                with open(dest, "wb") as f:
+                # Publish only a complete response. A failed stream never becomes a cache hit.
+                with tempfile.NamedTemporaryFile(dir=out_dir, prefix=".pbd-", suffix=".part", delete=False) as f:
+                    temporary_path = f.name
                     for chunk in r.iter_content(chunk_size=1 << 15):
                         if chunk:
                             f.write(chunk)
+                    if f.tell() == 0:
+                        raise ValueError("Empty media response")
+                os.replace(temporary_path, dest)
+                temporary_path = None
             return True
         except Exception:
             if attempt < max_retries:
@@ -440,6 +450,9 @@ def download_media(
                 time.sleep(delay)
             else:
                 return False
+        finally:
+            if temporary_path is not None:
+                Path(temporary_path).unlink(missing_ok=True)
     return False
 
 
@@ -1268,7 +1281,14 @@ def resolve_images(
     use_cache: bool = True,
     adaptive: bool = False,
     rate_limiting: bool = False,
+    cache_dir: str | None = None,
 ) -> Dict[str, str]:
+    """Resolve a mídia de cada pin, em paralelo.
+
+    Args:
+        cache_dir: Diretório do cache de metadados. None usa o cache do
+            sistema (XDG/AppData). Só é consultado quando use_cache=True.
+    """
     emit = emit or (lambda *_: None)
     logger = get_logger()
 
@@ -1288,7 +1308,7 @@ def resolve_images(
     logger.start_phase("resolve_images")
 
     # Carregar cache existente
-    cache = load_pin_cache() if use_cache else {}
+    cache = load_pin_cache(cache_dir) if use_cache else {}
     intercepted = get_intercepted_metadata()
 
     # Verificar quais pins já estão em cache ou foram interceptados
@@ -1313,25 +1333,63 @@ def resolve_images(
     def work(link: str) -> tuple[str, str | None]:
         return _resolve_single_pin(link, session, rate_limiting, manager)
 
-    with ThreadPoolExecutor(max_workers=actual_workers) as ex:
-        for idx, (link, img) in enumerate(ex.map(work, to_fetch), 1):
-            processed += 1
-            if img:
-                out[link] = img
-                cache[link] = img  # Atualizar cache com novo resultado
+    # O executor é criado com o teto de workers, mas o número de tarefas em
+    # voo é controlado aqui: `actual_workers` é a janela real de paralelismo
+    # e muda de verdade quando o gerenciador adaptativo ajusta o valor.
+    pool_ceiling = max(workers, manager.max_workers if manager else workers, 1)
+    actual_workers = max(1, min(actual_workers, pool_ceiling))
+    pending: dict[Future[tuple[str, str | None]], str] = {}
+    link_iter = iter(to_fetch)
+    exhausted = False
+    fetched = 0
 
-            # Adjust workers every 10 operations (if adaptive)
-            if manager and idx % 10 == 0:
-                new_workers = manager.adjust_workers()
-                if new_workers != actual_workers:
-                    actual_workers = new_workers
-                    logger.info("resolve_images", f"Workers ajustados para {new_workers}", count=new_workers)
+    with ThreadPoolExecutor(max_workers=pool_ceiling) as ex:
+        while True:
+            # Mantém o pool ocupado até a janela atual de paralelismo.
+            while not exhausted and len(pending) < actual_workers:
+                try:
+                    link = next(link_iter)
+                except StopIteration:
+                    exhausted = True
+                    break
+                pending[ex.submit(work, link)] = link
 
-            emit("resolve_progress", {"current": processed, "total": total_links})
+            if not pending:
+                break
+
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            error: BaseException | None = None
+            for future in done:
+                pending.pop(future)
+                try:
+                    link, img = future.result()
+                except BaseException as exc:  # noqa: BLE001 - relançado após o lote
+                    error = error or exc
+                    continue
+                processed += 1
+                fetched += 1
+                if img:
+                    out[link] = img
+                    cache[link] = img  # Atualizar cache com novo resultado
+
+                # Adjust workers every 10 operations (if adaptive)
+                if manager and fetched % 10 == 0:
+                    new_workers = manager.adjust_workers()
+                    new_workers = max(1, min(new_workers, pool_ceiling))
+                    if new_workers != actual_workers:
+                        actual_workers = new_workers
+                        logger.info("resolve_images", f"Workers ajustados para {new_workers}", count=new_workers)
+
+                emit("resolve_progress", {"current": processed, "total": total_links})
+
+            if error is not None:
+                raise error
+            if exhausted and not pending:
+                break
 
     # Salvar cache atualizado em disco
     if use_cache:
-        save_pin_cache(cache)
+        save_pin_cache(cache, cache_dir)
 
     # Save adaptive metrics if enabled
     if manager:
@@ -1379,6 +1437,7 @@ def _retry_missing_pins(
         emit=emit,
         use_cache=False,
         rate_limiting=options.rate_limiting,
+        cache_dir=options.cache_dir,
     )
     recovered = 0
     with ThreadPoolExecutor(max_workers=options.workers) as ex:
@@ -1499,6 +1558,7 @@ def download_board(
         use_cache=options.use_cache,
         adaptive=options.adaptive_workers,
         rate_limiting=options.rate_limiting,
+        cache_dir=options.cache_dir,
     )
 
     if not pin_img:
@@ -1735,8 +1795,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--cache-dir",
         type=str,
-        default=".",
-        help="Diretório para armazenar cache de pins (default: .)",
+        default=None,
+        help="Diretório para armazenar cache de pins (default: cache do sistema, XDG/AppData)",
     )
     ap.add_argument(
         "--no-cache",
@@ -1805,7 +1865,12 @@ def main() -> None:
     total_ok = 0
     total_all = 0
 
-    results = download_user_boards(user, options, status_cb=_cli_status_printer)
+    target_url = normalize_url(user)
+    parts = [part for part in urllib.parse.urlsplit(target_url).path.split("/") if part]
+    if len(parts) == 2 and parts[0] != "pin":
+        results = [download_board(target_url, options, status_cb=_cli_status_printer)]
+    else:
+        results = download_user_boards(user, options, status_cb=_cli_status_printer)
     if not results:
         sys.exit(5)
     for res in results:

@@ -1,3 +1,5 @@
+> **Registro histórico.** Métricas e afirmações deste documento se referem à época da implementação. Para o estado atual, consulte [README](../README.md), [PROJECT](../PROJECT.md) e [TEST_INFRA](../TEST_INFRA.md).
+
 > **Documento histórico — 12 de janeiro de 2026.**
 > Descreve o estado do projeto na época da ONDA 5B. O código evoluiu
 > bastante desde então: o repositório foi reestruturado para `src/`, a suíte
@@ -267,5 +269,5 @@ python -m pytest tests/ -q
 
 ---
 
-**Última atualização:** 11 de janeiro de 2026  
+**Última atualização:** 11 de janeiro de 2026
 **Status:** ✅ ONDA 5B Completa

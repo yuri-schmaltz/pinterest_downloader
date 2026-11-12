@@ -1,3 +1,5 @@
+> **Registro histórico.** Métricas e afirmações deste documento se referem à época da implementação. Para o estado atual, consulte [README](../README.md), [PROJECT](../PROJECT.md) e [TEST_INFRA](../TEST_INFRA.md).
+
 > **Documento histórico — 12 de janeiro de 2026.**
 > Descreve o estado do projeto na época da ONDA 5D. O código evoluiu
 > bastante desde então: o repositório foi reestruturado para `src/`, a suíte
@@ -315,6 +317,6 @@ python -m pytest tests/ -q
 
 ---
 
-**Guia criado em:** 12 de janeiro de 2026  
-**Versão:** 1.0.0  
+**Guia criado em:** 12 de janeiro de 2026
+**Versão:** 1.0.0
 **Autor:** GitHub Copilot

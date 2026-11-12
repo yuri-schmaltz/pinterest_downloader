@@ -8,7 +8,7 @@ import json
 import time
 from collections import deque
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Deque, Optional
@@ -206,7 +206,7 @@ class RateLimiter:
     def save_stats(self, filename: str = ".rate_limit_stats.json") -> None:
         """Salva estatísticas em arquivo JSON."""
         stats = self.get_stats()
-        stats["timestamp"] = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+        stats["timestamp"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="milliseconds") + "Z"
 
         try:
             Path(filename).write_text(json.dumps(stats, indent=2, ensure_ascii=False))
