@@ -29,19 +29,26 @@ struct Cli {
     #[arg(short, long)]
     user: Option<String>,
     /// Destino dos arquivos (layout usuario/quadro, o mesmo do Python)
-    #[arg(short, long, alias = "out", default_value = "downloads")]
+    #[arg(short, long, visible_alias = "out", default_value = "pins")]
     output: PathBuf,
-    #[arg(short, long, default_value_t = 8)]
+    #[arg(short, long, default_value_t = 16)]
     workers: usize,
     /// Quadros processados ao mesmo tempo; cada um abre o proprio browser
     #[arg(long, default_value_t = 1)]
     boards_workers: usize,
-    /// Ignora arquivos de mídia existentes (semântica Rust preservada)
+    /// Não usa o cache de metadados de pins (resolução sempre pela rede)
+    ///
+    /// Tem o mesmo significado do `--no-cache` do Python: as duas
+    /// ferramentas usam a mesma opção. Use `--force` para baixar
+    /// de novo as mídias que já estão no disco.
     #[arg(long)]
     no_cache: bool,
-    /// Não usa o cache de metadados de pins (resolução sempre pela rede)
+    /// Não usa o cache de metadados de pins (mesmo que --no-cache)
     #[arg(long)]
     no_metadata_cache: bool,
+    /// Baixa de novo as mídias que já estão no disco
+    #[arg(long)]
+    force: bool,
     /// Diretório do cache de metadados (default: cache do sistema)
     #[arg(long)]
     cache_dir: Option<PathBuf>,
@@ -80,7 +87,7 @@ struct Cli {
     #[arg(long)]
     json_log: bool,
     /// Arquivo JSONL com os mesmos eventos tipados
-    #[arg(long)]
+    #[arg(long, default_value = "download_log.json")]
     log_file: Option<PathBuf>,
 }
 
@@ -138,12 +145,12 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
             out_root: cli.output,
             workers: cli.workers,
             boards_workers: cli.boards_workers,
-            use_cache: !cli.no_cache,
+            use_cache: !cli.force,
             rate_limiting: cli.rate_limiting || !cli.no_rate_limit,
             adaptive: cli.adaptive_workers,
             max_pins: cli.max_pins,
             cache_dir: cli.cache_dir,
-            metadata_cache: !cli.no_metadata_cache,
+            metadata_cache: !(cli.no_cache || cli.no_metadata_cache),
             cache_ttl: std::time::Duration::from_secs(cli.cache_ttl_days.saturating_mul(86_400)),
         },
         collection,

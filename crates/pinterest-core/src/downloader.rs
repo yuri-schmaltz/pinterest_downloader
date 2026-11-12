@@ -80,8 +80,12 @@ impl Downloader {
     }
 
     /// Waits for a rate limit slot, giving up when the run is cancelled.
-    async fn acquire_slot(&self) -> Result<()> {
-        let allowed = self.limiter.acquire_cancellable(self.cancel.as_ref()).await;
+    async fn acquire_slot(&self, url: &str) -> Result<()> {
+        let host = host_of(url);
+        let allowed = self
+            .limiter
+            .acquire_cancellable_for(&host, self.cancel.as_ref())
+            .await;
         if allowed {
             Ok(())
         } else {
@@ -113,7 +117,7 @@ impl Downloader {
     /// Fetch one HTTP snapshot. This does not execute JavaScript or paginate feeds.
     pub(crate) async fn fetch_html(&self, url: &str, rate_limiting: bool) -> Result<String> {
         if rate_limiting {
-            self.acquire_slot().await?;
+            self.acquire_slot(url).await?;
         }
         let response = self.send(self.client.get(url)).await?.error_for_status()?;
         Ok(response.text().await?)
@@ -230,7 +234,7 @@ impl Downloader {
         rate_limiting: bool,
     ) -> Result<Option<crate::PinMetadata>> {
         if rate_limiting {
-            self.acquire_slot().await?;
+            self.acquire_slot(pin_url).await?;
         }
         let response = self
             .send(self.client.get(pin_url))
@@ -398,7 +402,7 @@ impl Downloader {
         fs::create_dir_all(out_dir).await?;
         for attempt in 0..=max_retries {
             if rate_limiting {
-                self.acquire_slot().await?;
+                self.acquire_slot(media_url).await?;
             }
             match self
                 .download_attempt(media_url, out_dir, &base_name, rate_limiting)
@@ -406,7 +410,8 @@ impl Downloader {
             {
                 Ok(path) => {
                     if rate_limiting {
-                        self.limiter.record_success().await;
+                        let host = host_of(media_url);
+                        self.limiter.record_success_for(&host).await;
                     }
                     return Ok(MediaDownload {
                         path,
@@ -455,7 +460,8 @@ impl Downloader {
                 .and_then(|v| {
                     crate::rate_limiter::parse_retry_after(v, std::time::SystemTime::now())
                 });
-            self.limiter.record_429(retry_after).await;
+            let host = host_of(media_url);
+            self.limiter.record_429_for(&host, retry_after).await;
         }
         let response = response.error_for_status()?;
         let content_type = response
@@ -556,6 +562,14 @@ impl Downloader {
             output_dir: target_dir,
         })
     }
+}
+
+/// The host of an address, used as the key of the rate limit windows.
+fn host_of(url: &str) -> String {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .unwrap_or_else(|| url.to_owned())
 }
 
 /// The pages that may hold the media of a pin.

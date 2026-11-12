@@ -177,7 +177,7 @@ Contrato declarado em `extension/manifest.json`:
 pinterest-cli [OPTIONS] [URL_OU_USUARIO]
 
 -u, --user <USER>          Usuário alternativo ao argumento posicional
--o, --output <OUTPUT>      Destino [default: downloads]
+-o, --output <OUTPUT>      Destino [default: pins]
 -w, --workers <WORKERS>    Downloads simultâneos [default: 8], maior que zero
     --boards-workers <N>   Quadros simultâneos [default: 1], maior que zero
     --no-cache            Força download de mídia, ignorando arquivos existentes

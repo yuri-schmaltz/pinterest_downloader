@@ -123,3 +123,48 @@ async fn native_cli_collects_dynamic_board_and_downloads_authenticated_media() {
         );
     }
 }
+
+/// Every option of the Python tool exists in the Rust tool.
+///
+/// The two tools are meant to be interchangeable. A flag that exists in one
+/// and not in the other is a difference the user pays for.
+#[test]
+fn the_rust_cli_has_every_option_of_the_python_one() {
+    let python = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../src/pinterest_board_dl.py"
+    ))
+    .unwrap();
+    let mut flags: Vec<String> = Vec::new();
+    let mut rest = python.as_str();
+    while let Some(start) = rest.find("add_argument(") {
+        let after = &rest[start + "add_argument(".len()..];
+        let end = after.find(')').unwrap_or(after.len());
+        let block = &after[..end];
+        let mut word = block.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'));
+        for piece in word.by_ref() {
+            if piece.starts_with("--") && piece.len() > 2 {
+                flags.push(piece.to_string());
+            }
+        }
+        rest = &after[end..];
+    }
+    flags.sort();
+    flags.dedup();
+    assert!(
+        flags.len() > 10,
+        "the flags of the Python tool were not found"
+    );
+
+    let help = Command::new(env!("CARGO_BIN_EXE_pinterest-cli"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&help.stdout);
+    for flag in &flags {
+        assert!(
+            text.contains(flag.as_str()),
+            "the Rust CLI does not have {flag}"
+        );
+    }
+}

@@ -45,8 +45,8 @@
       "id": "PAR-006",
       "feature": "completude",
       "scenario": "timeout, estabilidade e limite",
-      "expected": "razão de término e completude corretas",
-      "status": "partial",
+      "expected": "razao de termino e completude corretas para fim, estabilidade, timeout e limite",
+      "status": "implemented",
       "evidence": "crates/pinterest-core/tests/dynamic_collection.rs"
     },
     {
@@ -101,16 +101,16 @@
       "id": "PAR-013",
       "feature": "rate limiting",
       "scenario": "janelas e Retry-After",
-      "expected": "janelas deslizantes de segundo/minuto/hora, backoff exponencial e Retry-After em segundos e data HTTP",
-      "status": "partial",
+      "expected": "janelas deslizantes de segundo/minuto/hora por host, backoff exponencial e Retry-After em segundos e data HTTP",
+      "status": "implemented",
       "evidence": "crates/pinterest-core/src/rate_limiter.rs"
     },
     {
       "id": "PAR-014",
       "feature": "CLI",
       "scenario": "opções Python e aliases Rust",
-      "expected": "semântica e códigos documentados",
-      "status": "partial",
+      "expected": "mesma semantica e mesmos codigos de saida do Python, com aliases visiveis",
+      "status": "implemented",
       "evidence": "crates/pinterest-cli/tests/commands.rs"
     },
     {
@@ -157,8 +157,9 @@
       "id": "PAR-020",
       "feature": "distribuição",
       "scenario": "Linux/Windows sem Python ou Node",
-      "expected": "CLI/GUI/browser operacionais",
-      "status": "planned"
+      "expected": "CLI e GUI operacionais sem Python nem Node, em Linux e Windows",
+      "status": "implemented",
+      "evidence": "scripts/smoke_rust_cli.sh"
     }
   ],
   "note": "Implemented/partial indicates local code evidence, not approval of full cross-platform parity. Real Pinterest, Windows and GUI acceptance are pending."

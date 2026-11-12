@@ -320,6 +320,9 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends xvfb
     - name: Run all native tests, including browser lifecycle and dynamic fixtures
+      # The shell is bash on purpose: the default on Windows is PowerShell,
+      # which does not understand the branch below.
+      shell: bash
       # A virtual display lets the tests that need a visible browser run.
       run: |
         if [ "${{ runner.os }}" = "Linux" ]; then

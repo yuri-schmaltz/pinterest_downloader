@@ -10,7 +10,7 @@
 //! now", not "retry in the past".
 
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -123,9 +123,14 @@ impl RateLimiterState {
 }
 
 /// Rate limiter with sliding windows and backoff protection.
+///
+/// The windows are counted **per host**. A host that answers 429 must not
+/// freeze the tasks of another host: they are different servers, with
+/// different budgets.
 #[derive(Debug, Clone)]
 pub struct RateLimiter {
-    state: Arc<Mutex<RateLimiterState>>,
+    config: RateLimitConfig,
+    hosts: Arc<Mutex<HashMap<String, Arc<Mutex<RateLimiterState>>>>>,
     consecutive_429: Arc<AtomicU64>,
     waits: Arc<AtomicU64>,
 }
@@ -139,25 +144,42 @@ impl RateLimiter {
     /// A limiter with an explicit policy.
     pub fn with_config(config: RateLimitConfig) -> Self {
         Self {
-            state: Arc::new(Mutex::new(RateLimiterState {
-                config,
-                requests_1s: VecDeque::new(),
-                requests_1m: VecDeque::new(),
-                requests_1h: VecDeque::new(),
-                backoff_until: None,
-                current_backoff: Duration::ZERO,
-                total_requests: 0,
-                total_429s: 0,
-                total_wait_time: Duration::ZERO,
-            })),
+            config,
+            hosts: Arc::new(Mutex::new(HashMap::new())),
             consecutive_429: Arc::new(AtomicU64::new(0)),
             waits: Arc::new(AtomicU64::new(0)),
         }
     }
 
+    /// The state of one host. Each host has its own windows and backoff.
+    async fn state_of(&self, host: &str) -> Arc<Mutex<RateLimiterState>> {
+        let mut hosts = self.hosts.lock().await;
+        hosts
+            .entry(host.to_owned())
+            .or_insert_with(|| {
+                Arc::new(Mutex::new(RateLimiterState {
+                    config: self.config.clone(),
+                    requests_1s: VecDeque::new(),
+                    requests_1m: VecDeque::new(),
+                    requests_1h: VecDeque::new(),
+                    backoff_until: None,
+                    current_backoff: Duration::ZERO,
+                    total_requests: 0,
+                    total_429s: 0,
+                    total_wait_time: Duration::ZERO,
+                }))
+            })
+            .clone()
+    }
+
     /// Wait until the strictest window allows another request.
     pub async fn acquire(&self) {
-        self.acquire_cancellable(None).await;
+        self.acquire_for("").await;
+    }
+
+    /// Wait until the strictest window of a host allows another request.
+    pub async fn acquire_for(&self, host: &str) {
+        self.acquire_cancellable_for(host, None).await;
     }
 
     /// Wait until the strictest window allows another request, but give up
@@ -167,9 +189,20 @@ impl RateLimiter {
     /// cancelled run must not wait for it: the plan asks for the cancellation
     /// to be observed in at most two seconds.
     pub async fn acquire_cancellable(&self, cancel: Option<&CancellationToken>) -> bool {
+        self.acquire_cancellable_for("", cancel).await
+    }
+
+    /// Wait until the strictest window of a host allows another request,
+    /// but give up when the operation is cancelled.
+    pub async fn acquire_cancellable_for(
+        &self,
+        host: &str,
+        cancel: Option<&CancellationToken>,
+    ) -> bool {
+        let state = self.state_of(host).await;
         loop {
             let delay = {
-                let mut state = self.state.lock().await;
+                let mut state = state.lock().await;
                 let now = Instant::now();
                 state.clean(now);
                 let wait = state.wait_time(now);
@@ -212,8 +245,17 @@ impl RateLimiter {
     /// A `Retry-After` from the server wins when it asks for a longer pause
     /// than the computed backoff, and never shortens it.
     pub async fn record_429(&self, retry_after: Option<Duration>) {
+        self.record_429_for("", retry_after).await;
+    }
+
+    /// Report a `429 Too Many Requests` from one host.
+    ///
+    /// The backoff of a host does not touch the other hosts: a server that
+    /// says "slow down" only speaks for itself.
+    pub async fn record_429_for(&self, host: &str, retry_after: Option<Duration>) {
         let count = self.consecutive_429.fetch_add(1, Ordering::SeqCst) + 1;
-        let mut state = self.state.lock().await;
+        let state = self.state_of(host).await;
+        let mut state = state.lock().await;
         state.total_429s += 1;
         let exponent = (count.saturating_sub(1)).min(16) as i32;
         let scaled = state.config.backoff_on_429.as_secs_f64()
@@ -230,8 +272,14 @@ impl RateLimiter {
 
     /// Report a successful request, easing the backoff.
     pub async fn record_success(&self) {
+        self.record_success_for("").await;
+    }
+
+    /// Report a successful request to one host, easing its backoff.
+    pub async fn record_success_for(&self, host: &str) {
         self.consecutive_429.store(0, Ordering::SeqCst);
-        let mut state = self.state.lock().await;
+        let state = self.state_of(host).await;
+        let mut state = state.lock().await;
         if !state.current_backoff.is_zero() {
             let reduced = state.config.backoff_multiplier.max(1.0);
             state.current_backoff =
@@ -241,7 +289,13 @@ impl RateLimiter {
 
     /// What the limiter has done so far.
     pub async fn stats(&self) -> RateLimitStats {
-        let mut state = self.state.lock().await;
+        self.stats_for("").await
+    }
+
+    /// What the limiter has done for one host.
+    pub async fn stats_for(&self, host: &str) -> RateLimitStats {
+        let state = self.state_of(host).await;
+        let mut state = state.lock().await;
         let now = Instant::now();
         state.clean(now);
         RateLimitStats {
@@ -391,6 +445,46 @@ mod tests {
             60.0,
             "a one second Retry-After must not shorten the backoff"
         );
+    }
+
+    #[tokio::test]
+    async fn um_429_de_um_host_nao_congela_o_outro() {
+        // A server that says "slow down" speaks only for itself. The tasks
+        // of another host have to keep going.
+        let limiter = RateLimiter::with_config(RateLimitConfig {
+            backoff_on_429: Duration::from_secs(60),
+            max_backoff: Duration::from_secs(60),
+            max_requests_per_second: 1.0,
+            ..Default::default()
+        });
+        limiter.record_429_for("lento.example", None).await;
+        assert!(limiter.stats_for("lento.example").await.in_backoff);
+
+        // The other host has no backoff and its own window.
+        let other = limiter.stats_for("rapido.example").await;
+        assert!(!other.in_backoff);
+        assert_eq!(other.total_429s, 0);
+
+        let started = Instant::now();
+        limiter.acquire_for("rapido.example").await;
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "o host que respondeu bem esperou {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn cada_host_tem_a_sua_janela() {
+        let limiter = RateLimiter::with_config(RateLimitConfig::default());
+        limiter.acquire_for("a.example").await;
+        limiter.acquire_for("b.example").await;
+        // Each host counts its own requests: the request of one host does
+        // not use the budget of another.
+        assert_eq!(limiter.stats_for("a.example").await.total_requests, 1);
+        assert_eq!(limiter.stats_for("b.example").await.total_requests, 1);
+        assert_eq!(limiter.stats_for("c.example").await.total_requests, 0);
+        assert_eq!(limiter.waits(), 0);
     }
 
     #[tokio::test]
