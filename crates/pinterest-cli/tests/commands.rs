@@ -111,7 +111,14 @@ async fn native_cli_collects_dynamic_board_and_downloads_authenticated_media() {
     assert_eq!(events.last().unwrap()["event"]["totals"]["downloaded"], 2);
     for id in ["101", "102"] {
         assert_eq!(
-            std::fs::read(directory.path().join("alice_art").join(format!("{id}.jpg"))).unwrap(),
+            std::fs::read(
+                directory
+                    .path()
+                    .join("alice")
+                    .join("art")
+                    .join(format!("{id}.jpg"))
+            )
+            .unwrap(),
             b"fixture image"
         );
     }

@@ -3,10 +3,10 @@
 use crate::{
     adaptive::AdaptiveController,
     cache::{resolve_cache_dir, PinCache},
-    collector::{CollectedBoard, CollectionOptions, Collector},
+    collector::{CollectedBoard, CollectionOptions, Collector, FeedOrigin},
     parser::{extract_boards_from_html, extract_pws_metadata_from_html},
     runtime::{Completeness, CompletionReason, RunTotals},
-    utils::{normalize_url, safe_name},
+    utils::normalize_url,
     DownloadOptions, Downloader, Operation, PinterestError, Result, RunEvent,
 };
 use futures::{stream, StreamExt};
@@ -16,6 +16,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 use url::Url;
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -41,6 +42,8 @@ pub struct BoardReport {
     pub reason: CompletionReason,
     pub completeness: Completeness,
     pub totals: RunTotals,
+    /// Where the pins of the board came from and what was left out.
+    pub origin: FeedOrigin,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunReport {
@@ -154,7 +157,7 @@ async fn run_inner(
         (targets, Some(collector))
     } else {
         // No HTTP fast path in Auto yet: embedded pins alone cannot prove completeness.
-        let downloader = Downloader::new()?;
+        let downloader = Downloader::with_cancellation(cancellation.clone())?;
         let html = downloader
             .fetch_html(url.as_str(), options.download.rate_limiting)
             .await?;
@@ -222,35 +225,49 @@ async fn run_inner(
                     ),
                     None => None,
                 };
-                let downloader = Downloader::new()?;
-                let mut reports = Vec::new();
-                loop {
-                    operation.check_cancelled()?;
-                    let next = { queue.lock().await.next() };
-                    let Some((index, target)) = next else { break };
-                    operation
-                        .emit(
-                            RunEvent::BoardStarted {
-                                board_url: target.clone(),
-                            },
-                            Some(&target),
-                            None,
-                        )
-                        .await;
-                    let board = match collector.as_mut() {
-                        Some(collector) => collector.collect_board(&target).await?,
-                        None => collect_http_board(&downloader, &target, &options.download).await?,
-                    };
-                    downloader.import_browser_cookies(&board.cookies);
-                    let report =
-                        download_collected(board, &options.download, &downloader, &operation)
-                            .await?;
-                    reports.push((index, report));
+                // The browser is closed on every path, including the error and
+                // the cancellation ones. A cancelled run must not leave a
+                // browser behind.
+                let outcome: Result<Vec<(usize, BoardReport)>> = async {
+                    let downloader = Downloader::with_cancellation(operation.cancellation())?;
+                    let mut reports = Vec::new();
+                    loop {
+                        operation.check_cancelled()?;
+                        let next = { queue.lock().await.next() };
+                        let Some((index, target)) = next else { break };
+                        operation
+                            .emit(
+                                RunEvent::BoardStarted {
+                                    board_url: target.clone(),
+                                },
+                                Some(&target),
+                                None,
+                            )
+                            .await;
+                        let board = match collector.as_mut() {
+                            Some(collector) => collector.collect_board(&target).await?,
+                            None => {
+                                collect_http_board(&downloader, &target, &options.download).await?
+                            }
+                        };
+                        downloader.import_browser_cookies(&board.cookies);
+                        let report =
+                            download_collected(board, &options.download, &downloader, &operation)
+                                .await?;
+                        reports.push((index, report));
+                    }
+                    Ok(reports)
                 }
-                if let Some(collector) = collector {
-                    collector.close().await?;
+                .await;
+                let closed = match collector {
+                    Some(collector) => collector.close().await,
+                    None => Ok(()),
+                };
+                match (outcome, closed) {
+                    (Ok(reports), Ok(())) => Ok(reports),
+                    (Err(error), _) => Err(error),
+                    (Ok(_), Err(error)) => Err(error),
                 }
-                Ok::<Vec<(usize, BoardReport)>, PinterestError>(reports)
             }
         }))
         .buffer_unordered(workers);
@@ -274,12 +291,28 @@ async fn run_inner(
         }
         Ok(report)
     };
+    tokio::pin!(work);
     let result = tokio::select! {
-        _ = cancellation.cancelled() => Err(PinterestError::Cancelled),
-        result = work => result,
+        biased;
+        _ = cancellation.cancelled() => {
+            // The workers observe the cancellation and close their browsers
+            // on the way out. The grace period bounds the wait so that the
+            // cancellation is observed in time; when it expires the browser
+            // is torn down with the run.
+            let _ = tokio::time::timeout(CANCEL_GRACE, &mut work).await;
+            Err(PinterestError::Cancelled)
+        }
+        result = &mut work => result,
     };
     result
 }
+
+/// How long the workers may take to unwind after a cancellation.
+///
+/// The plan asks for the cancellation to be observed in at most two seconds,
+/// so the grace period stays below that. A browser that does not answer is
+/// torn down with the run.
+const CANCEL_GRACE: std::time::Duration = std::time::Duration::from_millis(1200);
 
 /// Build a board from a single HTTP snapshot.
 ///
@@ -301,6 +334,11 @@ async fn collect_http_board(
             if let Ok(image_url) = url.join(&pin.image_url) {
                 pin.image_url = image_url.to_string();
             }
+            // The URL of the pin follows the origin of the board, so that the
+            // cache of the HTTP mode is the same as the one of the browser.
+            if let Ok(pin_url) = url.join(&format!("/pin/{}/", pin.id)) {
+                pin.url = pin_url.to_string();
+            }
             (pin.id.clone(), pin)
         })
         .collect();
@@ -309,16 +347,21 @@ async fn collect_http_board(
             "Nenhum pin no snapshot HTTP".into(),
         ));
     }
-    let pin_links = pins
+    let pin_links: BTreeMap<String, String> = pins
         .iter()
         .map(|(id, pin)| (id.clone(), pin.url.clone()))
         .collect();
+    let pin_count = pin_links.len();
     Ok(CollectedBoard {
         board_url: url.to_string(),
         pins,
         pin_links,
         reason: CompletionReason::Snapshot,
         completeness: Completeness::Unknown,
+        origin: FeedOrigin {
+            sources: BTreeMap::from([("snapshot".to_string(), pin_count)]),
+            excluded_recommendations: 0,
+        },
         cookies: Vec::new(),
     })
 }
@@ -352,6 +395,7 @@ async fn run_dynamic<T, O, F, Fut, S>(
     items: Vec<T>,
     initial: usize,
     controller: Option<Arc<AdaptiveController>>,
+    cancel: CancellationToken,
     success: S,
     mut task: F,
 ) -> Vec<Result<O>>
@@ -382,7 +426,15 @@ where
                 (value, started.elapsed())
             });
         }
-        let Some((value, elapsed)) = pending.next().await else {
+        // A cancelled run stops here. Waiting for the tasks that are already
+        // running would make the cancellation wait for a network timeout,
+        // and the plan asks for it in at most two seconds.
+        let next = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => None,
+            next = pending.next() => next,
+        };
+        let Some((value, elapsed)) = next else {
             break;
         };
         completed += 1;
@@ -408,15 +460,65 @@ async fn download_collected(
         board.pin_links = board.pin_links.into_iter().take(max).collect();
         board.pins.retain(|id, _| board.pin_links.contains_key(id));
     }
+    let cancellation = operation.cancellation();
     let url = Url::parse(&board.board_url)
         .map_err(|_| PinterestError::InvalidUrl(board.board_url.clone()))?;
-    let parts: Vec<_> = url
-        .path_segments()
-        .into_iter()
-        .flatten()
-        .filter(|part| !part.is_empty())
-        .collect();
-    let out_dir = options.out_root.join(safe_name(&parts.join("_")));
+    let out_dir = crate::utils::board_output_dir(&options.out_root, &url);
+    let legacy_dir = crate::utils::legacy_board_output_dir(&options.out_root, &url);
+    // An earlier Rust build wrote the board into a single directory named
+    // `<user>_<board>`. The Python tool writes `<user>/<board>`. Moving the
+    // old directory keeps the files, stops the download of what is already on
+    // disk and leaves both tools looking at the same place. When both
+    // directories exist the move is skipped: merging them could overwrite a
+    // file, and the reuse check below still finds the old files where they
+    // are.
+    let mut reuse_dirs: Vec<std::path::PathBuf> = Vec::new();
+    if legacy_dir != out_dir {
+        let legacy_exists = tokio::fs::metadata(&legacy_dir).await.is_ok();
+        let current_exists = tokio::fs::metadata(&out_dir).await.is_ok();
+        if legacy_exists && !current_exists {
+            if let Some(parent) = out_dir.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            match tokio::fs::rename(&legacy_dir, &out_dir).await {
+                Ok(()) => {
+                    operation
+                        .emit(
+                            RunEvent::Warning {
+                                message: format!(
+                                    "Layout antigo migrado: {} -> {}",
+                                    legacy_dir.display(),
+                                    out_dir.display()
+                                ),
+                            },
+                            Some(&board.board_url),
+                            None,
+                        )
+                        .await;
+                }
+                Err(error) => {
+                    // The rename can fail when the directories live on
+                    // different filesystems. The old files stay where they
+                    // are and are still reused.
+                    operation
+                        .emit(
+                            RunEvent::Warning {
+                                message: format!(
+                                    "Nao foi possivel migrar o layout antigo ({}); os arquivos serao reutilizados onde estao",
+                                    error
+                                ),
+                            },
+                            Some(&board.board_url),
+                            None,
+                        )
+                        .await;
+                    reuse_dirs.push(legacy_dir.clone());
+                }
+            }
+        } else if legacy_exists {
+            reuse_dirs.push(legacy_dir.clone());
+        }
+    }
     let unresolved: Vec<_> = board
         .pin_links
         .iter()
@@ -438,6 +540,7 @@ async fn download_collected(
         unresolved,
         options.workers,
         resolution_controller,
+        cancellation.clone(),
         |result| matches!(result, Ok(Some(_))),
         |(id, link)| {
             let cache = Arc::clone(&cache);
@@ -530,38 +633,78 @@ async fn download_collected(
         resolved: board.pins.len(),
         ..Default::default()
     };
+    // A media URL that expired is resolved again during the download. The
+    // fresh URL is written to the cache, so the next run does not start with
+    // the expired one.
+    let cache_changed = std::sync::atomic::AtomicBool::new(false);
     let download_controller = adaptive_controller(options);
     let pending = run_dynamic(
         board.pins.into_values().collect::<Vec<_>>(),
         options.workers,
         download_controller,
+        cancellation.clone(),
         |result: &Result<crate::downloader::MediaDownload>| result.is_ok(),
         |pin| {
             let out_dir = &out_dir;
+            let reuse_dirs = &reuse_dirs;
+            let cache = &cache;
+            let cache_changed = &cache_changed;
             async move {
-                downloader
-                    .download_pin(&pin.image_url, out_dir, &pin.id, options)
+                match downloader
+                    .download_pin(&pin.image_url, out_dir, reuse_dirs, &pin.id, options)
                     .await
+                {
+                    Ok(media) => Ok(media),
+                    Err(error) if error.is_expired_media() => {
+                        // The signed URL of the media expired. The page of the
+                        // pin still knows where the media lives, so the pin is
+                        // resolved again. The identity of the pin does not
+                        // change: the file keeps the name of the same pin.
+                        let fresh = downloader
+                            .resolve_pin(&pin.url, &pin.id, options.rate_limiting)
+                            .await?;
+                        let Some(fresh) = fresh else {
+                            return Err(error);
+                        };
+                        if fresh.image_url == pin.image_url {
+                            return Err(error);
+                        }
+                        if cache_enabled {
+                            cache.lock().await.insert(&pin.url, &fresh.image_url);
+                            cache_changed.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        downloader
+                            .download_pin(&fresh.image_url, out_dir, reuse_dirs, &pin.id, options)
+                            .await
+                    }
+                    Err(error) => Err(error),
+                }
             }
         },
     )
     .await;
+    let mut legacy_reused = 0usize;
     for result in pending {
         operation.check_cancelled()?;
         match result {
             Ok(media) => {
-                if media.reused {
+                // A pin counts as downloaded, reused or failed, never as two of
+                // them: the file has to be on disk before it counts as a
+                // success. Otherwise the totals would not add up.
+                let published = tokio::fs::metadata(&media.path)
+                    .await
+                    .is_ok_and(|meta| meta.is_file() && meta.len() > 0);
+                if !published {
+                    totals.failed += 1;
+                } else if media.reused {
                     totals.reused += 1;
+                    totals.verified += 1;
+                    if media.from_legacy_layout {
+                        legacy_reused += 1;
+                    }
                 } else {
                     totals.downloaded += 1;
-                }
-                if tokio::fs::metadata(&media.path)
-                    .await
-                    .is_ok_and(|meta| meta.is_file() && meta.len() > 0)
-                {
                     totals.verified += 1;
-                } else {
-                    totals.failed += 1;
                 }
             }
             Err(error) => {
@@ -588,7 +731,35 @@ async fn download_collected(
             )
             .await;
     }
+    // The pins that were never resolved also failed, so the totals cover
+    // every pin that was discovered.
     totals.failed += totals.discovered.saturating_sub(totals.resolved);
+    if cache_enabled && cache_changed.load(std::sync::atomic::Ordering::Relaxed) {
+        if let Err(error) = cache.lock().await.save().await {
+            operation
+                .emit(
+                    RunEvent::Warning {
+                        message: format!("Cache de metadados nao foi gravado: {error}"),
+                    },
+                    Some(&board.board_url),
+                    None,
+                )
+                .await;
+        }
+    }
+    if legacy_reused > 0 {
+        operation
+            .emit(
+                RunEvent::Warning {
+                    message: format!(
+                        "{legacy_reused} midia(s) vieram do layout antigo e nao foram baixadas de novo"
+                    ),
+                },
+                Some(&board.board_url),
+                None,
+            )
+            .await;
+    }
     if board.completeness == Completeness::Unknown {
         operation.emit(RunEvent::Warning { message: "A coleta terminou sem comprovar o fim do quadro; resultado parcial/desconhecido".into() }, Some(&board.board_url), None).await;
     }
@@ -601,12 +772,27 @@ async fn download_collected(
             None,
         )
         .await;
+    if board.origin.excluded_recommendations > 0 {
+        operation
+            .emit(
+                RunEvent::Warning {
+                    message: format!(
+                        "{} pin(s) recomendado(s) nao pertencem ao quadro e foram descartados",
+                        board.origin.excluded_recommendations
+                    ),
+                },
+                Some(&board.board_url),
+                None,
+            )
+            .await;
+    }
     Ok(BoardReport {
         board_url: board.board_url,
         output_dir: out_dir,
         reason: board.reason,
         completeness: board.completeness,
         totals,
+        origin: board.origin,
     })
 }
 fn add_totals(total: &mut RunTotals, board: &RunTotals) {

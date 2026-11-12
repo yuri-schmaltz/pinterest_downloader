@@ -28,7 +28,7 @@ struct Cli {
     target: Option<String>,
     #[arg(short, long)]
     user: Option<String>,
-    /// Destino (layout Rust atual: usuario_quadro)
+    /// Destino dos arquivos (layout usuario/quadro, o mesmo do Python)
     #[arg(short, long, alias = "out", default_value = "downloads")]
     output: PathBuf,
     #[arg(short, long, default_value_t = 8)]

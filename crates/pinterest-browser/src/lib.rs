@@ -232,6 +232,11 @@ pub struct LinkSnapshot {
     pub thumbnail: String,
     #[serde(default)]
     pub recommendation: bool,
+    /// The container of the page the link came from, given by its
+    /// `data-test-id` or `data-parity`. It tells a pin of the board apart
+    /// from a pin that Pinterest recommends next to it.
+    #[serde(default)]
+    pub origin: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkPayload {
@@ -392,11 +397,23 @@ impl BrowserPage {
     pub async fn snapshot(&self) -> Result<PageSnapshot> {
         let value = self.evaluate(r#"(() => {
             const root = document.scrollingElement || document.documentElement;
+            // A recommendation can hide under many names. The board of the
+            // user is the only thing that belongs to the board, so anything
+            // that says it is a suggestion is left out.
+            const recommendationSelector = '[data-test-id*="recommend"], [data-test-id*="related"],'
+                + ' [data-test-id*="more-like"], [data-test-id*="morelike"], [data-test-id*="suggest"],'
+                + ' [data-parity*="recommend"], [data-parity*="related"], [data-parity*="suggest"],'
+                + ' [aria-label*="recommend" i], [aria-label*="more like this" i]';
             return {url: location.href, html: document.documentElement.outerHTML,
-                links: Array.from(document.querySelectorAll('a[href]')).slice(0,10000).map(a => ({
+                links: Array.from(document.querySelectorAll('a[href]')).slice(0,10000).map(a => {
+                    const container = a.closest('[data-test-id], [data-parity]');
+                    return {
                     href: a.href, title: (a.getAttribute('title') || a.textContent || '').trim(),
                     thumbnail: a.querySelector('img')?.src || '',
-                    recommendation: Boolean(a.closest('[data-test-id*="related"], [data-test-id*="recommend"], [data-parity="recommendations"]'))})),
+                    recommendation: Boolean(a.closest(recommendationSelector)),
+                    origin: container ? (container.getAttribute('data-test-id')
+                        || container.getAttribute('data-parity') || '') : ''};
+                }),
                 end_of_feed: Boolean(document.querySelector('[data-test-id="board-feed-end"]')),
                 document_ready: document.readyState !== 'loading',
                 login_required: /\/(login|signup)\/?$/.test(location.pathname) || Boolean(document.querySelector('[data-test-id="login-form"], form[action*="/login/"]')),

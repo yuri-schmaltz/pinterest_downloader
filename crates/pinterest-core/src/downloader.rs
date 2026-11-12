@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
+use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 #[derive(Clone)]
@@ -19,16 +20,50 @@ pub struct Downloader {
     client: Client,
     limiter: Arc<RateLimiter>,
     cookies: Arc<reqwest::cookie::Jar>,
+    /// Set when the downloader belongs to an operation that can be cancelled.
+    cancel: Option<CancellationToken>,
+}
+
+/// How one media file is downloaded.
+#[derive(Debug, Clone, Copy)]
+pub struct MediaRequest<'a> {
+    /// Where the media is.
+    pub media_url: &'a str,
+    /// Where the file is written.
+    pub out_dir: &'a Path,
+    /// Directories that may already hold the file, searched before writing.
+    pub reuse_dirs: &'a [PathBuf],
+    /// The name of the file, without the extension.
+    pub filename_hint: Option<&'a str>,
+    /// How many times the download is tried again.
+    pub max_retries: usize,
+    /// Whether a file that is already on disk counts as the result.
+    pub use_cache: bool,
+    /// Whether the rate limiter is consulted.
+    pub rate_limiting: bool,
 }
 
 #[derive(Debug)]
 pub struct MediaDownload {
     pub path: PathBuf,
     pub reused: bool,
+    /// The file was found in a directory left behind by an older layout.
+    /// The caller can report it so the run does not look like a fresh
+    /// download of something that was already on disk.
+    pub from_legacy_layout: bool,
 }
 
 impl Downloader {
     pub fn new() -> Result<Self> {
+        Self::build(None)
+    }
+
+    /// A downloader that stops waiting as soon as the operation is cancelled.
+    pub fn with_cancellation(cancel: CancellationToken) -> Result<Self> {
+        Self::build(Some(cancel))
+    }
+
+    fn build(cancel: Option<CancellationToken>) -> Result<Self> {
         let cookies = Arc::new(reqwest::cookie::Jar::default());
         let client = Client::builder()
             .cookie_provider(cookies.clone())
@@ -40,7 +75,32 @@ impl Downloader {
             client,
             limiter: Arc::new(RateLimiter::default()),
             cookies,
+            cancel,
         })
+    }
+
+    /// Waits for a rate limit slot, giving up when the run is cancelled.
+    async fn acquire_slot(&self) -> Result<()> {
+        let allowed = self.limiter.acquire_cancellable(self.cancel.as_ref()).await;
+        if allowed {
+            Ok(())
+        } else {
+            Err(PinterestError::Cancelled)
+        }
+    }
+
+    /// Runs an HTTP request that stops as soon as the run is cancelled.
+    async fn send(&self, request: reqwest::RequestBuilder) -> Result<reqwest::Response> {
+        match &self.cancel {
+            Some(cancel) => {
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => Err(PinterestError::Cancelled),
+                    response = request.send() => Ok(response?),
+                }
+            }
+            None => Ok(request.send().await?),
+        }
     }
 
     /// How many times the rate limiter had to hold a request back.
@@ -53,16 +113,10 @@ impl Downloader {
     /// Fetch one HTTP snapshot. This does not execute JavaScript or paginate feeds.
     pub(crate) async fn fetch_html(&self, url: &str, rate_limiting: bool) -> Result<String> {
         if rate_limiting {
-            self.limiter.acquire().await;
+            self.acquire_slot().await?;
         }
-        Ok(self
-            .client
-            .get(url)
-            .send()
-            .await?
-            .error_for_status()?
-            .text()
-            .await?)
+        let response = self.send(self.client.get(url)).await?.error_for_status()?;
+        Ok(response.text().await?)
     }
 
     /// A profile visits the boards embedded in its initial HTML; a board visits itself.
@@ -129,16 +183,59 @@ impl Downloader {
         Ok(results)
     }
 
+    /// Find the media of a pin, trying the fallback pages when the first one
+    /// does not answer.
+    ///
+    /// The Pinterest answers differently on `www` and on the mobile domain:
+    /// when the canonical page does not give the media, the mobile one
+    /// usually does. The fallback never changes the identity of the pin: the
+    /// media that comes back belongs to the same pin, and the URL that is
+    /// reported is always the one that was collected.
     pub async fn resolve_pin(
         &self,
         pin_url: &str,
         pin_id: &str,
         rate_limiting: bool,
     ) -> Result<Option<crate::PinMetadata>> {
-        if rate_limiting {
-            self.limiter.acquire().await;
+        let mut last_error = None;
+        for candidate in resolution_candidates(pin_url) {
+            match self
+                .resolve_pin_from(&candidate, pin_id, rate_limiting)
+                .await
+            {
+                Ok(Some(pin)) => {
+                    return Ok(Some(crate::PinMetadata {
+                        id: pin_id.into(),
+                        url: pin_url.into(),
+                        image_url: pin.image_url,
+                        title: pin.title,
+                    }));
+                }
+                Ok(None) => {}
+                Err(PinterestError::Cancelled) => return Err(PinterestError::Cancelled),
+                Err(error) => last_error = Some(error),
+            }
         }
-        let response = self.client.get(pin_url).send().await?.error_for_status()?;
+        match last_error {
+            Some(error) => Err(error),
+            None => Ok(None),
+        }
+    }
+
+    /// Read the media of a pin from one page.
+    async fn resolve_pin_from(
+        &self,
+        pin_url: &str,
+        pin_id: &str,
+        rate_limiting: bool,
+    ) -> Result<Option<crate::PinMetadata>> {
+        if rate_limiting {
+            self.acquire_slot().await?;
+        }
+        let response = self
+            .send(self.client.get(pin_url))
+            .await?
+            .error_for_status()?;
         let final_url = response.url().clone();
         let parts: Vec<_> = final_url
             .path_segments()
@@ -200,17 +297,19 @@ impl Downloader {
         &self,
         media_url: &str,
         out_dir: &Path,
+        reuse_dirs: &[PathBuf],
         pin_id: &str,
         options: &DownloadOptions,
     ) -> Result<MediaDownload> {
-        self.download_media_with_options(
+        self.download_media_with_options(MediaRequest {
             media_url,
             out_dir,
-            Some(pin_id),
-            3,
-            options.use_cache,
-            options.rate_limiting,
-        )
+            reuse_dirs,
+            filename_hint: Some(pin_id),
+            max_retries: 3,
+            use_cache: options.use_cache,
+            rate_limiting: options.rate_limiting,
+        })
         .await
     }
 
@@ -221,45 +320,85 @@ impl Downloader {
         filename_hint: Option<&str>,
         max_retries: usize,
     ) -> Result<PathBuf> {
-        self.download_media_with_options(media_url, out_dir, filename_hint, max_retries, true, true)
-            .await
-            .map(|result| result.path)
+        self.download_media_with_options(MediaRequest {
+            media_url,
+            out_dir,
+            reuse_dirs: &[],
+            filename_hint,
+            max_retries,
+            use_cache: true,
+            rate_limiting: true,
+        })
+        .await
+        .map(|result| result.path)
     }
 
-    async fn download_media_with_options(
+    /// Looks for a media file that a previous run already wrote.
+    ///
+    /// The directories are searched in order, so the current layout wins and
+    /// an older one only serves as a fallback. A file only counts when it is
+    /// complete: a leftover `.part` file is never a cache hit.
+    async fn find_existing_media(
         &self,
-        media_url: &str,
-        out_dir: &Path,
-        filename_hint: Option<&str>,
-        max_retries: usize,
-        use_cache: bool,
-        rate_limiting: bool,
-    ) -> Result<MediaDownload> {
-        let base_name = safe_name(filename_hint.unwrap_or(media_url));
-        if base_name.is_empty() {
-            return Err(PinterestError::Extraction("Nome de arquivo vazio".into()));
-        }
-        if use_cache && out_dir.exists() {
-            let mut entries = fs::read_dir(out_dir).await?;
+        directories: &[PathBuf],
+        base_name: &str,
+    ) -> Result<Option<(PathBuf, bool)>> {
+        let expected_stem = Path::new(base_name).file_stem().and_then(|s| s.to_str());
+        for (index, directory) in directories.iter().enumerate() {
+            if !directory.exists() {
+                continue;
+            }
+            let mut entries = fs::read_dir(directory).await?;
             while let Some(entry) = entries.next_entry().await? {
                 let path = entry.path();
                 let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
                 let stem = path.file_stem().and_then(|s| s.to_str());
-                let expected_stem = Path::new(&base_name).file_stem().and_then(|s| s.to_str());
                 if matches!(ext, "jpg" | "jpeg" | "png" | "gif" | "webp" | "mp4")
                     && stem == expected_stem
                 {
                     let meta = entry.metadata().await?;
                     if meta.is_file() && meta.len() > 0 {
-                        return Ok(MediaDownload { path, reused: true });
+                        return Ok(Some((path, index > 0)));
                     }
                 }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn download_media_with_options(
+        &self,
+        request: MediaRequest<'_>,
+    ) -> Result<MediaDownload> {
+        let MediaRequest {
+            media_url,
+            out_dir,
+            reuse_dirs,
+            filename_hint,
+            max_retries,
+            use_cache,
+            rate_limiting,
+        } = request;
+        let base_name = safe_name(filename_hint.unwrap_or(media_url));
+        if base_name.is_empty() {
+            return Err(PinterestError::Extraction("Nome de arquivo vazio".into()));
+        }
+        if use_cache {
+            let mut directories = vec![out_dir.to_path_buf()];
+            directories.extend(reuse_dirs.iter().cloned());
+            if let Some((path, legacy)) = self.find_existing_media(&directories, &base_name).await?
+            {
+                return Ok(MediaDownload {
+                    path,
+                    reused: true,
+                    from_legacy_layout: legacy,
+                });
             }
         }
         fs::create_dir_all(out_dir).await?;
         for attempt in 0..=max_retries {
             if rate_limiting {
-                self.limiter.acquire().await;
+                self.acquire_slot().await?;
             }
             match self
                 .download_attempt(media_url, out_dir, &base_name, rate_limiting)
@@ -272,12 +411,28 @@ impl Downloader {
                     return Ok(MediaDownload {
                         path,
                         reused: false,
+                        from_legacy_layout: false,
                     });
                 }
+                Err(PinterestError::Cancelled) => return Err(PinterestError::Cancelled),
+                // An expired URL answers the same way every time. The caller
+                // resolves the pin again instead of waiting for a retry.
+                Err(error) if error.is_expired_media() => return Err(error),
                 Err(error) if attempt == max_retries => return Err(error),
                 Err(_) => {
+                    // The pause between two attempts is part of the run and
+                    // has to end when the run is cancelled.
                     let delay = Duration::from_millis(500 * (1u64 << attempt.min(6)));
-                    tokio::time::sleep(delay).await;
+                    match &self.cancel {
+                        Some(cancel) => {
+                            tokio::select! {
+                                biased;
+                                _ = cancel.cancelled() => return Err(PinterestError::Cancelled),
+                                _ = tokio::time::sleep(delay) => {}
+                            }
+                        }
+                        None => tokio::time::sleep(delay).await,
+                    }
                 }
             }
         }
@@ -291,7 +446,7 @@ impl Downloader {
         base_name: &str,
         rate_limiting: bool,
     ) -> Result<PathBuf> {
-        let response = self.client.get(media_url).send().await?;
+        let response = self.send(self.client.get(media_url)).await?;
         if response.status().as_u16() == 429 && rate_limiting {
             let retry_after = response
                 .headers()
@@ -350,13 +505,13 @@ impl Downloader {
         let clean_url = crate::utils::normalize_url(board_url);
         let url = url::Url::parse(&clean_url)
             .map_err(|_| PinterestError::InvalidUrl(clean_url.clone()))?;
-        let parts: Vec<_> = url
-            .path_segments()
-            .into_iter()
-            .flatten()
-            .filter(|s| !s.is_empty())
-            .collect();
-        let target_dir = options.out_root.join(safe_name(&parts.join("_")));
+        let target_dir = crate::utils::board_output_dir(&options.out_root, &url);
+        let legacy_dir = crate::utils::legacy_board_output_dir(&options.out_root, &url);
+        let reuse_dirs: Vec<PathBuf> = if legacy_dir == target_dir {
+            Vec::new()
+        } else {
+            vec![legacy_dir]
+        };
         let mut pins: Vec<_> = pin_images.into_iter().collect();
         pins.sort_by(|a, b| a.0.cmp(&b.0));
         if let Some(limit) = options.max_pins {
@@ -365,20 +520,22 @@ impl Downloader {
         let total = pins.len();
         let outcomes: Vec<_> = stream::iter(pins.into_iter().map(|(pin_url, img_url)| {
             let out_dir = target_dir.clone();
+            let reuse_dirs = reuse_dirs.clone();
             async move {
                 let hint = pin_url
                     .trim_end_matches('/')
                     .rsplit('/')
                     .next()
                     .unwrap_or("pin");
-                self.download_media_with_options(
-                    &img_url,
-                    &out_dir,
-                    Some(hint),
-                    3,
-                    options.use_cache,
-                    options.rate_limiting,
-                )
+                self.download_media_with_options(MediaRequest {
+                    media_url: &img_url,
+                    out_dir: &out_dir,
+                    reuse_dirs: &reuse_dirs,
+                    filename_hint: Some(hint),
+                    max_retries: 3,
+                    use_cache: options.use_cache,
+                    rate_limiting: options.rate_limiting,
+                })
                 .await
             }
         }))
@@ -399,6 +556,19 @@ impl Downloader {
             output_dir: target_dir,
         })
     }
+}
+
+/// The pages that may hold the media of a pin.
+///
+/// The canonical page comes first. The mobile domain is the fallback the
+/// Python tool uses: it answers when the canonical one does not.
+fn resolution_candidates(pin_url: &str) -> Vec<String> {
+    let mut candidates = vec![pin_url.to_owned()];
+    let mobile = pin_url.replace("www.pinterest.com", "br.pinterest.com");
+    if mobile != pin_url && !candidates.contains(&mobile) {
+        candidates.push(mobile);
+    }
+    candidates
 }
 
 fn validate_options(options: &DownloadOptions) -> Result<()> {

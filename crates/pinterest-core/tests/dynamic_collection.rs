@@ -146,8 +146,14 @@ async fn runner_transfers_browser_cookies_downloads_and_reports_cache_hits() {
         assert_eq!(report.totals.reused, if cached { 2 } else { 0 });
         for id in ["101", "102"] {
             assert_eq!(
-                std::fs::read(directory.path().join("alice_art").join(format!("{id}.jpg")))
-                    .unwrap(),
+                std::fs::read(
+                    directory
+                        .path()
+                        .join("alice")
+                        .join("art")
+                        .join(format!("{id}.jpg"))
+                )
+                .unwrap(),
                 b"fixture image"
             );
         }
@@ -199,7 +205,7 @@ async fn resolves_dom_only_pin_using_its_page_and_session() {
     assert_eq!(report.totals.downloaded, 1);
     assert_eq!(report.totals.failed, 0);
     assert_eq!(
-        std::fs::read(directory.path().join("dom_art/103.jpg")).unwrap(),
+        std::fs::read(directory.path().join("dom").join("art").join("103.jpg")).unwrap(),
         b"fixture image"
     );
 }
@@ -241,4 +247,24 @@ async fn cancelled_run_drains_terminal_event_and_closes_browser() {
         Err(pinterest_core::PinterestError::Cancelled)
     ));
     assert!(presenter.await.unwrap());
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn the_recommended_pins_are_not_part_of_the_board() {
+    // The page of the board carries the pins of the board and, next to them,
+    // the pins that Pinterest recommends. A recommendation is not part of
+    // the board and must not be downloaded as one.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let board = collector
+        .collect_board(&format!("{}/origin/art/", server.url))
+        .await
+        .unwrap();
+    let mut ids: Vec<_> = board.pin_links.keys().cloned().collect();
+    ids.sort();
+    assert_eq!(ids, ["601", "602"]);
+    assert_eq!(board.origin.excluded_recommendations, 1);
+    assert_eq!(board.origin.sources.get("board-feed"), Some(&1));
+    collector.close().await.unwrap();
 }

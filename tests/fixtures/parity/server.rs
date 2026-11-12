@@ -109,6 +109,43 @@ pub async fn serve() -> Server {
                         "text/html",
                         r#"<html><script id="__PWS_DATA__">{"pins":[{"id":"201","images":{"orig":{"url":"/public-media/201.jpg"}}}]}</script></html>"#.to_owned(),
                     )
+                } else if path == "/origin/art/" {
+                    // A board whose page also carries the pins that Pinterest
+                    // recommends. Only the pins of the board belong to it.
+                    (
+                        "text/html",
+                        r#"<html><body><main data-test-id="board-feed">
+                            <a href="/pin/601/">Do quadro</a>
+                        </main><section data-test-id="related-pins">
+                            <a href="/pin/999/">Recomendado</a>
+                        </section><script id="__PWS_DATA__">{"pins":[{"id":"602","images":{"orig":{"url":"/public-media/602.jpg"}}}],
+                            "recommendations":[{"id":"998","images":{"orig":{"url":"/public-media/998.jpg"}}}]}</script></body></html>"#
+                            .to_owned(),
+                    )
+                } else if path == "/expire/art/" {
+                    // A board whose media URL expired: the media answers 403
+                    // and the page of the pin knows the fresh URL.
+                    (
+                        "text/html",
+                        r#"<html><script id="__PWS_DATA__">{"pins":[{"id":"501","images":{"orig":{"url":"/expired-media/501.jpg"}}}]}</script></html>"#.to_owned(),
+                    )
+                } else if path == "/pin/501/" {
+                    (
+                        "text/html",
+                        r#"<html><meta content="/fresh-media/501.jpg" property="og:image"></html>"#
+                            .to_owned(),
+                    )
+                } else if path == "/fresh-media/501.jpg" {
+                    ("image/jpeg", "fresh image".to_owned())
+                } else if path == "/expired-media/501.jpg" {
+                    status = "403 Forbidden";
+                    ("image/jpeg", "expired".to_owned())
+                } else if path == "/slow/art/" {
+                    // A board that never answers in time. The client has to
+                    // give up on its own when the run is cancelled, without
+                    // waiting for the network timeout.
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    ("text/html", "<html>slow</html>".to_owned())
                 } else if path == "/empty/art/" {
                     ("text/html", "<html><main data-test-id='board-feed'><div data-test-id='board-feed-end'></div></main></html>".to_owned())
                 } else if path == "/login/" {

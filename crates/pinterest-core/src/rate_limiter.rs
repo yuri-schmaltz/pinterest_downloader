@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 /// How many requests are allowed in each sliding window.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +157,16 @@ impl RateLimiter {
 
     /// Wait until the strictest window allows another request.
     pub async fn acquire(&self) {
+        self.acquire_cancellable(None).await;
+    }
+
+    /// Wait until the strictest window allows another request, but give up
+    /// when the operation is cancelled.
+    ///
+    /// The wait for a slot can be as long as the longest window, so a
+    /// cancelled run must not wait for it: the plan asks for the cancellation
+    /// to be observed in at most two seconds.
+    pub async fn acquire_cancellable(&self, cancel: Option<&CancellationToken>) -> bool {
         loop {
             let delay = {
                 let mut state = self.state.lock().await;
@@ -167,13 +178,22 @@ impl RateLimiter {
                     state.requests_1m.push_back(now);
                     state.requests_1h.push_back(now);
                     state.total_requests += 1;
-                    return;
+                    return true;
                 }
                 state.total_wait_time += wait;
                 wait
             };
             self.waits.fetch_add(1, Ordering::SeqCst);
-            tokio::time::sleep(delay).await;
+            match cancel {
+                Some(cancel) => {
+                    tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => return false,
+                        _ = tokio::time::sleep(delay) => {}
+                    }
+                }
+                None => tokio::time::sleep(delay).await,
+            }
         }
     }
 
@@ -370,6 +390,28 @@ mod tests {
             other.stats().await.backoff_seconds,
             60.0,
             "a one second Retry-After must not shorten the backoff"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_wait_does_not_wait_for_the_window() {
+        // A saturated hour window would hold the caller for a long time.
+        // A cancelled operation has to be released at once.
+        let limiter = RateLimiter::with_config(RateLimitConfig {
+            max_requests_per_second: 1.0,
+            max_requests_per_minute: 1,
+            max_requests_per_hour: 1,
+            ..Default::default()
+        });
+        limiter.acquire().await;
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let started = Instant::now();
+        assert!(!limiter.acquire_cancellable(Some(&cancel)).await);
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "the cancelled wait took {:?}",
+            started.elapsed()
         );
     }
 

@@ -37,6 +37,20 @@ impl Default for CollectionOptions {
     }
 }
 
+/// Where the pins of a board came from.
+///
+/// Pinterest shows the pins of the board next to the pins it recommends. The
+/// recommendations are not part of the board, so they are left out and
+/// counted here instead of disappearing without a trace.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FeedOrigin {
+    /// The container of the page each pin came from, and how many pins each
+    /// one brought.
+    pub sources: BTreeMap<String, usize>,
+    /// The pins that were left out because Pinterest recommends them.
+    pub excluded_recommendations: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectedBoard {
     pub board_url: String,
@@ -44,6 +58,8 @@ pub struct CollectedBoard {
     pub pin_links: BTreeMap<String, String>,
     pub reason: CompletionReason,
     pub completeness: Completeness,
+    /// Where the pins came from and what was left out.
+    pub origin: FeedOrigin,
     // Kept in memory only to transfer the session to the HTTP client later.
     #[serde(skip)]
     pub cookies: Vec<Value>,
@@ -100,6 +116,8 @@ impl Collector {
             let cancel = self.operation.cancellation();
             let mut pins = BTreeMap::new();
             let mut links = BTreeMap::new();
+            let mut origin = FeedOrigin::default();
+            let mut excluded = std::collections::BTreeSet::new();
             let mut stable = 0;
             let mut previous_count = 0;
             let mut previous_height = 0;
@@ -126,12 +144,25 @@ impl Collector {
                 truncated |= snapshot.network_truncated;
                 for link in &snapshot.links {
                     if link.recommendation {
+                        // A recommendation is not part of the board. It is
+                        // counted so that the report can say what was left
+                        // out instead of pretending the board is all there.
+                        if let Ok(url) = target.join(&link.href) {
+                            if let Some(id) = pin_id(&url) {
+                                excluded.insert(id);
+                            }
+                        }
                         continue;
                     }
                     if let Ok(url) = target.join(&link.href) {
                         if url.origin() == target.origin() {
                             if let Some(id) = pin_id(&url) {
-                                links.entry(id).or_insert_with(|| url.to_string());
+                                if links.insert(id.clone(), url.to_string()).is_none() {
+                                    *origin
+                                        .sources
+                                        .entry(origin_label(&link.origin))
+                                        .or_default() += 1;
+                                }
                             }
                         }
                     }
@@ -199,6 +230,7 @@ impl Collector {
                 pins.retain(|id, _| links.contains_key(id));
             }
             let completeness = completeness(&reason);
+            origin.excluded_recommendations = excluded.len();
             if truncated {
                 self.operation
                     .emit(
@@ -235,6 +267,7 @@ impl Collector {
                 pin_links: links,
                 reason,
                 completeness,
+                origin,
                 cookies,
             })
         }
@@ -370,6 +403,16 @@ impl Collector {
     }
 }
 
+/// The name of the container a pin came from.
+fn origin_label(origin: &str) -> String {
+    let trimmed = origin.trim();
+    if trimmed.is_empty() {
+        "desconhecido".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn board_metadata(snapshot: &PageSnapshot, target: &Url) -> BTreeMap<String, PinMetadata> {
     let mut pins = extract_pws_metadata_from_html(&snapshot.html);
     for payload in &snapshot.network {
@@ -392,6 +435,12 @@ fn board_metadata(snapshot: &PageSnapshot, target: &Url) -> BTreeMap<String, Pin
                 return None;
             }
             pin.image_url = image.to_string();
+            // The URL of the pin follows the origin of the board. The parser
+            // builds an absolute Pinterest URL, and using it here would make
+            // the cache of one origin useless for another.
+            if let Ok(url) = target.join(&format!("/pin/{}/", pin.id)) {
+                pin.url = url.to_string();
+            }
             Some((pin.id.clone(), pin))
         })
         .collect()

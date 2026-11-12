@@ -37,8 +37,8 @@
       "id": "PAR-005",
       "feature": "origem do feed",
       "scenario": "recomendações após fim do quadro",
-      "expected": "pins recomendados excluídos",
-      "status": "partial",
+      "expected": "pins recomendados excluidos e contados na origem do feed",
+      "status": "implemented",
       "evidence": "crates/pinterest-core/src/collector.rs"
     },
     {
@@ -69,16 +69,16 @@
       "id": "PAR-009",
       "feature": "resolução",
       "scenario": "DOM, og:image, mídia direta e URL expirada",
-      "expected": "fallback sem trocar identidade do pin",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/tests/dynamic_collection.rs"
+      "expected": "fallback para o dominio movel e resolucao de novo de URL expirada, sem trocar a identidade do pin",
+      "status": "implemented",
+      "evidence": "crates/pinterest-core/tests/resolution.rs"
     },
     {
       "id": "PAR-010",
       "feature": "cache de metadados",
       "scenario": "reexecução, corrupção e cache-dir",
-      "expected": "persistência isolada por diretório, tolerância a cache corrompido e reuso na reexecução; expiração e versionamento ainda não existem",
-      "status": "partial",
+      "expected": "persistencia isolada por diretorio, tolerancia a cache corrompido, reuso na reexecucao, expiracao e versionamento",
+      "status": "implemented",
       "evidence": "crates/pinterest-core/tests/metadata_cache.rs"
     },
     {
@@ -93,8 +93,8 @@
       "id": "PAR-012",
       "feature": "concorrência",
       "scenario": "vários quadros e workers adaptativos",
-      "expected": "vários quadros em paralelo com teto real de tarefas em voo; workers adaptativos por CPU/memoria ainda não existem",
-      "status": "partial",
+      "expected": "varios quadros em paralelo com teto real de tarefas em voo e workers adaptativos por CPU/memoria",
+      "status": "implemented",
       "evidence": "crates/pinterest-core/tests/board_concurrency.rs"
     },
     {
@@ -117,17 +117,17 @@
       "id": "PAR-015",
       "feature": "logs",
       "scenario": "eventos e métricas persistidos",
-      "expected": "JSON válido e totais conciliados",
-      "status": "partial",
-      "evidence": "crates/pinterest-cli/tests/commands.rs"
+      "expected": "JSON valido e totais conciliados com os arquivos em disco",
+      "status": "implemented",
+      "evidence": "crates/pinterest-core/tests/output_layout.rs"
     },
     {
       "id": "PAR-016",
       "feature": "cancelamento",
       "scenario": "coleta, login, retry e download",
-      "expected": "encerra dentro dos limites do plano",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/tests/dynamic_collection.rs"
+      "expected": "encerra em ate dois segundos, sem esperar timeout de rede",
+      "status": "implemented",
+      "evidence": "crates/pinterest-core/tests/cancellation.rs"
     },
     {
       "id": "PAR-017",
@@ -140,8 +140,9 @@
       "id": "PAR-018",
       "feature": "migração",
       "scenario": "arquivos/cache Python e Rust existentes",
-      "expected": "sem perda, duplicação ou confiança falsa",
-      "status": "planned"
+      "expected": "layout usuario/quadro compartilhado, migracao do layout antigo sem perda nem duplicacao",
+      "status": "implemented",
+      "evidence": "crates/pinterest-core/tests/output_layout.rs"
     },
     {
       "id": "PAR-019",

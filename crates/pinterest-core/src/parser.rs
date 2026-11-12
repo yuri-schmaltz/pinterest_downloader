@@ -41,10 +41,7 @@ fn walk_pws_data(val: &Value, out: &mut HashMap<String, PinMetadata>) {
                 out.entry(meta.url.clone()).or_insert(meta);
             }
             for (key, v) in map {
-                if matches!(
-                    key.as_str(),
-                    "recommendations" | "related_pins" | "more_like_this"
-                ) {
+                if is_recommendation_key(key) {
                     continue;
                 }
                 if v.is_array() || v.is_object() {
@@ -54,6 +51,33 @@ fn walk_pws_data(val: &Value, out: &mut HashMap<String, PinMetadata>) {
         }
         _ => {}
     }
+}
+
+/// Whether a key of the Pinterest payload holds recommendations.
+///
+/// The payload of a board carries the pins of the board and, next to them,
+/// the pins that Pinterest suggests. The suggestions live under keys whose
+/// name says so, under many different names, and they are not part of the
+/// board.
+fn is_recommendation_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    if lower.contains("recommend")
+        || lower.contains("more_like_this")
+        || lower.contains("more-like-this")
+        || lower.contains("morelikethis")
+    {
+        return true;
+    }
+    // "related" and "suggested" as a word of the name, so that
+    // `feed_related_pins` and `pins_suggested` are caught as well.
+    lower
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|word| {
+            matches!(
+                word,
+                "related" | "suggest" | "suggests" | "suggested" | "suggestion" | "suggestions"
+            )
+        })
 }
 
 fn pin_from_pws_dict(d: &serde_json::Map<String, Value>) -> Option<PinMetadata> {
@@ -239,6 +263,40 @@ mod tests {
                 "https://cdn.example/image.jpg?x=1&y=2"
             ]
         );
+    }
+
+    #[test]
+    fn every_name_of_a_recommendation_is_rejected() {
+        // The Pinterest changes the name of the suggestions over time. A
+        // payload that hides a recommendation under another name would put a
+        // pin of another board inside this one.
+        for key in [
+            "recommendations",
+            "more_recommendations",
+            "related_pins",
+            "related_pins_resource",
+            "feed_related_pins",
+            "more_like_this",
+            "moreLikeThis",
+            "suggested_pins",
+        ] {
+            assert!(is_recommendation_key(key), "{key} was not rejected");
+        }
+        for key in ["pins", "resource_response", "data", "images", "grid_title"] {
+            assert!(!is_recommendation_key(key), "{key} was rejected");
+        }
+    }
+
+    #[test]
+    fn a_recommendation_hidden_under_another_name_stays_out() {
+        let data = serde_json::json!({"data":[{"id":"101","images":{"orig":{"url":"/101.jpg"}}}],
+            "more_recommendations":[{"id":"999","images":{"orig":{"url":"/999.jpg"}}}]});
+        let mut ids: Vec<_> = extract_pin_metadata_from_value(&data)
+            .into_values()
+            .map(|pin| pin.id)
+            .collect();
+        ids.sort();
+        assert_eq!(ids, ["101"]);
     }
 
     #[test]
