@@ -296,11 +296,15 @@ async fn a_board_that_never_ends_reports_the_timeout_as_a_partial_result() {
 }
 
 #[tokio::test]
-#[ignore = "requires Chromium; browser CI runs explicitly"]
+#[ignore = "requires Chromium and a display; the CI runs it under a virtual display"]
 async fn a_page_that_always_asks_for_a_login_cannot_keep_the_run_forever() {
     // Every prompt for a login used to push the deadline away, so a page
     // that always asks for a login never ended. The collection has to stop
     // on the timeout it was given.
+    if cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_none() {
+        eprintln!("pulado: esta maquina nao tem display para o browser visivel");
+        return;
+    }
     let server = fixture::serve().await;
     let (operation, mut events) = Operation::new(32);
     let resume = operation.clone();

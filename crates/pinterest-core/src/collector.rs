@@ -72,6 +72,38 @@ pub struct CollectedProfile {
     pub completeness: Completeness,
 }
 
+/// The deadline of a collection.
+///
+/// The first manual login buys the collection the time it needs. A later
+/// login does not: a page that always asks for a login would otherwise keep
+/// the run alive forever, because every prompt pushed the deadline away.
+#[derive(Debug, Clone)]
+struct Deadline {
+    limit: Instant,
+    granted: bool,
+}
+
+impl Deadline {
+    fn new(max_duration: Duration) -> Self {
+        Self {
+            limit: Instant::now() + max_duration,
+            granted: false,
+        }
+    }
+
+    /// Give the collection more time, once.
+    fn extend_for_login(&mut self, max_duration: Duration) {
+        if !self.granted {
+            self.granted = true;
+            self.limit = Instant::now() + max_duration;
+        }
+    }
+
+    fn expired(&self) -> bool {
+        Instant::now() >= self.limit
+    }
+}
+
 pub struct Collector {
     session: BrowserSession,
     options: CollectionOptions,
@@ -112,12 +144,7 @@ impl Collector {
             page.navigate(target.as_str())
                 .await
                 .map_err(browser_error)?;
-            let mut deadline = Instant::now() + self.options.max_duration;
-            // The first manual login buys the collection the time it needs.
-            // A later login does not: a page that always asks for a login
-            // would otherwise keep the run alive forever, because every
-            // prompt pushed the deadline away.
-            let mut login_granted = false;
+            let mut deadline = Deadline::new(self.options.max_duration);
             let cancel = self.operation.cancellation();
             let mut pins = BTreeMap::new();
             let mut links = BTreeMap::new();
@@ -133,10 +160,15 @@ impl Collector {
                 let snapshot = tokio::select! {
                     biased;
                     _ = cancel.cancelled() => return Err(PinterestError::Cancelled),
-                    _ = tokio::time::sleep_until(deadline) => break CompletionReason::Timeout,
+                    _ = tokio::time::sleep_until(deadline.limit) => break CompletionReason::Timeout,
                     result = page.snapshot() => result.map_err(browser_error)?,
                 };
                 if snapshot.login_required {
+                    if deadline.expired() {
+                        // The collection is already over: asking the user to
+                        // log in would only keep the run alive.
+                        break CompletionReason::Timeout;
+                    }
                     if !self.options.manual_login {
                         return Err(PinterestError::AuthenticationRequired(target.to_string()));
                     }
@@ -144,10 +176,7 @@ impl Collector {
                     page.navigate(target.as_str())
                         .await
                         .map_err(browser_error)?;
-                    if !login_granted {
-                        login_granted = true;
-                        deadline = Instant::now() + self.options.max_duration;
-                    }
+                    deadline.extend_for_login(self.options.max_duration);
                     continue;
                 }
                 truncated |= snapshot.network_truncated;
@@ -230,7 +259,7 @@ impl Collector {
                 page.scroll().await.map_err(browser_error)?;
                 tokio::select! {
                     _ = cancel.cancelled() => return Err(PinterestError::Cancelled),
-                    _ = tokio::time::sleep_until(deadline) => break CompletionReason::Timeout,
+                    _ = tokio::time::sleep_until(deadline.limit) => break CompletionReason::Timeout,
                     _ = tokio::time::sleep(self.options.scroll_pause) => {},
                 }
             };
@@ -311,8 +340,7 @@ impl Collector {
             page.navigate(target.as_str())
                 .await
                 .map_err(browser_error)?;
-            let mut deadline = Instant::now() + self.options.max_duration;
-            let mut login_granted = false;
+            let mut deadline = Deadline::new(self.options.max_duration);
             let cancel = self.operation.cancellation();
             let mut boards = BTreeMap::new();
             let mut previous = (0, 0);
@@ -320,10 +348,15 @@ impl Collector {
             let reason = loop {
                 let snapshot = tokio::select! {
                     _ = cancel.cancelled() => return Err(PinterestError::Cancelled),
-                    _ = tokio::time::sleep_until(deadline) => break CompletionReason::Timeout,
+                    _ = tokio::time::sleep_until(deadline.limit) => break CompletionReason::Timeout,
                     result = page.snapshot() => result.map_err(browser_error)?,
                 };
                 if snapshot.login_required {
+                    if deadline.expired() {
+                        // The collection is already over: asking the user to
+                        // log in would only keep the run alive.
+                        break CompletionReason::Timeout;
+                    }
                     if !self.options.manual_login {
                         return Err(PinterestError::AuthenticationRequired(target.to_string()));
                     }
@@ -331,10 +364,7 @@ impl Collector {
                     page.navigate(target.as_str())
                         .await
                         .map_err(browser_error)?;
-                    if !login_granted {
-                        login_granted = true;
-                        deadline = Instant::now() + self.options.max_duration;
-                    }
+                    deadline.extend_for_login(self.options.max_duration);
                     continue;
                 }
                 let mut entries = extract_boards_from_html(&snapshot.html, username);
@@ -387,7 +417,7 @@ impl Collector {
                 page.scroll().await.map_err(browser_error)?;
                 tokio::select! {
                     _ = cancel.cancelled() => return Err(PinterestError::Cancelled),
-                    _ = tokio::time::sleep_until(deadline) => break CompletionReason::Timeout,
+                    _ = tokio::time::sleep_until(deadline.limit) => break CompletionReason::Timeout,
                     _ = tokio::time::sleep(self.options.scroll_pause) => {},
                 }
             };
@@ -500,5 +530,32 @@ fn browser_error(error: BrowserError) -> PinterestError {
     match error {
         BrowserError::Cancelled => PinterestError::Cancelled,
         _ => PinterestError::Browser(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+
+    #[test]
+    fn o_primeiro_login_da_mais_tempo_e_os_outros_nao() {
+        let mut deadline = Deadline::new(Duration::from_millis(50));
+        assert!(!deadline.expired());
+        std::thread::sleep(Duration::from_millis(70));
+        assert!(deadline.expired());
+
+        // The first login buys the collection a new budget of 200ms.
+        deadline.extend_for_login(Duration::from_millis(200));
+        assert!(!deadline.expired());
+        std::thread::sleep(Duration::from_millis(70));
+        assert!(!deadline.expired(), "o novo prazovigia");
+
+        // A later login does not extend it: the collection still ends.
+        deadline.extend_for_login(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(
+            deadline.expired(),
+            "um login que nao e o primeiro nao pode manter a coleta viva"
+        );
     }
 }

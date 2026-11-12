@@ -314,8 +314,19 @@ jobs:
       run: |
         python -m pip install playwright
         python -m playwright install --with-deps chromium
+    - name: Install a virtual display (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends xvfb
     - name: Run all native tests, including browser lifecycle and dynamic fixtures
-      run: cargo test --workspace --all-features --locked -- --include-ignored
+      # A virtual display lets the tests that need a visible browser run.
+      run: |
+        if [ "${{ runner.os }}" = "Linux" ]; then
+          xvfb-run -a cargo test --workspace --all-features --locked -- --include-ignored
+        else
+          cargo test --workspace --all-features --locked -- --include-ignored
+        fi
 
   rust-gui:
     name: Rust GUI (${{ matrix.os }})
@@ -363,7 +374,11 @@ jobs:
     # on a machine that has neither. The release job only runs on a tag, so
     # the distribution is checked on every change here.
     - name: Build the CLI and the fixture server
-      run: cargo build --release --locked -p pinterest-cli --example fixture_server
+      # Both targets are named: with only --example the binary itself is
+      # not built.
+      run: >
+        cargo build --release --locked -p pinterest-cli
+        --bin pinterest-cli --example fixture_server
     - name: Smoke test the built binary
       shell: bash
       run: |

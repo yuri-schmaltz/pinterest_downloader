@@ -374,7 +374,9 @@ jobs:
           python-version: '3.12'
       - run: python scripts/sync_version.py --check --tag
       - run: cargo test --workspace --locked
-      - run: cargo build --release --locked -p pinterest-cli --example fixture_server
+      # Both targets are named: with only --example the binary itself is
+      # not built.
+      - run: cargo build --release --locked -p pinterest-cli --bin pinterest-cli --example fixture_server
       - name: Smoke test the built binary
         shell: bash
         run: |
