@@ -128,6 +128,7 @@ impl Collector {
             let mut previous_height = 0;
             let mut truncated = false;
             let mut end_seen = false;
+            let mut gated = false;
             let reason = loop {
                 let snapshot = tokio::select! {
                     biased;
@@ -150,6 +151,7 @@ impl Collector {
                     continue;
                 }
                 truncated |= snapshot.network_truncated;
+                gated |= snapshot.gated;
                 for link in &snapshot.links {
                     if link.recommendation {
                         // A recommendation is not part of the board. It is
@@ -253,6 +255,12 @@ impl Collector {
                     .await;
             }
             if links.is_empty() && completeness != Completeness::Complete {
+                if gated {
+                    // The page shows the pins as a blurred preview and the
+                    // feed comes empty. The board is not empty: the visitor
+                    // is not logged in.
+                    return Err(PinterestError::AuthenticationRequired(target.to_string()));
+                }
                 return Err(PinterestError::Extraction(
                     "Nenhum pin encontrado; quadro vazio não foi comprovado".into(),
                 ));

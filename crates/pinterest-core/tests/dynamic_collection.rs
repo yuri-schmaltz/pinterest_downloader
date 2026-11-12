@@ -346,3 +346,22 @@ async fn a_board_that_stops_without_saying_it_ended_is_not_complete() {
     assert_eq!(board.pin_links.len(), 1);
     collector.close().await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn a_real_public_board_asks_for_a_login_instead_of_saying_it_is_empty() {
+    // Captura real e sanitizada de um quadro publico do Pinterest. Sem
+    // sessao, a pagina entrega os pins bloqueados e o feed vazio. Dizer
+    // "nenhum pin encontrado" seria uma resposta errada: o quadro tem pins,
+    // quem nao esta logado e que nao os ve.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let result = collector
+        .collect_board(&format!("{}/real/public/", server.url))
+        .await;
+    assert!(
+        matches!(result, Err(pinterest_core::PinterestError::AuthenticationRequired(_))),
+        "a gated board did not ask for a login: {result:?}"
+    );
+    collector.close().await.unwrap();
+}

@@ -284,3 +284,45 @@ Soma inicial: **43–69 dias de engenharia**, aproximadamente **9–14 semanas p
 - [ ] Documentação e notas de migração refletem a release entregue.
 
 Somente após esses itens a versão Rust pode ser declarada equiparada à versão Python como produto completo.
+
+## Capturas reais do Pinterest
+
+A captura real e feita por `scripts/capture_pinterest.py`:
+
+```
+python scripts/capture_pinterest.py https://www.pinterest.com/<perfil>/<quadro>/ \
+    --out tests/fixtures/real/<superficie> --trim
+```
+
+O que a captura guarda:
+
+- a pagina sanitizada, com o `__PWS_DATA__` tratado como JSON (e nao como
+  texto, para que nenhum token passe);
+- o formato dos payloads de rede, com o nome das chaves e o tipo de cada
+  uma, e nao o conteudo;
+- um `manifest.json` com a data, a origem, os seletores observados, as
+  chaves de payload e os limites: o que a captura cobre e o que ela nao
+  cobre.
+
+O que nunca entra na captura: cookie, token, nonce, identificador anonimo,
+nome de usuario, nome de quadro, id de pin e URL de midia. Cada um vira um
+placeholder estavel (`USUARIO_001`, `QUADRO_001`, `PIN_001`, `MIDIA_001`).
+Os testes em `tests/test_capture_sanitizer.py` verificam isso com uma
+pagina que carrega todos esses segredos.
+
+O que a captura real mostrou, e que os testes sinteticos nao mostravam:
+
+- a superficie publica entrega os pins **bloqueados** (`gated-pin-rep`) e o
+  feed vazio para quem nao esta logado. O quadro tem pins; quem nao ve nao
+  pode ver. O coletor agora pede login nesse caso, em vez de dizer que o
+  quadro esta vazio;
+- nenhuma superficie observada traz um marcador explicito de fim de feed.
+  A completude de um quadro real continua desconhecida, e o relatorio diz
+  isso;
+- os seletores reais (`feed`, `grid`, `masonry-container`,
+  `gated-pin-rep`) nao sao os da fixture sintetica. A fixture e a captura
+  sao coisas diferentes, e a captura e o que vale como prova.
+
+O que ainda falta: a superficie logada, os quadros privados e a conta de
+teste. Precisam de credenciais e nao podem ser provados por fixture
+publica.

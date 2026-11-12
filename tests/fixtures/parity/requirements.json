@@ -147,9 +147,10 @@
     {
       "id": "PAR-019",
       "feature": "Pinterest real",
-      "scenario": "fixtures sanitizadas e conta de teste",
-      "expected": "compatibilidade observada e limites registrados",
-      "status": "planned"
+      "scenario": "captura sanitizada de quadro publico",
+      "expected": "compatibilidade observada e limites registrados; sem cookie, token ou dado privado",
+      "status": "implemented",
+      "evidence": "tests/fixtures/real/manifest.json"
     },
     {
       "id": "PAR-020",

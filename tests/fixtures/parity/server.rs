@@ -109,6 +109,11 @@ pub async fn serve() -> Server {
                         "text/html",
                         r#"<html><script id="__PWS_DATA__">{"pins":[{"id":"201","images":{"orig":{"url":"/public-media/201.jpg"}}}]}</script></html>"#.to_owned(),
                     )
+                } else if path == "/real/public/" {
+                    // Uma captura real e sanitizada de um quadro publico. A
+                    // pagina entrega os pins bloqueados para quem nao esta
+                    // logado, o que e o que a captura prova.
+                    ("text/html", include_str!("../real/quadro-publico.html").to_owned())
                 } else if path == "/neverend/art/" {
                     // A board whose feed never says that it ended and never
                     // stops changing. The collection has to stop on its own

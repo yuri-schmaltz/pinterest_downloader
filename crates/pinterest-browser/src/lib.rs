@@ -256,6 +256,12 @@ pub struct PageSnapshot {
     /// conclude that nothing changed.
     pub document_ready: bool,
     pub login_required: bool,
+    /// The page shows the pins of the board only as a blurred preview.
+    ///
+    /// A visitor without a session sees the pins blocked and the feed
+    /// empty. Reporting that as "the board is empty" would be a wrong
+    /// answer: the board has pins, the visitor just cannot see them.
+    pub gated: bool,
     pub network: Vec<NetworkPayload>,
     pub network_truncated: bool,
     pub pending_requests: usize,
@@ -417,6 +423,7 @@ impl BrowserPage {
                 end_of_feed: Boolean(document.querySelector('[data-test-id="board-feed-end"]')),
                 document_ready: document.readyState !== 'loading',
                 login_required: /\/(login|signup)\/?$/.test(location.pathname) || Boolean(document.querySelector('[data-test-id="login-form"], form[action*="/login/"]')),
+                gated: Boolean(document.querySelector('[data-test-id="gated-pin-rep"], [data-test-id="gated-pin-image"]')),
                 height: Math.ceil(root.scrollHeight), at_bottom: root.scrollTop + innerHeight >= root.scrollHeight - 20};
         })()"#).await?;
         let mut log = self.network.lock().await;
@@ -434,6 +441,7 @@ impl BrowserPage {
             end_of_feed: value["end_of_feed"].as_bool().unwrap_or(false),
             document_ready: value["document_ready"].as_bool().unwrap_or(false),
             login_required: value["login_required"].as_bool().unwrap_or(false),
+            gated: value["gated"].as_bool().unwrap_or(false),
             network: entries,
             network_truncated: truncated,
             pending_requests,
