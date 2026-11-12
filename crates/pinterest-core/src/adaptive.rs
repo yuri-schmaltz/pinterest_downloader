@@ -245,7 +245,7 @@ mod tests {
         }
         let current = controller.current_workers().await;
         assert!(
-            current >= 2 && current <= 8,
+            (2..=8).contains(&current),
             "the limit left the range: {current}"
         );
     }

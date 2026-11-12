@@ -388,7 +388,7 @@ where
         completed += 1;
         if let Some(controller) = &controller {
             controller.record(elapsed, success(&value)).await;
-            if completed % 10 == 0 {
+            if completed.is_multiple_of(10) {
                 controller.adjust().await;
                 limit = controller.current_workers().await.max(1);
             }
