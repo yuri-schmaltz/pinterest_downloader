@@ -155,16 +155,63 @@ def get_cache_file_path(filename: str = ".pinterest_cache.json") -> Path:
 CACHE_FILE = get_cache_file_path()
 
 
-def load_pin_cache(cache_dir: str | None = None) -> Dict[str, str]:
+CACHE_VERSION = 1
+CACHE_META_FILE = ".pinterest_cache_meta.json"
+DEFAULT_CACHE_TTL_DAYS = 30
+
+
+def _cache_paths(cache_dir: str | None = None) -> tuple[Path, Path]:
+    """Caminho do mapa de cache e do arquivo de versão/idade."""
+    if cache_dir:
+        base = Path(cache_dir)
+    else:
+        base = get_cache_dir()
+    return base / ".pinterest_cache.json", base / CACHE_META_FILE
+
+
+def _read_cache_meta(meta_path: Path) -> dict | None:
+    """Lê a versão e a idade do cache; None quando não há metadados."""
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    version = data.get("version")
+    written_at = data.get("written_at")
+    if not isinstance(version, int) or not isinstance(written_at, int):
+        return None
+    return {"version": version, "written_at": written_at}
+
+
+def _cache_is_expired(meta: dict | None, ttl_days: int) -> bool:
+    """Diz se o cache é mais velho que o limite.
+
+    Sem metadados o cache é aceito: ele pode ter sido escrito agora pela
+    outra ferramenta, e descartar seria pior do que usar.
+    """
+    if not meta or ttl_days <= 0:
+        return False
+    if meta.get("version") != CACHE_VERSION:
+        return False
+    written_at = meta.get("written_at", 0)
+    if not isinstance(written_at, (int, float)):
+        return False
+    age = time.time() - float(written_at)
+    return age > ttl_days * 86400
+
+
+def load_pin_cache(cache_dir: str | None = None, ttl_days: int = DEFAULT_CACHE_TTL_DAYS) -> Dict[str, str]:
     """Carrega cache de pin_url -> og:image_url.
 
     Args:
         cache_dir: Diretório personalizado (opcional). Se None, usa XDG/AppData.
+        ttl_days: Dias que o cache vale; zero nunca expira.
     """
-    if cache_dir:
-        cache_path = Path(cache_dir) / ".pinterest_cache.json"
-    else:
-        cache_path = get_cache_file_path()
+    cache_path, meta_path = _cache_paths(cache_dir)
+
+    if _cache_is_expired(_read_cache_meta(meta_path), ttl_days):
+        return {}
 
     if cache_path.exists():
         try:
@@ -180,18 +227,21 @@ def load_pin_cache(cache_dir: str | None = None) -> Dict[str, str]:
 def save_pin_cache(cache: Dict[str, str], cache_dir: str | None = None) -> None:
     """Salva cache de pins em disco.
 
+    O mapa fica em JSON simples, o mesmo formato que a CLI Rust lê. A
+    versão e a idade vão num arquivo ao lado, para que as duas ferramentas
+    compartilhem o mesmo diretório sem deixar de se entender.
+
     Args:
         cache: Dict de pin_url -> og:image_url
         cache_dir: Diretório personalizado (opcional). Se None, usa XDG/AppData.
     """
-    if cache_dir:
-        cache_path = Path(cache_dir) / ".pinterest_cache.json"
-    else:
-        cache_path = get_cache_file_path()
+    cache_path, meta_path = _cache_paths(cache_dir)
 
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
+        meta = {"version": CACHE_VERSION, "written_at": int(time.time())}
+        meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass  # Falha de cache não deve quebrar fluxo
 
@@ -219,6 +269,7 @@ class DownloadOptions:
     workers: int = 16
     boards_workers: int = 1
     cache_dir: str | None = None  # None = cache do sistema (XDG/AppData)
+    cache_ttl_days: int = DEFAULT_CACHE_TTL_DAYS  # Dias que o cache vale; zero nunca expira
     use_cache: bool = True  # Habilitar/desabilitar cache
     adaptive_workers: bool = False  # ONDA 5C: Ajuste dinâmico de workers
     rate_limiting: bool = False  # ONDA 5E: Rate limiting inteligente
@@ -1282,6 +1333,7 @@ def resolve_images(
     adaptive: bool = False,
     rate_limiting: bool = False,
     cache_dir: str | None = None,
+    cache_ttl_days: int = DEFAULT_CACHE_TTL_DAYS,
 ) -> Dict[str, str]:
     """Resolve a mídia de cada pin, em paralelo.
 
@@ -1308,7 +1360,7 @@ def resolve_images(
     logger.start_phase("resolve_images")
 
     # Carregar cache existente
-    cache = load_pin_cache(cache_dir) if use_cache else {}
+    cache = load_pin_cache(cache_dir, cache_ttl_days) if use_cache else {}
     intercepted = get_intercepted_metadata()
 
     # Verificar quais pins já estão em cache ou foram interceptados
@@ -1438,6 +1490,7 @@ def _retry_missing_pins(
         use_cache=False,
         rate_limiting=options.rate_limiting,
         cache_dir=options.cache_dir,
+        cache_ttl_days=options.cache_ttl_days,
     )
     recovered = 0
     with ThreadPoolExecutor(max_workers=options.workers) as ex:
@@ -1559,6 +1612,7 @@ def download_board(
         adaptive=options.adaptive_workers,
         rate_limiting=options.rate_limiting,
         cache_dir=options.cache_dir,
+        cache_ttl_days=options.cache_ttl_days,
     )
 
     if not pin_img:
@@ -1799,6 +1853,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Diretório para armazenar cache de pins (default: cache do sistema, XDG/AppData)",
     )
     ap.add_argument(
+        "--cache-ttl-days",
+        type=int,
+        default=DEFAULT_CACHE_TTL_DAYS,
+        help="Dias que o cache de pins vale; zero nunca expira",
+    )
+    ap.add_argument(
         "--no-cache",
         action="store_true",
         help="Desabilita cache de metadados de pins (sempre refetch)",
@@ -1857,6 +1917,7 @@ def main() -> None:
         workers=args.workers,
         boards_workers=args.boards_workers,
         cache_dir=args.cache_dir,
+        cache_ttl_days=max(0, args.cache_ttl_days),
         use_cache=not args.no_cache,
         adaptive_workers=args.adaptive_workers,
         rate_limiting=args.rate_limiting,

@@ -45,6 +45,9 @@ struct Cli {
     /// Diretório do cache de metadados (default: cache do sistema)
     #[arg(long)]
     cache_dir: Option<PathBuf>,
+    /// Dias que o cache de metadados vale; zero nunca expira
+    #[arg(long, default_value_t = 30)]
+    cache_ttl_days: u64,
     /// Desativa o limitador de taxa
     #[arg(long, alias = "no-rate-limiting")]
     no_rate_limit: bool,
@@ -141,6 +144,7 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
             max_pins: cli.max_pins,
             cache_dir: cli.cache_dir,
             metadata_cache: !cli.no_metadata_cache,
+            cache_ttl: std::time::Duration::from_secs(cli.cache_ttl_days.saturating_mul(86_400)),
         },
         collection,
         mode: match cli.mode {

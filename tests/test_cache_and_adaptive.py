@@ -94,8 +94,9 @@ class TestCacheDirIsHonored:
     def test_sem_cache_dir_o_padrao_do_sistema_e_usado(self, tmp_path, monkeypatch, fake_media):
         usado = {}
 
-        def fake_load(cache_dir=None):
+        def fake_load(cache_dir=None, ttl_days=0):
             usado["load"] = cache_dir
+            usado["ttl"] = ttl_days
             return {}
 
         def fake_save(cache, cache_dir=None):

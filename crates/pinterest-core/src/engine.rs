@@ -425,7 +425,10 @@ async fn download_collected(
         .collect();
     // The metadata cache short-circuits the network for pins resolved before.
     let cache = Arc::new(Mutex::new(if options.metadata_cache {
-        PinCache::load(&resolve_cache_dir(options.cache_dir.as_deref()))
+        PinCache::load(
+            &resolve_cache_dir(options.cache_dir.as_deref()),
+            options.cache_ttl,
+        )
     } else {
         PinCache::disabled()
     }));
@@ -496,6 +499,18 @@ async fn download_collected(
             .await;
     }
     if cache_enabled {
+        // Every pin whose media URL is known belongs in the cache, including
+        // the ones that came with the board snapshot. Without this the
+        // cache would stay empty whenever the pins arrive with their media
+        // URL already attached.
+        {
+            let mut guard = cache.lock().await;
+            for pin in board.pins.values() {
+                if !pin.url.is_empty() && !pin.image_url.is_empty() {
+                    guard.insert(&pin.url, &pin.image_url);
+                }
+            }
+        }
         // A cache write failure must not fail the run: the downloads already
         // happened and the next run simply resolves the pins again.
         if let Err(error) = cache.lock().await.save().await {

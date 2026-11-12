@@ -73,6 +73,8 @@ pub struct DownloadOptions {
     pub metadata_cache: bool,
     /// Whether the number of tasks in flight follows the machine load.
     pub adaptive: bool,
+    /// How long the pin metadata cache stays usable. Zero never expires it.
+    pub cache_ttl: std::time::Duration,
 }
 
 impl Default for DownloadOptions {
@@ -87,6 +89,7 @@ impl Default for DownloadOptions {
             cache_dir: None,
             metadata_cache: true,
             adaptive: false,
+            cache_ttl: crate::cache::DEFAULT_TTL,
         }
     }
 }
