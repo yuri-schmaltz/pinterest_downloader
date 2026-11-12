@@ -1,4 +1,4 @@
-> **Estado em 2026-11-06:** Chrome é o alvo do manifest atual. O XPI gerado reutiliza esse manifest, não é assinado e não teve compatibilidade Firefox validada. As instruções Firefox abaixo são experimentais; empacotar não comprova funcionamento.
+> **Estado em 2026-11-12:** o manifest declara o background nos dois formatos. O Chrome usa `background.service_worker`; o Firefox MV3 não suporta service worker (Firefox bug 1573659), então roda `background.scripts` como event page. `minimum_chrome_version` é 121, a partir de onde o Chrome ignora o `scripts`. O `web-ext lint` do Mozilla passa sem erro nem aviso além do `BACKGROUND_SERVICE_WORKER_IGNORED`, que é o padrão cross-browser funcionando como previsto. O piso do Firefox é 142, exigido pela chave `data_collection_permissions` que o Firefox Add-ons passou a exigir. O XPI ainda **não é assinado** e a compatibilidade Firefox **não foi validada num browser real**; empacotar não comprova funcionamento.
 
 # Pinterest Pro Downloader — extensão
 
