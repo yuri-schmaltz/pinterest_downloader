@@ -267,7 +267,7 @@ impl Downloader {
             {
                 Ok(path) => {
                     if rate_limiting {
-                        self.limiter.record_success();
+                        self.limiter.record_success().await;
                     }
                     return Ok(MediaDownload {
                         path,
@@ -297,8 +297,9 @@ impl Downloader {
                 .headers()
                 .get(reqwest::header::RETRY_AFTER)
                 .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse::<u64>().ok())
-                .map(Duration::from_secs);
+                .and_then(|v| {
+                    crate::rate_limiter::parse_retry_after(v, std::time::SystemTime::now())
+                });
             self.limiter.record_429(retry_after).await;
         }
         let response = response.error_for_status()?;
