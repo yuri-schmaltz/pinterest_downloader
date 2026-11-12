@@ -1,10 +1,127 @@
-//! Rate limiter and backoff protection (equivalent to Python rate_limiter.py).
+//! Rate limiting with sliding windows and exponential backoff.
+//!
+//! The policy mirrors the Python `rate_limiter.py`: three sliding windows
+//! (one second, one minute, one hour) plus an exponential backoff that a
+//! `429 Too Many Requests` activates. The strictest window decides when the
+//! next request may go out.
+//!
+//! `Retry-After` is honoured in both forms the HTTP specification allows:
+//! a number of seconds and an HTTP date. A date in the past means "retry
+//! now", not "retry in the past".
 
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::Mutex;
 
+/// How many requests are allowed in each sliding window.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    pub max_requests_per_second: f64,
+    pub max_requests_per_minute: usize,
+    pub max_requests_per_hour: usize,
+    pub backoff_on_429: Duration,
+    pub backoff_multiplier: f64,
+    pub max_backoff: Duration,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            max_requests_per_second: 5.0,
+            max_requests_per_minute: 200,
+            max_requests_per_hour: 10_000,
+            backoff_on_429: Duration::from_secs(60),
+            backoff_multiplier: 2.0,
+            max_backoff: Duration::from_secs(300),
+        }
+    }
+}
+
+/// A snapshot of what the limiter has done.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RateLimitStats {
+    pub total_requests: u64,
+    pub total_429s: u64,
+    pub total_wait_time_seconds: f64,
+    pub requests_last_second: usize,
+    pub requests_last_minute: usize,
+    pub requests_last_hour: usize,
+    pub in_backoff: bool,
+    pub backoff_seconds: f64,
+}
+
+#[derive(Debug)]
+struct RateLimiterState {
+    config: RateLimitConfig,
+    requests_1s: VecDeque<Instant>,
+    requests_1m: VecDeque<Instant>,
+    requests_1h: VecDeque<Instant>,
+    backoff_until: Option<Instant>,
+    current_backoff: Duration,
+    total_requests: u64,
+    total_429s: u64,
+    total_wait_time: Duration,
+}
+
+impl RateLimiterState {
+    fn clean(&mut self, now: Instant) {
+        while self
+            .requests_1s
+            .front()
+            .is_some_and(|stamp| now.duration_since(*stamp) > Duration::from_secs(1))
+        {
+            self.requests_1s.pop_front();
+        }
+        while self
+            .requests_1m
+            .front()
+            .is_some_and(|stamp| now.duration_since(*stamp) > Duration::from_secs(60))
+        {
+            self.requests_1m.pop_front();
+        }
+        while self
+            .requests_1h
+            .front()
+            .is_some_and(|stamp| now.duration_since(*stamp) > Duration::from_secs(3600))
+        {
+            self.requests_1h.pop_front();
+        }
+    }
+
+    fn wait_time(&self, now: Instant) -> Duration {
+        let mut wait = Duration::ZERO;
+        if self.requests_1s.len() as f64 >= self.config.max_requests_per_second {
+            if let Some(oldest) = self.requests_1s.front() {
+                let remaining = Duration::from_secs(1).saturating_sub(now.duration_since(*oldest));
+                wait = wait.max(remaining);
+            }
+        }
+        if self.requests_1m.len() >= self.config.max_requests_per_minute {
+            if let Some(oldest) = self.requests_1m.front() {
+                let remaining = Duration::from_secs(60).saturating_sub(now.duration_since(*oldest));
+                wait = wait.max(remaining);
+            }
+        }
+        if self.requests_1h.len() >= self.config.max_requests_per_hour {
+            if let Some(oldest) = self.requests_1h.front() {
+                let remaining =
+                    Duration::from_secs(3600).saturating_sub(now.duration_since(*oldest));
+                wait = wait.max(remaining);
+            }
+        }
+        if let Some(until) = self.backoff_until {
+            if now < until {
+                wait = wait.max(until.duration_since(now));
+            }
+        }
+        wait
+    }
+}
+
+/// Rate limiter with sliding windows and backoff protection.
 #[derive(Debug, Clone)]
 pub struct RateLimiter {
     state: Arc<Mutex<RateLimiterState>>,
@@ -12,96 +129,261 @@ pub struct RateLimiter {
     waits: Arc<AtomicU64>,
 }
 
-#[derive(Debug)]
-struct RateLimiterState {
-    tokens: f64,
-    max_tokens: f64,
-    refill_rate_per_sec: f64,
-    last_update: Instant,
-    backoff_until: Option<Instant>,
-}
-
 impl RateLimiter {
-    pub fn new(rate_per_sec: f64, burst_capacity: usize) -> Self {
+    /// A limiter with the default policy.
+    pub fn new() -> Self {
+        Self::with_config(RateLimitConfig::default())
+    }
+
+    /// A limiter with an explicit policy.
+    pub fn with_config(config: RateLimitConfig) -> Self {
         Self {
             state: Arc::new(Mutex::new(RateLimiterState {
-                tokens: burst_capacity as f64,
-                max_tokens: burst_capacity as f64,
-                refill_rate_per_sec: rate_per_sec,
-                last_update: Instant::now(),
+                config,
+                requests_1s: VecDeque::new(),
+                requests_1m: VecDeque::new(),
+                requests_1h: VecDeque::new(),
                 backoff_until: None,
+                current_backoff: Duration::ZERO,
+                total_requests: 0,
+                total_429s: 0,
+                total_wait_time: Duration::ZERO,
             })),
             consecutive_429: Arc::new(AtomicU64::new(0)),
             waits: Arc::new(AtomicU64::new(0)),
         }
     }
 
+    /// Wait until the strictest window allows another request.
+    pub async fn acquire(&self) {
+        loop {
+            let delay = {
+                let mut state = self.state.lock().await;
+                let now = Instant::now();
+                state.clean(now);
+                let wait = state.wait_time(now);
+                if wait.is_zero() {
+                    state.requests_1s.push_back(now);
+                    state.requests_1m.push_back(now);
+                    state.requests_1h.push_back(now);
+                    state.total_requests += 1;
+                    return;
+                }
+                state.total_wait_time += wait;
+                wait
+            };
+            self.waits.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(delay).await;
+        }
+    }
+
     /// How many times the limiter had to hold a caller back.
     ///
-    /// Zero means every caller found a token ready. This is the observable
+    /// Zero means every caller found a slot ready. This is the observable
     /// difference between a rate-limited run and a bypassed one, without
     /// depending on wall-clock timing.
     pub fn waits(&self) -> u64 {
         self.waits.load(Ordering::SeqCst)
     }
 
-    pub async fn acquire(&self) {
-        loop {
-            let delay = {
-                let mut state = self.state.lock().await;
-                let now = Instant::now();
+    /// Report a `429 Too Many Requests`.
+    ///
+    /// The backoff grows exponentially and is capped by the configuration.
+    /// A `Retry-After` from the server wins when it asks for a longer pause
+    /// than the computed backoff, and never shortens it.
+    pub async fn record_429(&self, retry_after: Option<Duration>) {
+        let count = self.consecutive_429.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut state = self.state.lock().await;
+        state.total_429s += 1;
+        let exponent = (count.saturating_sub(1)).min(16) as i32;
+        let scaled = state.config.backoff_on_429.as_secs_f64()
+            * state.config.backoff_multiplier.powi(exponent);
+        let computed = Duration::from_secs_f64(scaled.min(state.config.max_backoff.as_secs_f64()));
+        state.current_backoff = computed
+            .max(retry_after.unwrap_or(Duration::ZERO))
+            .min(state.config.max_backoff);
+        state.backoff_until = Some(Instant::now() + state.current_backoff);
+        state.requests_1s.clear();
+        state.requests_1m.clear();
+        state.requests_1h.clear();
+    }
 
-                // Checa backoff ativo
-                if let Some(until) = state.backoff_until {
-                    if now < until {
-                        until - now
-                    } else {
-                        state.backoff_until = None;
-                        Duration::ZERO
-                    }
-                } else {
-                    // Token bucket
-                    let elapsed = (now - state.last_update).as_secs_f64();
-                    state.tokens =
-                        (state.tokens + elapsed * state.refill_rate_per_sec).min(state.max_tokens);
-                    state.last_update = now;
-
-                    if state.tokens >= 1.0 {
-                        state.tokens -= 1.0;
-                        return;
-                    }
-
-                    let needed = 1.0 - state.tokens;
-                    Duration::from_secs_f64(needed / state.refill_rate_per_sec)
-                }
-            };
-
-            if !delay.is_zero() {
-                self.waits.fetch_add(1, Ordering::SeqCst);
-                tokio::time::sleep(delay).await;
-            }
+    /// Report a successful request, easing the backoff.
+    pub async fn record_success(&self) {
+        self.consecutive_429.store(0, Ordering::SeqCst);
+        let mut state = self.state.lock().await;
+        if !state.current_backoff.is_zero() {
+            let reduced = state.config.backoff_multiplier.max(1.0);
+            state.current_backoff =
+                Duration::from_secs_f64((state.current_backoff.as_secs_f64() / reduced).max(0.0));
         }
     }
 
-    pub async fn record_429(&self, retry_after: Option<Duration>) {
-        let count = self.consecutive_429.fetch_add(1, Ordering::SeqCst) + 1;
-        let delay = retry_after.unwrap_or_else(|| {
-            let base = 2.0_f64.powi((count as i32).min(5));
-            Duration::from_secs_f64(base)
-        });
-
+    /// What the limiter has done so far.
+    pub async fn stats(&self) -> RateLimitStats {
         let mut state = self.state.lock().await;
-        state.backoff_until = Some(Instant::now() + delay);
-        state.tokens = 0.0;
-    }
-
-    pub fn record_success(&self) {
-        self.consecutive_429.store(0, Ordering::SeqCst);
+        let now = Instant::now();
+        state.clean(now);
+        RateLimitStats {
+            total_requests: state.total_requests,
+            total_429s: state.total_429s,
+            total_wait_time_seconds: state.total_wait_time.as_secs_f64(),
+            requests_last_second: state.requests_1s.len(),
+            requests_last_minute: state.requests_1m.len(),
+            requests_last_hour: state.requests_1h.len(),
+            in_backoff: state.backoff_until.is_some_and(|until| now < until),
+            backoff_seconds: state.current_backoff.as_secs_f64(),
+        }
     }
 }
 
 impl Default for RateLimiter {
     fn default() -> Self {
-        Self::new(10.0, 15)
+        Self::new()
+    }
+}
+
+/// Parse a `Retry-After` header value.
+///
+/// Both forms of the header are accepted: a number of seconds and an HTTP
+/// date. A date in the past means the request may be retried right away.
+pub fn parse_retry_after(value: &str, now: SystemTime) -> Option<Duration> {
+    let value = value.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let target = httpdate::parse_http_date(value).ok()?;
+    match target.duration_since(now) {
+        Ok(delta) => Some(delta),
+        // The date is in the past: retry immediately.
+        Err(_) => Some(Duration::ZERO),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_after_accepts_seconds() {
+        let now = SystemTime::UNIX_EPOCH;
+        assert_eq!(
+            parse_retry_after("120", now),
+            Some(Duration::from_secs(120))
+        );
+        assert_eq!(parse_retry_after("  7 ", now), Some(Duration::from_secs(7)));
+    }
+
+    #[test]
+    fn a_retry_after_date_in_the_past_means_retry_now() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000_000);
+        assert_eq!(
+            parse_retry_after("Sun, 06 Nov 1994 08:49:37 GMT", now),
+            Some(Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn a_retry_after_date_in_the_future_waits_for_it() {
+        // The reference is 2033-05-18 03:33:20 GMT; the header asks for
+        // 2034-01-01, a little over half a year later.
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000_000);
+        let delta = parse_retry_after("Sun, 01 Jan 2034 00:00:00 GMT", now).unwrap();
+        assert!(
+            delta > Duration::from_secs(200 * 24 * 3600),
+            "the delta should cover the remaining months, got {delta:?}"
+        );
+        assert!(delta <= Duration::from_secs(365 * 24 * 3600));
+    }
+
+    #[test]
+    fn a_date_with_the_wrong_weekday_is_rejected() {
+        // 2034-01-01 is a Sunday; the parser refuses a mismatched weekday
+        // instead of trusting it.
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000_000);
+        assert_eq!(
+            parse_retry_after("Mon, 01 Jan 2034 00:00:00 GMT", now),
+            None
+        );
+    }
+
+    #[test]
+    fn an_unreadable_retry_after_is_ignored() {
+        let now = SystemTime::UNIX_EPOCH;
+        assert_eq!(parse_retry_after("soon", now), None);
+    }
+
+    #[tokio::test]
+    async fn the_second_window_stops_the_sixth_request() {
+        let limiter = RateLimiter::with_config(RateLimitConfig {
+            max_requests_per_second: 5.0,
+            max_requests_per_minute: 200,
+            max_requests_per_hour: 10_000,
+            ..Default::default()
+        });
+        for _ in 0..5 {
+            limiter.acquire().await;
+        }
+        assert_eq!(limiter.waits(), 0, "the first five fit in the window");
+        limiter.acquire().await;
+        assert_eq!(limiter.waits(), 1, "the sixth has to wait for the window");
+    }
+
+    #[tokio::test]
+    async fn a_429_starts_a_backoff_that_a_success_eases() {
+        let limiter = RateLimiter::with_config(RateLimitConfig {
+            backoff_on_429: Duration::from_secs(10),
+            backoff_multiplier: 2.0,
+            max_backoff: Duration::from_secs(60),
+            ..Default::default()
+        });
+        limiter.record_429(None).await;
+        let stats = limiter.stats().await;
+        assert_eq!(stats.total_429s, 1);
+        assert!(stats.in_backoff);
+        assert_eq!(stats.backoff_seconds, 10.0);
+
+        limiter.record_429(None).await;
+        assert_eq!(limiter.stats().await.backoff_seconds, 20.0);
+
+        limiter.record_success().await;
+        assert_eq!(limiter.stats().await.backoff_seconds, 10.0);
+    }
+
+    #[tokio::test]
+    async fn retry_after_never_shortens_the_backoff_but_extends_it() {
+        let limiter = RateLimiter::with_config(RateLimitConfig {
+            backoff_on_429: Duration::from_secs(10),
+            max_backoff: Duration::from_secs(60),
+            ..Default::default()
+        });
+        limiter.record_429(Some(Duration::from_secs(30))).await;
+        assert_eq!(limiter.stats().await.backoff_seconds, 30.0);
+
+        let other = RateLimiter::with_config(RateLimitConfig {
+            backoff_on_429: Duration::from_secs(60),
+            max_backoff: Duration::from_secs(60),
+            ..Default::default()
+        });
+        other.record_429(Some(Duration::from_secs(1))).await;
+        assert_eq!(
+            other.stats().await.backoff_seconds,
+            60.0,
+            "a one second Retry-After must not shorten the backoff"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_backoff_is_capped() {
+        let limiter = RateLimiter::with_config(RateLimitConfig {
+            backoff_on_429: Duration::from_secs(30),
+            backoff_multiplier: 4.0,
+            max_backoff: Duration::from_secs(120),
+            ..Default::default()
+        });
+        for _ in 0..10 {
+            limiter.record_429(None).await;
+        }
+        assert_eq!(limiter.stats().await.backoff_seconds, 120.0);
     }
 }

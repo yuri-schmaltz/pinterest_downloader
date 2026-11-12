@@ -15,7 +15,38 @@ pub struct Server {
     /// from growing when the same pin is resolved again.
     #[allow(dead_code)]
     pub pin_hits: Arc<AtomicUsize>,
+    /// Highest number of requests the server handled at the same time. A
+    /// worker pool that really runs in parallel shows up here.
+    #[allow(dead_code)]
+    pub peak_concurrency: Arc<AtomicUsize>,
     task: JoinHandle<()>,
+}
+
+/// Tracks how many requests are in flight at the same time.
+#[derive(Clone, Default)]
+struct Concurrency {
+    current: Arc<AtomicUsize>,
+    peak: Arc<AtomicUsize>,
+}
+
+impl Concurrency {
+    fn enter(&self) {
+        let now = self.current.fetch_add(1, Ordering::SeqCst) + 1;
+        // Keep the highest count seen.
+        let mut peak = self.peak.load(Ordering::SeqCst);
+        while now > peak {
+            match self
+                .peak
+                .compare_exchange(peak, now, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Ok(_) => break,
+                Err(observed) => peak = observed,
+            }
+        }
+    }
+    fn leave(&self) {
+        self.current.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 impl Drop for Server {
     fn drop(&mut self) {
@@ -28,11 +59,15 @@ pub async fn serve() -> Server {
     let url = format!("http://{}", listener.local_addr().unwrap());
     let pin_hits = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&pin_hits);
+    let concurrency = Concurrency::default();
+    let peak_concurrency = Arc::clone(&concurrency.peak);
     let task = tokio::spawn(async move {
         loop {
             let (mut socket, _) = listener.accept().await.unwrap();
             let counter = Arc::clone(&counter);
+            let concurrency = concurrency.clone();
             tokio::spawn(async move {
+                concurrency.enter();
                 let mut bytes = [0; 8192];
                 let count = socket.read(&mut bytes).await.unwrap();
                 let request = String::from_utf8_lossy(&bytes[..count]);
@@ -61,6 +96,19 @@ pub async fn serve() -> Server {
                     ("text/html", r#"<html><meta content='/media/103.jpg?signature=keep&amp;x=1' property='og:image'></html>"#.to_owned())
                 } else if path == "/snapshot/art/" {
                     ("text/html", r#"<html><script id="__PWS_DATA__">{"pins":[{"id":"101","images":{"orig":{"url":"/public-media/101.jpg"}}}]}</script></html>"#.to_owned())
+                } else if path == "/profile-many/" {
+                    (
+                        "text/html",
+                        r#"<html><script id="__PWS_DATA__">{"boards":[{"url":"/profile-many/one/","name":"One"},{"url":"/profile-many/two/","name":"Two"},{"url":"/profile-many/three/","name":"Three"}]}</script></html>"#.to_owned(),
+                    )
+                } else if path.starts_with("/profile-many/") {
+                    // A board that takes a moment, so a worker pool that really
+                    // runs in parallel is visible in the concurrency counter.
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    (
+                        "text/html",
+                        r#"<html><script id="__PWS_DATA__">{"pins":[{"id":"201","images":{"orig":{"url":"/public-media/201.jpg"}}}]}</script></html>"#.to_owned(),
+                    )
                 } else if path == "/empty/art/" {
                     ("text/html", "<html><main data-test-id='board-feed'><div data-test-id='board-feed-end'></div></main></html>".to_owned())
                 } else if path == "/login/" {
@@ -79,12 +127,14 @@ pub async fn serve() -> Server {
                     ("text/html", include_str!("dynamic_board.html").to_owned())
                 };
                 let _ = socket.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
+                concurrency.leave();
             });
         }
     });
     Server {
         url,
         pin_hits,
+        peak_concurrency,
         task,
     }
 }

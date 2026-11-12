@@ -21,6 +21,8 @@ Atualizado em **2026-11-06**, sobre o clone da `main` em `688243c`. Alterações
 - [x] Trocar `datetime.utcnow()` por `datetime.now(timezone.utc)`, preservando o formato dos timestamps.
 - [x] Entregar o cache de metadados no Rust, com `--cache-dir`, `--no-metadata-cache` e o mesmo formato de arquivo do Python.
 - [x] Tornar o teste do rate limiter Rust determinístico, medindo esperas do limitador em vez de relógio.
+- [x] Substituir o token bucket Rust por janelas deslizantes com backoff exponencial e `Retry-After` completo.
+- [x] Processar vários quadros em paralelo no Rust, com `--boards-workers` e um browser por worker.
 
 ## Plano de paridade Rust
 

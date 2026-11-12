@@ -63,6 +63,10 @@ pub struct DownloadOptions {
     pub use_cache: bool,
     pub rate_limiting: bool,
     pub max_pins: Option<usize>,
+    /// How many boards are processed at the same time. Each one gets its own
+    /// browser and its own HTTP client, so the total concurrency is this
+    /// times `workers`.
+    pub boards_workers: usize,
     /// Directory of the pin metadata cache. `None` uses the platform default.
     pub cache_dir: Option<PathBuf>,
     /// Whether the pin metadata cache is read and written.
@@ -77,6 +81,7 @@ impl Default for DownloadOptions {
             use_cache: true,
             rate_limiting: true,
             max_pins: None,
+            boards_workers: 1,
             cache_dir: None,
             metadata_cache: true,
         }

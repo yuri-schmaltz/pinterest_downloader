@@ -46,6 +46,7 @@ cargo build --release --locked
 | `-u, --user USER` | — | Alternativa ao alvo posicional |
 | `-o, --output DIR` | `downloads` | Pasta de saída |
 | `-w, --workers N` | 8 | Downloads concorrentes, N > 0 |
+| `--boards-workers N` | 1 | Quadros processados ao mesmo tempo, N > 0 |
 | `--max-pins N` | sem limite | Limite por quadro, N > 0 |
 | `--mode MODE` | `auto` | `auto`, `browser` ou `http` |
 | `--headful` | desligado | Browser visível |
@@ -60,7 +61,9 @@ Rust usa Chromium no modo `auto` e `browser`; o modo `http` explícito é um sna
 do HTML inicial e tem completude desconhecida. O cache de metadados é
 `.pinterest_cache.json` no diretório informado em `--cache-dir` e tem o mesmo
 formato do Python, de modo que o diretório pode ser compartilhado entre as duas
-CLIs. A ausência de pins é um erro, e não uma conclusão bem-sucedida.
+CLIs. `--boards-workers` abre um browser por quadro em paralelo; a concorrência
+total é `boards-workers × workers`, então comece com 2. A ausência de pins é um
+erro, e não uma conclusão bem-sucedida.
 
 ## Verificação e build
 

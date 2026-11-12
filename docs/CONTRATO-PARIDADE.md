@@ -6,6 +6,8 @@ Estado: em implementação, 2026-11-06. A matriz `tests/fixtures/parity/requirem
 
 - Usuário ou URL de perfil descobre quadros; URL `/usuario/quadro/` coleta um quadro. Caminhos de pin não são perfis.
 - `max_pins` é por quadro e positivo. `workers` e `boards_workers` são positivos e limitam trabalhos reais em voo.
+- `boards_workers` define quantos quadros são processados ao mesmo tempo. Cada worker tem o próprio browser e o próprio cliente HTTP, então a sessão de um quadro não chega a outro. O primeiro worker reaproveita o browser da descoberta em vez de abrir um segundo. A concorrência total é `boards_workers × workers`.
+- A ordem dos quadros no relatório é a ordem da descoberta, não a ordem de término.
 - `pins/<usuario>/<quadro>/` é o destino de compatibilidade Python planejado. O layout Rust atual `<usuario>_<quadro>` continua até haver migração explícita.
 - O parâmetro `--no-cache` Rust existente ignora arquivos de mídia. Foi preservado. O cache de metadados tem controle próprio (`--no-metadata-cache`), separado até haver migração documentada.
 - `--cache-dir` aponta o cache de metadados para um diretório específico. Sem a opção vale o diretório do sistema (XDG em Linux/macOS, `LOCALAPPDATA` no Windows). O arquivo é `.pinterest_cache.json` e tem o mesmo formato do Python, de modo que o mesmo diretório pode ser compartilhado.
