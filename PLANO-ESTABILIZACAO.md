@@ -34,7 +34,7 @@ O detalhamento da evolução para paridade do motor, CLI e GUI está em [docs/PL
 2. **Paridade Rust em execução:** adapter Chromium/CDP, coleta por DOM/rede/scroll, eventos e CLI já têm regressões locais. Validar o Pinterest real, login interativo, cache persistente, controle de concorrência e GUI conforme o plano detalhado.
 3. **Distribuição:** executar os workflows alterados após push e testar os artefatos Linux/Windows. Não foram publicados nesta revisão.
 4. **Integridade de arquivos antigos:** decidir se o reuso deve exigir tamanho/hash ou metadados persistidos. Arquivos existentes com conteúdo ainda são reutilizados sem verificação retrospectiva.
-5. **Extensão:** separar manifest Firefox, validar extensão instalada em browsers reais, assinar XPI e preparar Chrome Web Store.
+5. **Extensão:** o manifest declara o background nos dois formatos (Chrome usa service worker, Firefox usa event page), tem `browser_specific_settings.gecko.id` e a declaração de coleta de dados, e passa no `web-ext lint` do Mozilla. Falta validar a extensão instalada em browsers reais, assinar o XPI e preparar a submissão do Chrome Web Store.
 6. **Cache Python:** o `--cache-dir` já é encaminhado ao resolvedor e o cache padrão é o do sistema. Falta o cache de metadados versionado e a invalidação segura previstos no plano de paridade.
 7. **Cache Rust:** entregue com `--cache-dir` e `--no-metadata-cache`, no mesmo formato do Python. Faltam versionamento, expiração e invalidação.
 8. **Manutenção:** estabelecer MSRV Rust e avaliar dependências fixadas Python.

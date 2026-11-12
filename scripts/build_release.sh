@@ -40,7 +40,11 @@ referenced = []
 for entry in manifest.get("content_scripts", []):
     referenced += entry.get("js", [])
 if "background" in manifest:
-    referenced.append(manifest["background"].get("service_worker", ""))
+    background = manifest["background"]
+    referenced.append(background.get("service_worker", ""))
+    # Firefox MV3 runs the background script as an event page, so the same
+    # file is referenced through "scripts" as well.
+    referenced += background.get("scripts", [])
 if "action" in manifest:
     referenced.append(manifest["action"].get("default_popup", ""))
 
