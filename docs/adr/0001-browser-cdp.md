@@ -16,6 +16,8 @@ Cada sessão usa perfil temporário exclusivo por padrão. Perfil persistente é
 
 O CDP tem limites de buffer; a captura sinaliza truncamento e requisições JSON pendentes, que impedem inferir completude. Pins coletados no DOM continuam disponíveis quando não há metadados interceptados. Um snapshot HTTP explícito nunca é rotulado completo só por conter pins.
 
+Uma página que não mudou de altura e não trouxe links novos parece um feed que não chegou. A coleta só pode ser declarada estável quando o documento terminou de parsear, não há payload JSON em voo e o quadro já entregou pins ou traz marcador de fim explícito. Sem isso, um quadro lento é reportado como vazio, que é uma resposta errada e não apenas incompleta.
+
 ## Validação e limites
 
 Testes em `crates/pinterest-browser/tests/lifecycle.rs`, `crates/pinterest-core/tests/dynamic_collection.rs` e `crates/pinterest-cli/tests/commands.rs` usam fixtures locais compartilhadas. A CI adiciona execução explícita dos testes de browser em Linux e Windows; esses jobs ainda não foram executados remotamente nesta revisão.

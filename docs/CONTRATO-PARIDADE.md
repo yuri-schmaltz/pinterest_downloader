@@ -12,6 +12,8 @@ Estado: em implementação, 2026-11-06. A matriz `tests/fixtures/parity/requirem
 - O cache de metadados é otimização, nunca fonte de verdade: um arquivo ausente, vazio ou corrompido é descartado em vez de derrubar a execução, e uma gravação falha emite aviso sem falhar a execução. Não há expiração nem versionamento ainda.
 - Modo HTTP explícito produz snapshot de completude desconhecida. Modo automático não usa a presença de alguns pins como evidência de fim.
 - Estabilidade de scroll não comprova completude. Somente um sinal inequívoco de fim no contexto do quadro permite `complete`. Um limite pedido produz `limited`.
+- Um quadro que ainda não produziu nenhum link não pode ser declarado estável: um feed que ainda não chegou é indistinguível de um quadro vazio. A coleta só termina por marcador de fim explícito ou por quadro que já entregou pins; o resto é `unknown`.
+- Um quadro sem pins e sem marcador de fim é resultado inconclusivo, não sucesso.
 - Erros de extração, login obrigatório e quadro vazio comprovado são resultados diferentes. Mensagens ambíguas não devem inferir privacidade ou inexistência.
 
 ## Eventos e execução

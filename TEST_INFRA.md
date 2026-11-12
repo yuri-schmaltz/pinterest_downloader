@@ -9,7 +9,7 @@ Verificação local em **2026-11-06**, sobre as correções posteriores ao clone
 | Python 3.12.3, Qt offscreen e Chromium | **218 passaram**, nenhum skip, 0 avisos de depreciação |
 | Cobertura de `src/` | **67%** geral; scraper **57%**; GUI **72%** |
 | Node: i18n + helpers de pins | **40 + 29 verificações** |
-| Rust 1.99.1 | **36 testes** (13 unitários no core, 3 do browser, 3 da CLI, 17 de integração), todos aprovados com Chromium |
+| Rust 1.99.1 | **38 testes** (13 unitários no core, 4 do browser, 3 da CLI, 18 de integração), todos aprovados com Chromium |
 | Ruff / Black / mypy | Aprovados; mypy cobre scraper e app_version |
 | Rustfmt / Clippy | Aprovados; Clippy com `-D warnings` |
 | Versões | Manifest, Python, manifests Cargo e entradas locais do Cargo.lock sincronizados em 2.0.5 |
@@ -29,6 +29,7 @@ Os avisos Python restantes vieram de `datetime.utcnow()`, removido de `json_logg
 - **Rust:** helpers de URL/contagem/tipo, parser de pins/quadros e fluxo HTTP perfil → quadro → imagem; limite por quadro, opções de cache e desativação do limitador, streams interrompidos/vazios, extração vazia, workers zero e colisões de cache.
 - **Cache de metadados Rust (`metadata_cache.rs`):** gravação atômica e reuso na reexecução, descarte de cache corrompido, compatibilidade de formato com o Python, isolamento por `--cache-dir` e ausência de arquivo quando o cache está desligado. A reexecução sem nova ida à página do pin é verificada pelo contador de requisições do servidor de fixture.
 - **Rate limiter Rust:** o teste verifica o contador de esperas do limitador, e não o relógio, para não depender da velocidade da máquina.
+- **Coleta dinâmica Rust:** um feed lento não pode ser reportado como quadro vazio. A fixture serve um quadro cujo primeiro payload demora três segundos; sem a regra de estabilidade o teste falha com quadro vazio.
 
 ## Executar
 
