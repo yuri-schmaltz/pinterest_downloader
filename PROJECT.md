@@ -68,13 +68,13 @@ A CLI Rust usa I/O assíncrono, mas não tem benchmark comparativo nem paridade 
 | Coleta HTTP | `downloader::download_target` | HTML inicial de quadro ou perfil; perfis visitam quadros do JSON embutido |
 | Parser JSON | `parser` | Pins e quadros em `__PWS_DATA__`, fallback de resolução orig/736x/474x |
 | Download | `downloader` | Streaming, concorrência limitada, retry, arquivo temporário antes de publicação |
-| Rate limiter | `rate_limiter` | Token bucket, backoff HTTP 429; sem jitter; expõe quantas vezes segurou uma requisição |
+| Rate limiter | `rate_limiter` | Janelas deslizantes de segundo/minuto/hora, backoff exponencial com teto, `Retry-After` em segundos e data HTTP |
 | Cache de metadados | `cache` | `.pinterest_cache.json` por diretório, gravação atômica, cache corrompido é descartado; formato idêntico ao Python |
 | Motor compartilhado | `engine` | Modos auto/browser/http, eventos tipados, cancelamento, códigos de saída |
 | Browser | `pinterest-browser` | Chromium/CDP: navegação, JS, scroll, cookies de sessão, perfis temporários isolados |
 | CLI | `pinterest-cli` | Limites positivos, opções de cache/taxa aplicadas, erro se extração vazia ou download parcial |
 
-O modo HTTP explícito produz um snapshot de completude desconhecida e não é completo por construção. O cache de metadados ainda não tem expiração nem invalidação, e não há paralelismo entre quadros nem workers adaptativos no Rust.
+O modo HTTP explícito produz um snapshot de completude desconhecida e não é completo por construção. `--boards-workers` processa vários quadros ao mesmo tempo, cada um com seu próprio browser e cliente HTTP. O cache de metadados ainda não tem expiração nem invalidação, e não há workers adaptativos por CPU/memória no Rust.
 
 ---
 
@@ -179,6 +179,7 @@ pinterest-cli [OPTIONS] [URL_OU_USUARIO]
 -u, --user <USER>          Usuário alternativo ao argumento posicional
 -o, --output <OUTPUT>      Destino [default: downloads]
 -w, --workers <WORKERS>    Downloads simultâneos [default: 8], maior que zero
+    --boards-workers <N>   Quadros simultâneos [default: 1], maior que zero
     --no-cache            Força download de mídia, ignorando arquivos existentes
     --no-metadata-cache   Não usa o cache de metadados de pins
     --cache-dir <DIR>     Diretório do cache de metadados [default: cache do sistema]

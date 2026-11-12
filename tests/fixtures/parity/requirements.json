@@ -93,15 +93,17 @@
       "id": "PAR-012",
       "feature": "concorrência",
       "scenario": "vários quadros e workers adaptativos",
-      "expected": "tetos globais e adaptação efetiva",
-      "status": "planned"
+      "expected": "vários quadros em paralelo com teto real de tarefas em voo; workers adaptativos por CPU/memoria ainda não existem",
+      "status": "partial",
+      "evidence": "crates/pinterest-core/tests/board_concurrency.rs"
     },
     {
       "id": "PAR-013",
       "feature": "rate limiting",
       "scenario": "janelas e Retry-After",
-      "expected": "espera limitada, cancelável e métricas corretas",
-      "status": "planned"
+      "expected": "janelas deslizantes de segundo/minuto/hora, backoff exponencial e Retry-After em segundos e data HTTP",
+      "status": "partial",
+      "evidence": "crates/pinterest-core/src/rate_limiter.rs"
     },
     {
       "id": "PAR-014",

@@ -8,7 +8,7 @@
 - P1: crate `pinterest-browser` com Chromium/CDP, descoberta de executável, perfis temporários isolados, eventos de rede, cookies e fechamento/cancelamento. Prova Linux executada; Windows depende da CI adicionada. Decisão em `adr/0001-browser-cdp.md`.
 - P2: coleta dinâmica de perfil/quadro por JSON, DOM e scroll, incluindo feed virtualizado; resultado distingue fim explícito, limite, estabilidade e timeout. A estabilidade só é declarada quando o documento terminou de parsear, não há payload JSON em voo e o quadro já entregou pins ou traz marcador de fim; um feed lento não pode ser reportado como quadro vazio. Atribuição de origem e critérios de fim no Pinterest real ainda pendentes.
 - P3: integração de cookies, resolução HTTP pela página do pin/metatags e protocolo de login/continuação/cancelamento iniciados. Login headful real, persistência e renovação de sessão ainda pendentes.
-- P5: motor compartilhado, canal limitado de eventos, CLI com modos auto/browser/http, opções de coleta, JSONL, códigos de saída e Ctrl+C. Cache de metadados entregue com `--cache-dir` e controle próprio `--no-metadata-cache`; adaptação, rate limiter completo e paralelismo entre quadros ainda pendentes.
+- P5: motor compartilhado, canal limitado de eventos, CLI com modos auto/browser/http, opções de coleta, JSONL, códigos de saída e Ctrl+C. Cache de metadados entregue com `--cache-dir` e controle próprio `--no-metadata-cache`; paralelismo entre quadros entregue com `--boards-workers` e janelas de rate limiting com `Retry-After`. Workers adaptativos por CPU/memória ainda pendentes.
 - P4/P6/P7/P8: não entregues como marcos completos. Nenhum artefato foi publicado nem a paridade foi declarada.
 
 A matriz diferencia código implementado de requisito verificado integralmente. `python scripts/check_parity.py --require-complete` deve falhar enquanto houver itens obrigatórios pendentes.
@@ -48,13 +48,13 @@ Paridade significa equivalência observável em cenários definidos. Não exige 
 | GUI | Perfil, seleção, capas, pasta, progresso, login | Ausente | Aplicação desktop Rust |
 | Distribuição | PyInstaller, AppImage, DEB, Windows | Workflow CLI Linux/Windows definido | CLI/GUI e Chromium validados em máquinas limpas |
 
-A referência é o comportamento do código, confrontado com cenários e expectativas independentes. A suíte local registrada tem 218 testes Python e 38 Rust; isso não comprova compatibilidade atual com o Pinterest.
+A referência é o comportamento do código, confrontado com cenários e expectativas independentes. A suíte local registrada tem 218 testes Python e 53 Rust; isso não comprova compatibilidade atual com o Pinterest.
 
 Divergências conhecidas a resolver no contrato:
 
 - Python e Rust diferem em defaults, saída em disco e semântica de `--no-cache`.
 - Rust tem cache de metadados e `--cache-dir`, mas ainda sem expiração nem invalidação segura; o Python também não tem.
-- Rust ainda não redimensiona o paralelismo por quadro nem por ajuste adaptativo; o Python já altera o número real de tarefas em voo.
+- Rust redimensiona o paralelismo entre quadros, mas ainda não ajusta o número de tarefas em voo por CPU e memória como o `--adaptive-workers` do Python.
 - Um HTML vazio ou parcial não prova que um quadro está vazio ou completo.
 - Reuso de arquivos não vazios não prova integridade retrospectiva.
 
