@@ -33,6 +33,9 @@ struct Cli {
     output: PathBuf,
     #[arg(short, long, default_value_t = 8)]
     workers: usize,
+    /// Quadros processados ao mesmo tempo; cada um abre o proprio browser
+    #[arg(long, default_value_t = 1)]
+    boards_workers: usize,
     /// Ignora arquivos de mídia existentes (semântica Rust preservada)
     #[arg(long)]
     no_cache: bool,
@@ -92,6 +95,7 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
         .or(cli.target)
         .ok_or_else(|| (2, "Informe URL ou usuário; use --help".into()))?;
     if cli.workers == 0
+        || cli.boards_workers == 0
         || cli.max_pins == Some(0)
         || !cli.scroll_pause.is_finite()
         || cli.scroll_pause <= 0.0
@@ -100,7 +104,7 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
     {
         return Err((
             2,
-            "Workers, limite, pausa e timeout devem ser positivos; pausa máxima: 3600s".into(),
+            "Workers, quadros em paralelo, limite, pausa e timeout devem ser positivos; pausa máxima: 3600s".into(),
         ));
     }
     if matches!(cli.mode, Mode::Http) && (cli.manual_login || cli.headful) {
@@ -120,6 +124,7 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
         download: DownloadOptions {
             out_root: cli.output,
             workers: cli.workers,
+            boards_workers: cli.boards_workers,
             use_cache: !cli.no_cache,
             rate_limiting: !cli.no_rate_limit,
             max_pins: cli.max_pins,

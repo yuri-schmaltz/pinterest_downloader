@@ -98,9 +98,12 @@ async fn run_inner(
     operation: &Operation,
 ) -> Result<RunReport> {
     operation.check_cancelled()?;
-    if options.download.workers == 0 || options.download.max_pins == Some(0) {
+    if options.download.workers == 0
+        || options.download.boards_workers == 0
+        || options.download.max_pins == Some(0)
+    {
         return Err(PinterestError::Extraction(
-            "Workers e limite devem ser positivos".into(),
+            "Workers, quadros em paralelo e limite devem ser positivos".into(),
         ));
     }
     options.collection.max_pins = options.download.max_pins;
@@ -121,97 +124,12 @@ async fn run_inner(
     {
         return Err(PinterestError::InvalidUrl(target.into()));
     }
-    let downloader = Downloader::new()?;
     let cancellation = operation.cancellation();
-    // No HTTP fast path in Auto yet: embedded pins alone cannot prove completeness.
-    if options.mode == CollectionMode::Http {
-        let work = async {
-            let html = downloader
-                .fetch_html(url.as_str(), options.download.rate_limiting)
-                .await?;
-            let targets = if parts.len() == 1 {
-                let boards = extract_boards_from_html(&html, parts[0]);
-                if boards.is_empty() {
-                    return Err(PinterestError::Extraction(
-                        "Nenhum quadro no snapshot HTTP; use --mode browser".into(),
-                    ));
-                }
-                let mut targets = Vec::new();
-                for board in boards {
-                    let next = url
-                        .join(&board.url)
-                        .map_err(|_| PinterestError::InvalidUrl(board.url.clone()))?;
-                    if next.origin() == url.origin() {
-                        targets.push(next);
-                    }
-                }
-                targets
-            } else {
-                vec![url.clone()]
-            };
-            let mut report = RunReport {
-                discovery_completeness: if parts.len() == 1 {
-                    Completeness::Unknown
-                } else {
-                    Completeness::Complete
-                },
-                boards: Vec::new(),
-                totals: RunTotals::default(),
-            };
-            for target in targets {
-                operation
-                    .emit(
-                        RunEvent::BoardStarted {
-                            board_url: target.to_string(),
-                        },
-                        Some(target.as_str()),
-                        None,
-                    )
-                    .await;
-                let board_html = if target == url {
-                    html.clone()
-                } else {
-                    downloader
-                        .fetch_html(target.as_str(), options.download.rate_limiting)
-                        .await?
-                };
-                let pins: BTreeMap<_, _> = extract_pws_metadata_from_html(&board_html)
-                    .into_values()
-                    .map(|mut pin| {
-                        if let Ok(image_url) = target.join(&pin.image_url) {
-                            pin.image_url = image_url.to_string();
-                        }
-                        (pin.id.clone(), pin)
-                    })
-                    .collect();
-                if pins.is_empty() {
-                    return Err(PinterestError::Extraction(
-                        "Nenhum pin no snapshot HTTP".into(),
-                    ));
-                }
-                let pin_links = pins
-                    .iter()
-                    .map(|(id, pin)| (id.clone(), pin.url.clone()))
-                    .collect();
-                let board = CollectedBoard {
-                    board_url: target.to_string(),
-                    pins,
-                    pin_links,
-                    reason: CompletionReason::Snapshot,
-                    completeness: Completeness::Unknown,
-                    cookies: Vec::new(),
-                };
-                let board_report =
-                    download_collected(board, &options.download, &downloader, operation).await?;
-                add_totals(&mut report.totals, &board_report.totals);
-                report.boards.push(board_report);
-            }
-            Ok(report)
-        };
-        return tokio::select! { _ = cancellation.cancelled() => Err(PinterestError::Cancelled), result = work => result };
-    }
-    let collector = Collector::launch(options.collection.clone(), operation.clone()).await?;
-    let work = async {
+    let browser_mode = options.mode != CollectionMode::Http;
+
+    // Discovery: which boards does the target contain?
+    let (targets, inherited) = if browser_mode {
+        let collector = Collector::launch(options.collection.clone(), operation.clone()).await?;
         let targets = if parts.len() == 1 {
             let profile = collector.collect_profile(url.as_str()).await?;
             operation
@@ -230,43 +148,176 @@ async fn run_inner(
         } else {
             vec![url.to_string()]
         };
+        (targets, Some(collector))
+    } else {
+        // No HTTP fast path in Auto yet: embedded pins alone cannot prove completeness.
+        let downloader = Downloader::new()?;
+        let html = downloader
+            .fetch_html(url.as_str(), options.download.rate_limiting)
+            .await?;
+        let targets = if parts.len() == 1 {
+            let boards = extract_boards_from_html(&html, parts[0]);
+            if boards.is_empty() {
+                return Err(PinterestError::Extraction(
+                    "Nenhum quadro no snapshot HTTP; use --mode browser".into(),
+                ));
+            }
+            let mut targets = Vec::new();
+            for board in boards {
+                let next = url
+                    .join(&board.url)
+                    .map_err(|_| PinterestError::InvalidUrl(board.url.clone()))?;
+                if next.origin() == url.origin() {
+                    targets.push(next.to_string());
+                }
+            }
+            targets
+        } else {
+            vec![url.to_string()]
+        };
+        (targets, None)
+    };
+
+    // The browser path collects the boards in a sorted map, while the HTTP
+    // path reads them from a hash map. Sorting here gives both the same
+    // stable order, so the report does not shuffle between runs.
+    let mut targets = targets;
+    targets.sort();
+
+    let discovery_completeness = if parts.len() == 1 {
+        Completeness::Unknown
+    } else {
+        Completeness::Complete
+    };
+
+    // Process the boards. Each worker owns its own browser and its own HTTP
+    // client, so the session of one board never reaches another. The first
+    // worker inherits the browser used for the discovery instead of opening
+    // a second one.
+    let workers = options
+        .download
+        .boards_workers
+        .max(1)
+        .min(targets.len().max(1));
+    let queue = Arc::new(tokio::sync::Mutex::new(targets.into_iter().enumerate()));
+    let mut slots: Vec<Option<Collector>> = Vec::with_capacity(workers);
+    slots.push(inherited);
+    for _ in 1..workers {
+        slots.push(None);
+    }
+
+    let work = async {
+        let mut workers_stream = stream::iter(slots.into_iter().map(|slot| {
+            let options = options.clone();
+            let operation = operation.clone();
+            let queue = Arc::clone(&queue);
+            async move {
+                let mut collector = match slot {
+                    Some(collector) => Some(collector),
+                    None if browser_mode => Some(
+                        Collector::launch(options.collection.clone(), operation.clone()).await?,
+                    ),
+                    None => None,
+                };
+                let downloader = Downloader::new()?;
+                let mut reports = Vec::new();
+                loop {
+                    operation.check_cancelled()?;
+                    let next = { queue.lock().await.next() };
+                    let Some((index, target)) = next else { break };
+                    operation
+                        .emit(
+                            RunEvent::BoardStarted {
+                                board_url: target.clone(),
+                            },
+                            Some(&target),
+                            None,
+                        )
+                        .await;
+                    let board = match collector.as_mut() {
+                        Some(collector) => collector.collect_board(&target).await?,
+                        None => collect_http_board(&downloader, &target, &options.download).await?,
+                    };
+                    downloader.import_browser_cookies(&board.cookies);
+                    let report =
+                        download_collected(board, &options.download, &downloader, &operation)
+                            .await?;
+                    reports.push((index, report));
+                }
+                if let Some(collector) = collector {
+                    collector.close().await?;
+                }
+                Ok::<Vec<(usize, BoardReport)>, PinterestError>(reports)
+            }
+        }))
+        .buffer_unordered(workers);
+
+        let mut batches: Vec<Vec<(usize, BoardReport)>> = Vec::new();
+        while let Some(item) = workers_stream.next().await {
+            batches.push(item?);
+        }
+
+        // Keep the order of the discovered boards, not the order they finished.
+        let mut ordered: Vec<(usize, BoardReport)> = batches.into_iter().flatten().collect();
+        ordered.sort_by_key(|(index, _)| *index);
         let mut report = RunReport {
-            discovery_completeness: if parts.len() == 1 {
-                Completeness::Unknown
-            } else {
-                Completeness::Complete
-            },
-            boards: Vec::new(),
+            discovery_completeness,
+            boards: Vec::with_capacity(ordered.len()),
             totals: RunTotals::default(),
         };
-        for target in targets {
-            operation
-                .emit(
-                    RunEvent::BoardStarted {
-                        board_url: target.clone(),
-                    },
-                    Some(&target),
-                    None,
-                )
-                .await;
-            let board = collector.collect_board(&target).await?;
-            downloader.import_browser_cookies(&board.cookies);
-            let board_report =
-                download_collected(board, &options.download, &downloader, operation).await?;
-            add_totals(&mut report.totals, &board_report.totals);
-            report.boards.push(board_report);
+        for (_, board) in ordered {
+            add_totals(&mut report.totals, &board.totals);
+            report.boards.push(board);
         }
         Ok(report)
     };
-    let result = tokio::select! { _ = cancellation.cancelled() => Err(PinterestError::Cancelled), result = work => result };
-    let closed = collector.close().await;
-    match result {
-        Err(error) => Err(error),
-        Ok(report) => {
-            closed?;
-            Ok(report)
-        }
+    let result = tokio::select! {
+        _ = cancellation.cancelled() => Err(PinterestError::Cancelled),
+        result = work => result,
+    };
+    result
+}
+
+/// Build a board from a single HTTP snapshot.
+///
+/// The snapshot carries the pins that are embedded in the page. It cannot
+/// prove that the board is complete, so the completeness stays unknown.
+async fn collect_http_board(
+    downloader: &Downloader,
+    target: &str,
+    options: &DownloadOptions,
+) -> Result<CollectedBoard> {
+    let url = Url::parse(&normalize_url(target))
+        .map_err(|_| PinterestError::InvalidUrl(target.to_string()))?;
+    let html = downloader
+        .fetch_html(url.as_str(), options.rate_limiting)
+        .await?;
+    let pins: BTreeMap<_, _> = extract_pws_metadata_from_html(&html)
+        .into_values()
+        .map(|mut pin| {
+            if let Ok(image_url) = url.join(&pin.image_url) {
+                pin.image_url = image_url.to_string();
+            }
+            (pin.id.clone(), pin)
+        })
+        .collect();
+    if pins.is_empty() {
+        return Err(PinterestError::Extraction(
+            "Nenhum pin no snapshot HTTP".into(),
+        ));
     }
+    let pin_links = pins
+        .iter()
+        .map(|(id, pin)| (id.clone(), pin.url.clone()))
+        .collect();
+    Ok(CollectedBoard {
+        board_url: url.to_string(),
+        pins,
+        pin_links,
+        reason: CompletionReason::Snapshot,
+        completeness: Completeness::Unknown,
+        cookies: Vec::new(),
+    })
 }
 
 async fn download_collected(
