@@ -113,7 +113,10 @@ pub async fn serve() -> Server {
                     // Uma captura real e sanitizada de um quadro publico. A
                     // pagina entrega os pins bloqueados para quem nao esta
                     // logado, o que e o que a captura prova.
-                    ("text/html", include_str!("../real/quadro-publico.html").to_owned())
+                    (
+                        "text/html",
+                        include_str!("../real/quadro-publico.html").to_owned(),
+                    )
                 } else if path == "/neverend/art/" {
                     // A board whose feed never says that it ended and never
                     // stops changing. The collection has to stop on its own

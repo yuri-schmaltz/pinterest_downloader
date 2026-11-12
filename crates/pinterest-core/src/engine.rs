@@ -98,12 +98,132 @@ pub async fn run_target(
     result
 }
 
-async fn run_inner(
+/// The boards a target holds, and how much the discovery could prove.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredBoards {
+    pub target: String,
+    pub boards: Vec<crate::BoardMetadata>,
+    pub completeness: Completeness,
+}
+
+/// Discover the boards of a target without downloading anything.
+///
+/// A graphical interface needs the list before the user chooses what to
+/// download. The discovery is the same the run does; only the download is
+/// left out.
+pub async fn discover_boards(
     target: &str,
-    mut options: RunOptions,
-    operation: &Operation,
+    options: RunOptions,
+    operation: Operation,
+) -> Result<DiscoveredBoards> {
+    operation.check_cancelled()?;
+    let mut options = options;
+    validate_options(&mut options)?;
+    let url = validated_target(target)?;
+    let parts = url_parts(&url);
+    let browser_mode = options.mode != CollectionMode::Http;
+    let (boards, completeness) = if browser_mode {
+        let collector = Collector::launch(options.collection.clone(), operation.clone()).await?;
+        let result = if parts.len() == 1 {
+            let profile = collector.collect_profile(url.as_str()).await?;
+            (profile.boards, profile.completeness)
+        } else {
+            (
+                vec![crate::BoardMetadata {
+                    url: url.to_string(),
+                    title: parts.last().cloned().unwrap_or_default(),
+                    thumbnail_url: String::new(),
+                    pin_count: String::new(),
+                    pin_count_int: None,
+                }],
+                Completeness::Complete,
+            )
+        };
+        collector.close().await?;
+        result
+    } else {
+        let downloader = Downloader::with_cancellation(operation.cancellation())?;
+        let html = downloader
+            .fetch_html(url.as_str(), options.download.rate_limiting)
+            .await?;
+        let mut boards = Vec::new();
+        if parts.len() == 1 {
+            for board in extract_boards_from_html(&html, &parts[0]) {
+                if let Ok(next) = url.join(&board.url) {
+                    if next.origin() == url.origin() {
+                        boards.push(crate::BoardMetadata {
+                            url: next.to_string(),
+                            ..board
+                        });
+                    }
+                }
+            }
+        } else {
+            boards.push(crate::BoardMetadata {
+                url: url.to_string(),
+                title: parts.last().cloned().unwrap_or_default(),
+                thumbnail_url: String::new(),
+                pin_count: String::new(),
+                pin_count_int: None,
+            });
+        }
+        (boards, Completeness::Unknown)
+    };
+    if boards.is_empty() {
+        return Err(PinterestError::Extraction(
+            "Nenhum quadro encontrado no alvo".into(),
+        ));
+    }
+    Ok(DiscoveredBoards {
+        target: url.to_string(),
+        boards,
+        completeness,
+    })
+}
+
+/// Download a list of boards, and only those.
+///
+/// A graphical interface lets the user pick a subset of the boards. The
+/// engine downloads exactly the list it receives.
+pub async fn run_boards(
+    boards: Vec<String>,
+    options: RunOptions,
+    operation: Operation,
 ) -> Result<RunReport> {
     operation.check_cancelled()?;
+    let mut options = options;
+    validate_options(&mut options)?;
+    let result = process_boards(boards, Completeness::Complete, options, &operation, None).await;
+    match &result {
+        Ok(report) => {
+            operation
+                .emit(
+                    RunEvent::Finished {
+                        totals: report.totals.clone(),
+                    },
+                    None,
+                    None,
+                )
+                .await
+        }
+        Err(PinterestError::Cancelled) => operation.emit(RunEvent::Cancelled, None, None).await,
+        Err(error) => {
+            operation
+                .emit(
+                    RunEvent::Failed {
+                        code: error_code(error).into(),
+                        message: public_error_message(error),
+                    },
+                    None,
+                    None,
+                )
+                .await
+        }
+    }
+    result
+}
+
+fn validate_options(options: &mut RunOptions) -> Result<()> {
     if options.download.workers == 0
         || options.download.boards_workers == 0
         || options.download.max_pins == Some(0)
@@ -113,14 +233,13 @@ async fn run_inner(
         ));
     }
     options.collection.max_pins = options.download.max_pins;
+    Ok(())
+}
+
+fn validated_target(target: &str) -> Result<Url> {
     let url = Url::parse(&normalize_url(target))
         .map_err(|_| PinterestError::InvalidUrl(target.into()))?;
-    let parts: Vec<_> = url
-        .path_segments()
-        .into_iter()
-        .flatten()
-        .filter(|part| !part.is_empty())
-        .collect();
+    let parts = url_parts(&url);
     if !matches!(url.scheme(), "http" | "https")
         || !url.username().is_empty()
         || url.password().is_some()
@@ -130,6 +249,27 @@ async fn run_inner(
     {
         return Err(PinterestError::InvalidUrl(target.into()));
     }
+    Ok(url)
+}
+
+fn url_parts(url: &Url) -> Vec<String> {
+    url.path_segments()
+        .into_iter()
+        .flatten()
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+async fn run_inner(
+    target: &str,
+    mut options: RunOptions,
+    operation: &Operation,
+) -> Result<RunReport> {
+    operation.check_cancelled()?;
+    validate_options(&mut options)?;
+    let url = validated_target(target)?;
+    let parts = url_parts(&url);
     let cancellation = operation.cancellation();
     let browser_mode = options.mode != CollectionMode::Http;
 
@@ -165,7 +305,7 @@ async fn run_inner(
             .fetch_html(url.as_str(), options.download.rate_limiting)
             .await?;
         let targets = if parts.len() == 1 {
-            let boards = extract_boards_from_html(&html, parts[0]);
+            let boards = extract_boards_from_html(&html, &parts[0]);
             if boards.is_empty() {
                 return Err(PinterestError::Extraction(
                     "Nenhum quadro no snapshot HTTP; use --mode browser".into(),
@@ -201,10 +341,30 @@ async fn run_inner(
         Completeness::Complete
     };
 
-    // Process the boards. Each worker owns its own browser and its own HTTP
-    // client, so the session of one board never reaches another. The first
-    // worker inherits the browser used for the discovery instead of opening
-    // a second one.
+    process_boards(
+        targets,
+        discovery_completeness,
+        options,
+        operation,
+        inherited,
+    )
+    .await
+}
+
+/// Download the boards, in parallel, and build the report.
+///
+/// Each worker owns its own browser and its own HTTP client, so the session
+/// of one board never reaches another. The first worker inherits the browser
+/// used for the discovery instead of opening a second one.
+async fn process_boards(
+    targets: Vec<String>,
+    discovery_completeness: Completeness,
+    options: RunOptions,
+    operation: &Operation,
+    inherited: Option<Collector>,
+) -> Result<RunReport> {
+    let cancellation = operation.cancellation();
+    let browser_mode = options.mode != CollectionMode::Http;
     let workers = options
         .download
         .boards_workers

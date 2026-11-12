@@ -360,7 +360,10 @@ async fn a_real_public_board_asks_for_a_login_instead_of_saying_it_is_empty() {
         .collect_board(&format!("{}/real/public/", server.url))
         .await;
     assert!(
-        matches!(result, Err(pinterest_core::PinterestError::AuthenticationRequired(_))),
+        matches!(
+            result,
+            Err(pinterest_core::PinterestError::AuthenticationRequired(_))
+        ),
         "a gated board did not ask for a login: {result:?}"
     );
     collector.close().await.unwrap();

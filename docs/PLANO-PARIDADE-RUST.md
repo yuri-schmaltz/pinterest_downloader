@@ -326,3 +326,49 @@ O que a captura real mostrou, e que os testes sinteticos nao mostravam:
 O que ainda falta: a superficie logada, os quadros privados e a conta de
 teste. Precisam de credenciais e nao podem ser provados por fixture
 publica.
+
+## A GUI Rust
+
+O crate `crates/pinterest-gui` tem as três etapas da jornada: o perfil, a
+escolha dos quadros e o download.
+
+### Framework e decisoes
+
+- **egui/eframe 0.32**: a interface e imediata, em Rust puro, sem sistema de
+  janelas proprio. O mesmo codigo roda em Linux e Windows e a interface
+  pode ser desenhada **sem tela**, o que permite testar o que o usuario ve
+  sem depender de um servidor de display.
+- **Tema escuro** por padrao, com a escala de tela do sistema respeitada
+  pelo `egui`.
+- **Navegacao por teclado**: o egui entrega o foco e a navegacao por
+  `Tab`; o campo de perfil aceita `Enter` para comecar a busca.
+- **Downloads fora da thread que desenha**: o motor roda num runtime
+  `tokio` proprio e a interface le os eventos por um canal. A thread que
+  desenha nunca espera por uma operacao de rede.
+- **A GUI nao chama a CLI por subprocesso e nao tem um segundo coletor**:
+  ela usa `pinterest_core::engine`, o mesmo motor da CLI.
+
+### As tres etapas
+
+1. **Perfil**: o alvo e validado antes de gastar um browser; a descoberta
+   e assincrona; o erro aparece no lugar certo e a busca pode ser repetida.
+2. **Quadros**: busca por texto, escolha de um ou de todos, capa quadrada
+   sem distorcao, titulo e contagem de pins. O filtro **esconde** e nao
+   desescolhe: o que estava escolhido continua escolhido. As capas ficam
+   em um cache com limite, e so oito sao buscadas por vez.
+3. **Download**: progresso por quadro e total, log com numero limitado de
+   linhas, arquivos novos/reutilizados/falhos, cancelar e resumo do
+   resultado parcial. O dialogo de login abre o browser e espera por
+   "continuar" ou "cancelar"; cancelar tambem destrava a tarefa de
+   autenticacao.
+
+### O que os testes provam
+
+- `crates/pinterest-gui/tests/journey.rs`: perfil -> escolha -> download
+  gera **somente** as midias dos quadros escolhidos, e o resultado e o
+  mesmo que a CLI produz para o mesmo alvo.
+- `crates/pinterest-gui/tests/interface.rs`: a interface e desenhada sem
+  tela e mostra o que o usuario precisa ver em cada etapa.
+- `crates/pinterest-gui/src/`: o modelo, a lista de quadros, o cache de
+  capas e o progresso tem testes proprios, sem interface.
+- `scripts/smoke_gui.sh`: o binario construido abre a janela e fica de pe.

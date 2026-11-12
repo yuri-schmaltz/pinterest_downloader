@@ -132,9 +132,10 @@
     {
       "id": "PAR-017",
       "feature": "GUI",
-      "scenario": "perfil, filtro, seleção e download",
-      "expected": "somente quadros selecionados, interface responsiva",
-      "status": "planned"
+      "scenario": "perfil, filtro, selecao e download",
+      "expected": "somente os quadros escolhidos, interface responsiva e cancelamento em ate dois segundos",
+      "status": "implemented",
+      "evidence": "crates/pinterest-gui/tests/journey.rs"
     },
     {
       "id": "PAR-018",
