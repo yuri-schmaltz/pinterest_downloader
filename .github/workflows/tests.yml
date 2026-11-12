@@ -316,3 +316,29 @@ jobs:
         python -m playwright install --with-deps chromium
     - name: Run all native tests, including browser lifecycle and dynamic fixtures
       run: cargo test --workspace --all-features --locked -- --include-ignored
+
+  rust-distribution:
+    name: Rust CLI without Python or Node (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    # No Python and no Node are installed on purpose: the binary has to work
+    # on a machine that has neither. The release job only runs on a tag, so
+    # the distribution is checked on every change here.
+    - name: Build the CLI and the fixture server
+      run: cargo build --release --locked -p pinterest-cli --example fixture_server
+    - name: Smoke test the built binary
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          bash scripts/smoke_rust_cli.sh \
+            "target/release/pinterest-cli.exe" \
+            "target/release/examples/fixture_server.exe"
+        else
+          bash scripts/smoke_rust_cli.sh
+        fi

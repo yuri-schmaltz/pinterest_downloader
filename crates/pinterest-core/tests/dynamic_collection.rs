@@ -268,3 +268,81 @@ async fn the_recommended_pins_are_not_part_of_the_board() {
     assert_eq!(board.origin.sources.get("board-feed"), Some(&1));
     collector.close().await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn a_board_that_never_ends_reports_the_timeout_as_a_partial_result() {
+    // The feed of this board never says that it ended. The collection has to
+    // stop on its own timeout, and the report has to say that the result is
+    // partial instead of pretending the board is complete.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(
+        CollectionOptions {
+            max_duration: Duration::from_secs(3),
+            ..options()
+        },
+        operation(),
+    )
+    .await
+    .unwrap();
+    let board = collector
+        .collect_board(&format!("{}/neverend/art/", server.url))
+        .await
+        .unwrap();
+    assert_eq!(board.reason, CompletionReason::Timeout);
+    assert_eq!(board.completeness, Completeness::Unknown);
+    assert_eq!(board.pin_links.len(), 1);
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn a_page_that_always_asks_for_a_login_cannot_keep_the_run_forever() {
+    // Every prompt for a login used to push the deadline away, so a page
+    // that always asks for a login never ended. The collection has to stop
+    // on the timeout it was given.
+    let server = fixture::serve().await;
+    let (operation, mut events) = Operation::new(32);
+    let resume = operation.clone();
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            if matches!(event.event, RunEvent::LoginRequired { .. }) {
+                resume.resume_login();
+            }
+        }
+    });
+    let collector = Collector::launch(
+        CollectionOptions {
+            manual_login: true,
+            max_duration: Duration::from_secs(3),
+            ..options()
+        },
+        operation,
+    )
+    .await
+    .unwrap();
+    let result = tokio::time::timeout(
+        Duration::from_secs(30),
+        collector.collect_board(&format!("{}/login/", server.url)),
+    )
+    .await;
+    assert!(result.is_ok(), "the collection never ended");
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn a_board_that_stops_without_saying_it_ended_is_not_complete() {
+    // The feed stopped changing, but nothing proved that the board is
+    // complete. The stability is not proof: the result stays unknown.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let board = collector
+        .collect_board(&format!("{}/still/art/", server.url))
+        .await
+        .unwrap();
+    assert_eq!(board.reason, CompletionReason::Stable);
+    assert_eq!(board.completeness, Completeness::Unknown);
+    assert_eq!(board.pin_links.len(), 1);
+    collector.close().await.unwrap();
+}

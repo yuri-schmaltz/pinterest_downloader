@@ -134,9 +134,9 @@ async fn run_inner(
     let browser_mode = options.mode != CollectionMode::Http;
 
     // Discovery: which boards does the target contain?
-    let (targets, inherited) = if browser_mode {
+    let (targets, inherited, profile_completeness) = if browser_mode {
         let collector = Collector::launch(options.collection.clone(), operation.clone()).await?;
-        let targets = if parts.len() == 1 {
+        let (targets, profile_completeness) = if parts.len() == 1 {
             let profile = collector.collect_profile(url.as_str()).await?;
             operation
                 .emit(
@@ -150,11 +150,14 @@ async fn run_inner(
                     None,
                 )
                 .await;
-            profile.boards.into_iter().map(|board| board.url).collect()
+            (
+                profile.boards.into_iter().map(|board| board.url).collect(),
+                profile.completeness,
+            )
         } else {
-            vec![url.to_string()]
+            (vec![url.to_string()], Completeness::Complete)
         };
-        (targets, Some(collector))
+        (targets, Some(collector), profile_completeness)
     } else {
         // No HTTP fast path in Auto yet: embedded pins alone cannot prove completeness.
         let downloader = Downloader::with_cancellation(cancellation.clone())?;
@@ -181,7 +184,7 @@ async fn run_inner(
         } else {
             vec![url.to_string()]
         };
-        (targets, None)
+        (targets, None, Completeness::Unknown)
     };
 
     // The browser path collects the boards in a sorted map, while the HTTP
@@ -190,8 +193,10 @@ async fn run_inner(
     let mut targets = targets;
     targets.sort();
 
+    // The discovery of a profile is what the profile page could prove. A
+    // board is its own discovery, so nothing is missing there.
     let discovery_completeness = if parts.len() == 1 {
-        Completeness::Unknown
+        profile_completeness
     } else {
         Completeness::Complete
     };

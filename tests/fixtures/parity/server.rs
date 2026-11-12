@@ -109,6 +109,39 @@ pub async fn serve() -> Server {
                         "text/html",
                         r#"<html><script id="__PWS_DATA__">{"pins":[{"id":"201","images":{"orig":{"url":"/public-media/201.jpg"}}}]}</script></html>"#.to_owned(),
                     )
+                } else if path == "/neverend/art/" {
+                    // A board whose feed never says that it ended and never
+                    // stops changing. The collection has to stop on its own
+                    // timeout and report that the result is partial.
+                    (
+                        "text/html",
+                        r#"<html><body><main data-test-id="board-feed">
+                            <a href="/pin/701/">Sem fim</a>
+                            <img src="/public-media/701.jpg">
+                            <div id="grow"></div>
+                            <div style="height:3000px"></div>
+                        </main><script>
+                            window.addEventListener('scroll', () => {
+                                const grow = document.getElementById('grow');
+                                const item = document.createElement('div');
+                                item.style.height = '40px';
+                                item.textContent = 'mais';
+                                grow.appendChild(item);
+                            });
+                        </script></body></html>"#
+                            .to_owned(),
+                    )
+                } else if path == "/still/art/" {
+                    // A board that stops changing without ever saying that
+                    // it ended. The stability is not proof of completeness.
+                    (
+                        "text/html",
+                        r#"<html><body><main data-test-id="board-feed">
+                            <a href="/pin/702/">Parado</a>
+                            <img src="/public-media/702.jpg">
+                        </main></body></html>"#
+                            .to_owned(),
+                    )
                 } else if path == "/origin/art/" {
                     // A board whose page also carries the pins that Pinterest
                     // recommends. Only the pins of the board belong to it.

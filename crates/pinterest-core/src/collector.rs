@@ -113,6 +113,11 @@ impl Collector {
                 .await
                 .map_err(browser_error)?;
             let mut deadline = Instant::now() + self.options.max_duration;
+            // The first manual login buys the collection the time it needs.
+            // A later login does not: a page that always asks for a login
+            // would otherwise keep the run alive forever, because every
+            // prompt pushed the deadline away.
+            let mut login_granted = false;
             let cancel = self.operation.cancellation();
             let mut pins = BTreeMap::new();
             let mut links = BTreeMap::new();
@@ -138,7 +143,10 @@ impl Collector {
                     page.navigate(target.as_str())
                         .await
                         .map_err(browser_error)?;
-                    deadline = Instant::now() + self.options.max_duration;
+                    if !login_granted {
+                        login_granted = true;
+                        deadline = Instant::now() + self.options.max_duration;
+                    }
                     continue;
                 }
                 truncated |= snapshot.network_truncated;
@@ -296,6 +304,7 @@ impl Collector {
                 .await
                 .map_err(browser_error)?;
             let mut deadline = Instant::now() + self.options.max_duration;
+            let mut login_granted = false;
             let cancel = self.operation.cancellation();
             let mut boards = BTreeMap::new();
             let mut previous = (0, 0);
@@ -314,7 +323,10 @@ impl Collector {
                     page.navigate(target.as_str())
                         .await
                         .map_err(browser_error)?;
-                    deadline = Instant::now() + self.options.max_duration;
+                    if !login_granted {
+                        login_granted = true;
+                        deadline = Instant::now() + self.options.max_duration;
+                    }
                     continue;
                 }
                 let mut entries = extract_boards_from_html(&snapshot.html, username);

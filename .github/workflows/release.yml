@@ -327,7 +327,22 @@ jobs:
           python-version: '3.12'
       - run: python scripts/sync_version.py --check --tag
       - run: cargo test --workspace --locked
-      - run: cargo build --release --locked -p pinterest-cli
+      - run: cargo build --release --locked -p pinterest-cli --example fixture_server
+      - name: Smoke test the built binary
+        shell: bash
+        run: |
+          # The binary has to work on a machine without Python and without
+          # Node. The smoke test downloads from a local server written in
+          # Rust and checks the files that landed on disk.
+          if [ "${{ matrix.platform }}" = "windows-x86_64" ]; then
+            bash scripts/smoke_rust_cli.sh \
+              "target/release/${{ matrix.executable }}" \
+              "target/release/examples/fixture_server.exe"
+          else
+            bash scripts/smoke_rust_cli.sh \
+              "target/release/${{ matrix.executable }}" \
+              "target/release/examples/fixture_server"
+          fi
       - name: Package Rust CLI
         shell: bash
         run: |
