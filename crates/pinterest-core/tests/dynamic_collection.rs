@@ -114,7 +114,10 @@ async fn a_session_that_expires_midway_keeps_the_pins_that_were_already_collecte
     let collector = Collector::launch(
         CollectionOptions {
             manual_login: true,
-            max_duration: Duration::from_secs(6),
+            // The budget is generous: a machine that is busy with other
+            // browsers takes longer to load the page, and the test is about
+            // the login, not about the speed of the computer.
+            max_duration: Duration::from_secs(60),
             ..options()
         },
         operation,
@@ -151,9 +154,15 @@ async fn cancelling_the_login_stops_the_run_right_away() {
     let server = fixture::serve().await;
     let (operation, mut events) = Operation::new(32);
     let cancel = operation.clone();
+    // The moment the login was asked. The clock of the test starts here and
+    // not before: the speed of the computer does not decide whether the
+    // run stopped right away.
+    let asked_at = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let stamp = std::sync::Arc::clone(&asked_at);
     tokio::spawn(async move {
         while let Some(event) = events.recv().await {
             if matches!(event.event, RunEvent::LoginRequired { .. }) {
+                *stamp.lock().unwrap() = Some(std::time::Instant::now());
                 cancel.cancel();
             }
         }
@@ -168,7 +177,6 @@ async fn cancelling_the_login_stops_the_run_right_away() {
     )
     .await
     .unwrap();
-    let started = std::time::Instant::now();
     let result = collector
         .collect_board(&format!("{}/session-expired/art/", server.url))
         .await;
@@ -176,10 +184,11 @@ async fn cancelling_the_login_stops_the_run_right_away() {
         matches!(result, Err(pinterest_core::PinterestError::Cancelled)),
         "the run did not stop: {result:?}"
     );
+    let asked_at = asked_at.lock().unwrap().expect("the login was never asked");
     assert!(
-        started.elapsed() < Duration::from_secs(10),
+        asked_at.elapsed() < Duration::from_secs(10),
         "cancelling the login took {:?}",
-        started.elapsed()
+        asked_at.elapsed()
     );
     collector.close().await.unwrap();
 }
@@ -231,11 +240,16 @@ async fn a_board_that_says_it_ended_does_not_wait_for_the_whole_stability_budget
     // The page tells the collector that the feed ended. That is evidence
     // that there is nothing more to load, so waiting the whole stability
     // budget (20 rounds) added half a minute to every single board.
+    //
+    // The budget here is enormous (a thousand rounds) and the deadline is
+    // short: a collector that waits for the budget cannot finish inside
+    // the deadline, and the reason of the result says so. The clock of the
+    // computer does not take part in the proof.
     let server = fixture::serve().await;
     let collector = Collector::launch(
         CollectionOptions {
             scroll_pause: Duration::from_millis(200),
-            stable_rounds: 20,
+            stable_rounds: 1000,
             max_duration: Duration::from_secs(30),
             ..options()
         },
@@ -243,19 +257,13 @@ async fn a_board_that_says_it_ended_does_not_wait_for_the_whole_stability_budget
     )
     .await
     .unwrap();
-    let started = std::time::Instant::now();
     let board = collector
         .collect_board(&format!("{}/alice/art/", server.url))
         .await
         .unwrap();
-    let elapsed = started.elapsed();
     assert_eq!(board.reason, CompletionReason::EndOfFeed);
     assert_eq!(board.completeness, Completeness::Complete);
     assert_eq!(board.pin_links.len(), 2);
-    assert!(
-        elapsed < Duration::from_secs(5),
-        "a board that said it ended took {elapsed:?}"
-    );
     collector.close().await.unwrap();
 }
 
@@ -606,7 +614,19 @@ async fn a_real_public_board_asks_for_a_login_instead_of_saying_it_is_empty() {
     // "nenhum pin encontrado" seria uma resposta errada: o quadro tem pins,
     // quem nao esta logado e que nao os ve.
     let server = fixture::serve().await;
-    let collector = Collector::launch(options(), operation()).await.unwrap();
+    // The deadline is generous: a busy computer takes longer to load the
+    // page, and the test is about what the interface says, not about the
+    // speed of the machine. The collection stops as soon as it sees that
+    // the board is behind a login.
+    let collector = Collector::launch(
+        CollectionOptions {
+            max_duration: Duration::from_secs(60),
+            ..options()
+        },
+        operation(),
+    )
+    .await
+    .unwrap();
     let result = collector
         .collect_board(&format!("{}/real/public/", server.url))
         .await;

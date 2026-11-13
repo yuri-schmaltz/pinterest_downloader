@@ -158,19 +158,25 @@ pub async fn serve() -> Server {
                     // collection: the pins show up first and the login form
                     // arrives on the first scroll. The pins collected before
                     // the expiry have to be kept.
+                    //
+                    // The scroll is the trigger, and the time is the backup:
+                    // a window that is too tall never scrolls, and then the
+                    // session would never expire.
                     (
                         "text/html",
                         r#"<html><body><main data-test-id="board-feed">
                             <a href="/pin/1001/">Primeiro</a>
                             <a href="/pin/1002/">Segundo</a>
                         </main><div style="height:1800px"></div><script>
-                            window.addEventListener('scroll', () => {
+                            const expire = () => {
                                 if (!document.querySelector('[data-test-id="login-form"]')) {
                                     const form = document.createElement('form');
                                     form.dataset.testId = 'login-form';
                                     document.body.appendChild(form);
                                 }
-                            });
+                            };
+                            window.addEventListener('scroll', expire);
+                            setTimeout(expire, 1200);
                         </script></body></html>"#
                             .to_owned(),
                     )
@@ -269,7 +275,15 @@ pub async fn serve() -> Server {
                 } else {
                     ("text/html", include_str!("dynamic_board.html").to_owned())
                 };
-                let _ = socket.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
+                // The page of the real capture asks for resources of other
+                // hosts. The browser waits for them before saying that the
+                // page is ready, and a machine without internet waits
+                // forever. The policy says that only the fixture itself can
+                // be used: the page loads at once and the test does not
+                // depend on the network.
+                let policy = "Content-Security-Policy: default-src 'self' \
+                              'unsafe-inline' 'unsafe-eval' data: blob:;";
+                let _ = socket.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: {mime}\r\n{policy}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
                 concurrency.leave();
             });
         }

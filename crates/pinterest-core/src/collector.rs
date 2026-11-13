@@ -235,6 +235,14 @@ impl Collector {
                     });
                     pins.insert(pin.id.clone(), pin);
                 }
+                if gated && links.is_empty() {
+                    // A pagina mostra os pins bloqueados para quem nao esta
+                    // logado. Esperar a estabilidade nao muda nada: o quadro
+                    // so aparece depois do login. Dizer isso agora evita
+                    // que o usuario espere o prazo inteiro por um quadro
+                    // que ele so vai ver depois de entrar.
+                    break CompletionReason::Gated;
+                }
                 end_seen |= snapshot.end_of_feed;
                 self.operation
                     .emit(

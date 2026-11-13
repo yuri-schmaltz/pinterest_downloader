@@ -47,9 +47,39 @@ fn main() -> eframe::Result<()> {
             .with_title("Pinterest Board Downloader"),
         ..Default::default()
     };
-    eframe::run_native(
+    run(options)
+}
+
+/// Draw the interface, with the OpenGL when the machine has one.
+///
+/// A machine without OpenGL 2.0 (um Windows sem driver de video, por
+/// exemplo) mostraria um erro e nada mais. A wgpu desenha com DirectX ou
+/// com Vulkan, e a interface funciona do mesmo jeito.
+fn run(options: eframe::NativeOptions) -> eframe::Result<()> {
+    let glow = eframe::NativeOptions {
+        renderer: eframe::Renderer::Glow,
+        ..options.clone()
+    };
+    match eframe::run_native(
         "Pinterest Board Downloader",
-        options,
+        glow,
         Box::new(|_cc| Ok(Box::new(App::new()))),
-    )
+    ) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            eprintln!(
+                "O OpenGL nao esta disponivel neste computador ({error}). \
+                 A interface vai usar o renderizador da wgpu."
+            );
+            let wgpu = eframe::NativeOptions {
+                renderer: eframe::Renderer::Wgpu,
+                ..options
+            };
+            eframe::run_native(
+                "Pinterest Board Downloader",
+                wgpu,
+                Box::new(|_cc| Ok(Box::new(App::new()))),
+            )
+        }
+    }
 }

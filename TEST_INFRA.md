@@ -17,7 +17,7 @@ Verificação local em **2026-11-13**, sobre as correções posteriores ao clone
 
 Os avisos Python restantes vieram de `datetime.utcnow()`, removido de `json_logger.py`, `adaptive_workers.py` e `rate_limiter.py`; o formato dos timestamps foi preservado. Nenhum teste Rust da CLI é contado como teste unitário: os 89 do core, os 36 da interface gráfica, os 5 da CLI e os 4 do browser separam o que é unidade do que é integração (browser, CLI, fluxo HTTP, coleta dinâmica e cache de metadados). O binário foi adicionalmente exercitado contra servidor local, verificando sucesso, extração vazia, workers zero e stream interrompido.
 
-A interface gráfica do Rust tem 13 testes de desenho sem tela (`crates/pinterest-gui/tests/interface.rs`): eles desenham a interface de verdade com o egui e conferem o que aparece — o perfil, a grade de quadros, o download, o lugar do erro, o diálogo de login, o `Enter` no campo do perfil, a tela vazia, o filtro que esconde tudo e o fato de que nenhuma tela invade o rodapé.
+A interface gráfica do Rust tem 13 testes de desenho sem tela (`crates/pinterest-gui/tests/interface.rs`): eles desenham a interface de verdade com o egui e conferem o que aparece — o perfil, a grade de quadros, o download, o lugar do erro, o diálogo de login, o `Enter` no campo do perfil, a tela vazia, o filtro que esconde tudo, o fundo e a borda dos campos e o fato de que nenhuma tela invade o rodapé.
 
 ## O que cada camada prova
 
@@ -31,7 +31,7 @@ A interface gráfica do Rust tem 13 testes de desenho sem tela (`crates/pinteres
 - **Rust:** helpers de URL/contagem/tipo, parser de pins/quadros e fluxo HTTP perfil → quadro → imagem; limite por quadro, opções de cache e desativação do limitador, streams interrompidos/vazios, extração vazia, workers zero e colisões de cache.
 - **Cache de metadados Rust (`metadata_cache.rs`):** gravação atômica e reuso na reexecução, descarte de cache corrompido, compatibilidade de formato com o Python, isolamento por `--cache-dir` e ausência de arquivo quando o cache está desligado. A reexecução sem nova ida à página do pin é verificada pelo contador de requisições do servidor de fixture.
 - **Rate limiter Rust:** o teste verifica o contador de esperas do limitador, e não o relógio, para não depender da velocidade da máquina.
-- **Coleta dinâmica Rust:** um feed lento não pode ser reportado como quadro vazio. A fixture serve um quadro cujo primeiro payload demora três segundos; sem a regra de estabilidade o teste falha com quadro vazio.
+- **Coleta dinâmica Rust:** um feed lento não pode ser reportado como quadro vazio. Um quadro bloqueado por login para a coleta assim que o bloqueio aparece, e o teste da sessão que expira e o do cancelamento medem o tempo a partir do pedido de login, para não depender da velocidade da máquina. A fixture serve um quadro cujo primeiro payload demora três segundos; sem a regra de estabilidade o teste falha com quadro vazio.
 - **Paralelismo entre quadros (`board_concurrency.rs`):** o servidor de fixture registra o maior número de requisições atendidas ao mesmo tempo, então a concorrência é observada. Um worker não sobrepõe quadros; três workers sobrepõem. A ordem do relatório segue a descoberta, não o término.
 - **Rate limiting Rust:** as janelas deslizantes de segundo, minuto e hora, o backoff exponencial com teto e o `Retry-After` em segundos e em data HTTP têm testes próprios, inclusive data no passado (tentar agora) e dia da semana incorreto (recusado).
 

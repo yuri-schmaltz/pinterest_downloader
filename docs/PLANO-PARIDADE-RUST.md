@@ -6,7 +6,7 @@
 
 - P0: contrato em `CONTRATO-PARIDADE.md`, matriz rastreável em `tests/fixtures/parity/requirements.json` e fixtures locais compartilhadas criados. Capturas reais e congelamento final dos contratos ainda pendentes.
 - P1: crate `pinterest-browser` com Chromium/CDP, descoberta de executável, perfis temporários isolados, eventos de rede, cookies e fechamento/cancelamento. Prova Linux executada; Windows depende da CI adicionada. Decisão em `adr/0001-browser-cdp.md`.
-- P2: coleta dinâmica de perfil/quadro por JSON, DOM e scroll, incluindo feed virtualizado; resultado distingue fim explícito, limite, estabilidade e timeout. A estabilidade só é declarada quando o documento terminou de parsear, não há payload JSON em voo e o quadro já entregou pins ou traz marcador de fim; um feed lento não pode ser reportado como quadro vazio. Atribuição de origem e critérios de fim no Pinterest real ainda pendentes.
+- P2: coleta dinâmica de perfil/quadro por JSON, DOM e scroll, incluindo feed virtualizado; resultado distingue fim explícito, limite, estabilidade, timeout e quadro bloqueado por login (`gated`), que para a coleta na hora em vez de esperar o prazo inteiro. A estabilidade só é declarada quando o documento terminou de parsear, não há payload JSON em voo e o quadro já entregou pins ou traz marcador de fim; um feed lento não pode ser reportado como quadro vazio. Atribuição de origem e critérios de fim no Pinterest real ainda pendentes.
 - P3: integração de cookies, resolução HTTP pela página do pin/metatags e protocolo de login/continuação/cancelamento iniciados. Login headful real, persistência e renovação de sessão ainda pendentes.
 - P5: motor compartilhado, canal limitado de eventos, CLI com modos auto/browser/http, opções de coleta, JSONL, códigos de saída e Ctrl+C. Cache de metadados entregue com `--cache-dir` e controle próprio `--no-metadata-cache`; paralelismo entre quadros entregue com `--boards-workers` e janelas de rate limiting com `Retry-After`. Workers adaptativos por CPU/memória ainda pendentes.
 - P4/P6/P7/P8: não entregues como marcos completos. Nenhum artefato foi publicado nem a paridade foi declarada.
@@ -315,7 +315,8 @@ O que a captura real mostrou, e que os testes sinteticos nao mostravam:
 - a superficie publica entrega os pins **bloqueados** (`gated-pin-rep`) e o
   feed vazio para quem nao esta logado. O quadro tem pins; quem nao ve nao
   pode ver. O coletor agora pede login nesse caso, em vez de dizer que o
-  quadro esta vazio;
+  quadro esta vazio, e a coleta para assim que ve o bloqueio: esperar o
+  prazo inteiro nao muda nada, porque os pins so aparecem depois do login;
 - nenhuma superficie observada traz um marcador explicito de fim de feed.
   A completude de um quadro real continua desconhecida, e o relatorio diz
   isso;
@@ -340,6 +341,10 @@ escolha dos quadros e o download.
   sem depender de um servidor de display.
 - **Tema escuro** por padrao, com a escala de tela do sistema respeitada
   pelo `egui`.
+- **OpenGL com reserva**: a interface desenha com o `glow` e, quando a
+  maquina nao tem OpenGL 2.0 (um Windows sem driver de video, uma sessao
+  remota sem GPU), ela passa para o renderizador da `wgpu` em vez de
+  mostrar um erro e sair.
 - **Navegacao por teclado**: o egui entrega o foco e a navegacao por
   `Tab`; o campo de perfil aceita `Enter` para comecar a busca.
 - **Downloads fora da thread que desenha**: o motor roda num runtime

@@ -574,9 +574,7 @@ def _looks_like_pin(obj: dict) -> bool:
     # O payload real traz as imagens em "originals"; sem esta checagem um
     # pin cuja media so exista nessa resolucao seria descartado.
     images = obj.get("images")
-    return isinstance(images, dict) and any(
-        isinstance(images.get(size), dict) for size in IMAGE_SIZE_ORDER
-    )
+    return isinstance(images, dict) and any(isinstance(images.get(size), dict) for size in IMAGE_SIZE_ORDER)
 
 
 def _find_pins_in_graphql(obj) -> List[dict]:
