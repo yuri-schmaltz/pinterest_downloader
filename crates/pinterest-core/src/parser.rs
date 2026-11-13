@@ -101,11 +101,12 @@ fn pin_from_pws_dict(d: &serde_json::Map<String, Value>) -> Option<PinMetadata> 
     if let Some(orig) = flat_orig {
         iurl = orig.get("url").and_then(|u| u.as_str());
     } else if let Some(dict) = imgs_dict {
-        let best = dict
-            .get("orig")
-            .or_else(|| dict.get("736x"))
-            .or_else(|| dict.get("474x"))
-            .and_then(|v| v.as_object());
+        // The real Pinterest serves `originals` (and `750x`), while the
+        // fixtures and the older payloads use `orig`. The bigger the
+        // source, the better the candidate.
+        let best = ["originals", "orig", "750x", "736x", "474x"]
+            .iter()
+            .find_map(|size| dict.get(*size).and_then(|v| v.as_object()));
         iurl = best.and_then(|b| b.get("url")).and_then(|u| u.as_str());
     }
 
@@ -297,6 +298,36 @@ mod tests {
             .collect();
         ids.sort();
         assert_eq!(ids, ["101"]);
+    }
+
+    #[test]
+    fn a_media_with_the_name_originals_is_recognized() {
+        // The real Pinterest serves `originals`, not `orig`. A pin whose
+        // only media is `originals` used to be dropped entirely.
+        let data = serde_json::json!({"data":[
+            {"id":"777","images":{"originals":{"url":"https://i.pinimg.com/originals/777.jpg"}}}
+        ]});
+        let pins = extract_pin_metadata_from_value(&data);
+        let found: Vec<_> = pins.values().collect();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "777");
+        assert_eq!(found[0].image_url, "https://i.pinimg.com/originals/777.jpg");
+    }
+
+    #[test]
+    fn the_largest_media_size_has_precedence() {
+        let data = serde_json::json!({"data":[
+            {"id":"778","images":{
+                "originals":{"url":"/originals.jpg"},
+                "750x":{"url":"/750.jpg"},
+                "736x":{"url":"/736.jpg"},
+                "474x":{"url":"/474.jpg"}
+            }}
+        ]});
+        let pins = extract_pin_metadata_from_value(&data);
+        let found: Vec<_> = pins.values().collect();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].image_url, "/originals.jpg");
     }
 
     #[test]
