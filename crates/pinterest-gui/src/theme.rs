@@ -92,22 +92,29 @@ pub fn apply(ctx: &egui::Context) {
     widgets.noninteractive.bg_fill = SURFACE;
     widgets.noninteractive.weak_bg_fill = SURFACE;
     widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0_f32, TEXT);
+    widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, BORDER);
     widgets.noninteractive.corner_radius = egui::CornerRadius::same(RADIUS_CARD);
     widgets.inactive.bg_fill = SURFACE_2;
     widgets.inactive.weak_bg_fill = SURFACE_2;
     widgets.inactive.fg_stroke = egui::Stroke::new(1.0_f32, BORDER_STRONG);
+    // A borda que o egui desenha por conta e clara demais: o produto
+    // usa a borda escura, e e ela que separa o campo do fundo.
+    widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, BORDER_STRONG);
     widgets.inactive.corner_radius = egui::CornerRadius::same(RADIUS_BUTTON);
     widgets.hovered.bg_fill = SURFACE_3;
     widgets.hovered.weak_bg_fill = SURFACE_3;
     widgets.hovered.fg_stroke = egui::Stroke::new(1.0_f32, TEXT);
+    widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, BORDER_STRONG);
     widgets.hovered.corner_radius = egui::CornerRadius::same(RADIUS_BUTTON);
     widgets.active.bg_fill = SURFACE_3;
     widgets.active.weak_bg_fill = SURFACE_3;
     widgets.active.fg_stroke = egui::Stroke::new(1.0_f32, TEXT);
+    widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, BORDER_STRONG);
     widgets.active.corner_radius = egui::CornerRadius::same(RADIUS_BUTTON);
     widgets.open.bg_fill = SURFACE_3;
     widgets.open.weak_bg_fill = SURFACE_3;
     widgets.open.fg_stroke = egui::Stroke::new(1.0_f32, TEXT);
+    widgets.open.bg_stroke = egui::Stroke::new(1.0_f32, BORDER_STRONG);
     widgets.open.corner_radius = egui::CornerRadius::same(RADIUS_BUTTON);
 
     // The text of the interface: the title stands out, the rest reads
@@ -301,15 +308,32 @@ pub enum ButtonKind {
 }
 
 /// A field where the user types.
-pub fn field(ui: &mut egui::Ui, text: &mut String, hint_text: &str, width: f32) -> egui::Response {
+///
+/// The field has an id proprio: e assim que o teste consegue dar o foco
+/// para ele e perguntar o que acontece quando o Enter e apertado.
+pub fn field(
+    ui: &mut egui::Ui,
+    text: &mut String,
+    hint_text: &str,
+    width: f32,
+    id: egui::Id,
+) -> egui::Response {
+    // The color of the field and the color of the focus are saved and put
+    // back: a field does not change the fields that come after it.
+    let saved_bg = ui.visuals().text_edit_bg_color;
+    let saved_stroke = ui.visuals().selection.stroke;
     ui.visuals_mut().text_edit_bg_color = Some(SURFACE_2);
+    // Com o foco, a borda fica vermelha, como no produto.
+    ui.visuals_mut().selection.stroke = egui::Stroke::new(1.0_f32, ACCENT);
     let response = ui.add(
         egui::TextEdit::singleline(text)
+            .id(id)
             .hint_text(hint_text)
             .desired_width(width)
             .frame(true),
     );
-    ui.visuals_mut().text_edit_bg_color = None;
+    ui.visuals_mut().text_edit_bg_color = saved_bg;
+    ui.visuals_mut().selection.stroke = saved_stroke;
     response
 }
 

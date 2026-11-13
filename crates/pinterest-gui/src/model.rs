@@ -143,6 +143,9 @@ impl AppModel {
         self.activity = Activity::Discovering;
         self.error = None;
         self.notice = None;
+        // The filter of the old profile would hide the boards of the new
+        // one, and the user would think that the profile has no boards.
+        self.boards.set_filter("");
         Ok(())
     }
 

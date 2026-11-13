@@ -100,6 +100,9 @@ impl App {
             self.model.discovery_failed(message);
             return;
         }
+        // The filter of the old profile would hide the boards of the new
+        // one, and the field would show a text that no longer means anything.
+        self.filter.clear();
         let Some(runtime) = self.runtime.as_ref() else {
             self.model
                 .discovery_failed("Nao foi possivel iniciar o motor da interface");
@@ -409,9 +412,12 @@ impl App {
                             &mut self.model.target,
                             "usuario ou https://www.pinterest.com/usuario/",
                             280.0,
+                            egui::Id::new("campo-perfil"),
                         );
-                        // The field keeps the focus, so the user can
-                        // press Enter to start the search.
+                        // O Enter com o campo focalizado comeca a busca.
+                        // O egui larga o foco do campo quando o Enter e
+                        // apertado (e isso e proposital), e e por essa
+                        // perda de foco que a busca e detectada.
                         if response.lost_focus()
                             && ui.input(|input| input.key_pressed(egui::Key::Enter))
                         {
@@ -586,7 +592,13 @@ impl App {
 
         // The filter and the quick choices.
         ui.horizontal(|ui| {
-            theme::field(ui, &mut self.filter, "Buscar quadro...", 240.0);
+            theme::field(
+                ui,
+                &mut self.filter,
+                "Buscar quadro...",
+                240.0,
+                egui::Id::new("campo-filtro"),
+            );
             if theme::button(ui, "Filtrar", theme::ButtonKind::Quiet) {
                 self.model.boards.set_filter(self.filter.clone());
             }
@@ -614,7 +626,37 @@ impl App {
             .map(|board| (board.url.clone(), board.title.clone(), board.pin_count))
             .collect();
         if visible.is_empty() {
-            theme::hint(ui, "Nenhum quadro carregado.");
+            // Two empties are different: the profile has no board at all, or
+            // the filter hides every board. The user needs to know which one
+            // it is, and needs a way out of the screen.
+            if self.model.boards.boards().is_empty() {
+                theme::step_title(ui, &self.label("Nenhum quadro encontrado"));
+                ui.add_space(8.0);
+                theme::hint(
+                    ui,
+                    "O perfil nao devolveu nenhum quadro. Confira o usuario \
+                     e tente de novo.",
+                );
+                ui.add_space(16.0);
+                let back = self.label("Voltar");
+                if theme::button(ui, &back, theme::ButtonKind::Quiet) {
+                    self.model.stage = Stage::Profile;
+                }
+            } else {
+                theme::step_title(ui, &self.label("O filtro escondeu os quadros"));
+                ui.add_space(8.0);
+                theme::hint(
+                    ui,
+                    "Nenhum quadro combina com o filtro. Limpe o filtro para \
+                     ver todos.",
+                );
+                ui.add_space(16.0);
+                let clear = self.label("Limpar filtro");
+                if theme::button(ui, &clear, theme::ButtonKind::Quiet) {
+                    self.filter.clear();
+                    self.model.boards.set_filter("");
+                }
+            }
             return;
         }
 
@@ -711,7 +753,13 @@ impl App {
                 ui.horizontal(|ui| {
                     theme::quiet(ui, "Destino");
                     let mut out_root = self.out_root_text.clone();
-                    let response = theme::field(ui, &mut out_root, "pasta de destino", 280.0);
+                    let response = theme::field(
+                        ui,
+                        &mut out_root,
+                        "pasta de destino",
+                        280.0,
+                        egui::Id::new("campo-destino"),
+                    );
                     if response.changed() {
                         self.out_root_text = out_root.clone();
                         self.model.out_root = std::path::PathBuf::from(&out_root);

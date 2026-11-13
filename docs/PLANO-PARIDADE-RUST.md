@@ -48,7 +48,7 @@ Paridade significa equivalência observável em cenários definidos. Não exige 
 | GUI | Perfil, seleção, capas, pasta, progresso, login | Aplicação desktop Rust (egui) | Aplicação desktop Rust |
 | Distribuição | PyInstaller, AppImage, DEB, Windows | Workflow CLI Linux/Windows definido | CLI/GUI e Chromium validados em máquinas limpas |
 
-A referência é o comportamento do código, confrontado com cenários e expectativas independentes. A suíte local registrada tem 246 testes Python e 128 Rust; isso não comprova compatibilidade atual com o Pinterest.
+A referência é o comportamento do código, confrontado com cenários e expectativas independentes. A suíte local registrada tem 246 testes Python e 134 Rust; isso não comprova compatibilidade atual com o Pinterest.
 
 Divergências conhecidas a resolver no contrato:
 

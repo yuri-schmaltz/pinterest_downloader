@@ -1,6 +1,6 @@
 # Handoff — Pinterest Pro Downloader
 
-Atualizado em **2026-11-06**. Versão declarada **2.0.5**.
+Atualizado em **2026-11-13**. Versão declarada **2.0.5**.
 
 ## Ponto de partida
 
@@ -63,4 +63,4 @@ O source precisa incluir `crates/`, `Cargo.toml`, `Cargo.lock`, o spec PyInstall
 
 ## Próximos trabalhos
 
-Capturar fixtures reais, validar coleta no Pinterest, paginar a coleta dinâmica Rust, versionar o cache de metadados, testar artefatos em Windows/Linux e preparar manifests/assinatura das lojas. A interface Rust em egui já cobre perfil, seleção com capas, destino, progresso, cancelamento e login, e usa a mesma paleta da interface PyQt6. Os detalhes e limites de cobertura estão em [TEST_INFRA.md](TEST_INFRA.md).
+Capturar fixtures reais, validar coleta no Pinterest, paginar a coleta dinâmica Rust, versionar o cache de metadados, testar artefatos em Windows/Linux e preparar manifests/assinatura das lojas. A interface Rust em egui já cobre perfil, seleção com capas, destino, progresso, cancelamento e login, e usa a mesma paleta da interface PyQt6: barra de passos numerada, cartão central com a largura da janela, tira de opções, rodapé com o resumo da etapa e estados vazios que explicam o que aconteceu. O desenho é conferido sem tela por 13 testes em `crates/pinterest-gui/tests/interface.rs` (grade de capas, nenhuma tela invade o rodapé, `Enter` no campo do perfil, tela vazia e filtro que esconde tudo). Os detalhes e limites de cobertura estão em [TEST_INFRA.md](TEST_INFRA.md).
