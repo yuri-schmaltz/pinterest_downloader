@@ -89,7 +89,8 @@ struct Cli {
     /// Eventos JSONL em stdout; progresso humano vai para stderr
     #[arg(long)]
     json_log: bool,
-    /// Arquivo JSONL com os mesmos eventos tipados
+    /// Arquivo JSONL com os mesmos eventos tipados; cada execucao acrescenta
+    /// as suas linhas e cada evento traz o `run_id` que a produziu
     #[arg(long, default_value = "download_log.json")]
     log_file: Option<PathBuf>,
 }
@@ -168,8 +169,16 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
     let (operation, mut events) = Operation::new(256);
     let presentation_operation = operation.clone();
     let log = if let Some(path) = cli.log_file {
+        // The file is opened in append mode and every event is written with
+        // a single call. Two runs that share the same file used to
+        // overwrite each other's bytes and left a line that was not valid
+        // JSON; appending keeps every line whole, and the run id that each
+        // event carries tells the runs apart.
         Some(
-            tokio::fs::File::create(path)
+            tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
                 .await
                 .map_err(|error| (1, error.to_string()))?,
         )
@@ -201,8 +210,12 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
                         stdout.write_all(format!("{serialized}\n").as_bytes()).await.map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
                     }
                     if let Some(file) = &mut log {
-                        file.write_all(serialized.as_bytes()).await.map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
-                        file.write_all(b"\n").await.map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
+                        // One write per event: two writes would let another
+                        // run slip its newline between the two halves of a
+                        // line.
+                        file.write_all(format!("{serialized}\n").as_bytes())
+                            .await
+                            .map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
                     }
                     match &event.event {
                         RunEvent::LoginRequired { url } => {

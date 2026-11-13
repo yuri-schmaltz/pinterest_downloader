@@ -230,4 +230,25 @@ mod tests {
             Path::new("/tmp/alice/casa e jardim")
         );
     }
+
+    #[test]
+    fn the_same_board_written_in_different_ways_lands_in_the_same_directory() {
+        // A URL do alvo chega de varias formas: com barra final, com codigo
+        // de convite, com ancora. Todas tem de apontar para o mesmo quadro
+        // e para o mesmo diretorio.
+        let root = Path::new("/tmp/downloads");
+        for raw in [
+            "https://www.pinterest.com/alice/decoracao/",
+            "https://www.pinterest.com/alice/decoracao",
+            "https://www.pinterest.com/alice/decoracao/?invite_code=abc",
+            "https://www.pinterest.com/alice/decoracao/#anchor",
+        ] {
+            let url = url::Url::parse(&normalize_url(raw)).unwrap();
+            assert_eq!(
+                board_output_dir(root, &url),
+                Path::new("/tmp/downloads/alice/decoracao"),
+                "the target {raw} landed somewhere else"
+            );
+        }
+    }
 }

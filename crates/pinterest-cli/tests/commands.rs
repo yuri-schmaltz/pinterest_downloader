@@ -31,9 +31,52 @@ fn version_help_invalid_workers_and_missing_browser_have_stable_exits() {
         "--scroll-pause",
         "--cache-dir",
         "--no-metadata-cache",
+        "--end-quiet-rounds",
     ] {
         assert!(text.contains(flag));
     }
+}
+
+/// Two runs that share the same log file must not corrupt each other.
+///
+/// The file used to be truncated by both runs, so their bytes landed on top
+/// of each other and a line came out as broken JSON.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_runs_that_share_a_log_file_keep_every_line_valid() {
+    let server = fixture::serve().await;
+    let directory = tempfile::tempdir().unwrap();
+    let log = directory.path().join("events.jsonl");
+    let mut children = Vec::new();
+    for _ in 0..2 {
+        children.push(
+            Command::new(env!("CARGO_BIN_EXE_pinterest-cli"))
+                .args([
+                    &format!("{}/snapshot/art/", server.url),
+                    "--mode",
+                    "http",
+                    "--no-rate-limit",
+                    "--output",
+                    directory.path().join("out").to_str().unwrap(),
+                    "--cache-dir",
+                    directory.path().join("cache").to_str().unwrap(),
+                    "--log-file",
+                    log.to_str().unwrap(),
+                ])
+                .spawn()
+                .unwrap(),
+        );
+    }
+    for child in children {
+        child.wait_with_output().unwrap();
+    }
+    let content = std::fs::read_to_string(&log).unwrap();
+    let mut runs = std::collections::HashSet::new();
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let event: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|error| panic!("the line is not valid JSON: {error}\n{line}"));
+        runs.insert(event["run_id"].as_str().unwrap().to_owned());
+    }
+    assert_eq!(runs.len(), 2, "the two runs did not both leave their trace");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -94,6 +137,8 @@ async fn native_cli_collects_dynamic_board_and_downloads_authenticated_media() {
             directory.path().to_str().unwrap(),
             "--cache-dir",
             directory.path().join("cache").to_str().unwrap(),
+            "--log-file",
+            directory.path().join("events.jsonl").to_str().unwrap(),
         ])
         .output()
         .unwrap();

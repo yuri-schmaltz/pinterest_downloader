@@ -695,7 +695,20 @@
       "related_applications",
       "web_pinnacle_guidebook_headroom_opportunities_recommendation_alert_settings"
     ],
-    "payload_count": 21
+    "payload_count": 21,
+    "image_size_keys": [
+      "originals",
+      "1200x",
+      "750x",
+      "736x",
+      "474x"
+    ],
+    "image_size_note": "As dicts de imagem do Pinterest real usam 'originals' para a resolucao completa. A captura so expoe o formato dos payloads, sem os valores, e o feed de um quadro publico sem sessao vem bloqueado; por isso a chave 'originals' foi observada em 'profile_cover.images'.",
+    "limitations": [
+      "O feed de um quadro publico sem sessao vem bloqueado: a captura nao tem pins.",
+      "Os payloads gravam a forma (tipos), nao os valores.",
+      "Nenhum marcador de fim de feed foi observado em nenhuma superficie real."
+    ]
   },
   "counts": {
     "usuarios": 21,

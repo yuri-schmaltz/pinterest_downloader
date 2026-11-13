@@ -101,10 +101,10 @@ fn pin_from_pws_dict(d: &serde_json::Map<String, Value>) -> Option<PinMetadata> 
     if let Some(orig) = flat_orig {
         iurl = orig.get("url").and_then(|u| u.as_str());
     } else if let Some(dict) = imgs_dict {
-        // The real Pinterest serves `originals` (and `750x`), while the
-        // fixtures and the older payloads use `orig`. The bigger the
-        // source, the better the candidate.
-        let best = ["originals", "orig", "750x", "736x", "474x"]
+        // The real Pinterest serves `originals` (and `1200x`, `750x`),
+        // while the fixtures and the older payloads use `orig`. The bigger
+        // the source, the better the candidate.
+        let best = ["originals", "orig", "1200x", "750x", "736x", "474x"]
             .iter()
             .find_map(|size| dict.get(*size).and_then(|v| v.as_object()));
         iurl = best.and_then(|b| b.get("url")).and_then(|u| u.as_str());
@@ -119,11 +119,29 @@ fn pin_from_pws_dict(d: &serde_json::Map<String, Value>) -> Option<PinMetadata> 
         .unwrap_or("")
         .to_string();
 
+    // The board the pin was saved to. The payload of a board carries the
+    // pins of the board and, next to them, the pins of the other boards
+    // that the page asked for.
+    let board_url = d
+        .get("board")
+        .and_then(|board| {
+            board
+                .as_object()
+                .and_then(|b| b.get("url"))
+                .or_else(|| board.get("url"))
+        })
+        .or_else(|| d.get("board_url"))
+        .or_else(|| d.get("boardUrl"))
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .filter(|value| !value.is_empty());
+
     Some(PinMetadata {
         id: pid.to_string(),
         url: format!("https://www.pinterest.com/pin/{pid}/"),
         image_url,
         title,
+        board_url,
     })
 }
 
@@ -328,6 +346,46 @@ mod tests {
         let found: Vec<_> = pins.values().collect();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].image_url, "/originals.jpg");
+    }
+
+    #[test]
+    fn the_real_image_sizes_are_understood() {
+        // The shape observed in the sanitized capture of the real Pinterest.
+        let data = serde_json::json!({"data":[{
+            "id":"779",
+            "images":{
+                "1200x":{"url":"/1200.jpg","width":1200,"height":1200},
+                "474x":{"url":"/474.jpg"},
+                "736x":{"url":"/736.jpg"},
+                "750x":{"url":"/750.jpg"},
+                "originals":{"url":"/originals.jpg"}
+            }
+        }]});
+        let pins = extract_pin_metadata_from_value(&data);
+        let found: Vec<_> = pins.values().collect();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].image_url, "/originals.jpg");
+    }
+
+    #[test]
+    fn a_pin_that_names_its_board_keeps_that_name() {
+        // The page of a board asks for the feeds of other boards. The pin
+        // that says which board it belongs to is what makes it possible to
+        // leave the foreign pins out.
+        let data = serde_json::json!({"data":[
+            {"id":"801","images":{"orig":{"url":"/801.jpg"}},"board":{"url":"/alice/art/","name":"Art"}},
+            {"id":"802","images":{"orig":{"url":"/802.jpg"}},"board":{"url":"/alice/other/"}}
+        ]});
+        let pins = extract_pin_metadata_from_value(&data);
+        let found: Vec<_> = pins.values().collect();
+        assert_eq!(found.len(), 2);
+        let boards: Vec<_> = found
+            .iter()
+            .filter_map(|pin| pin.board_url.clone())
+            .collect();
+        assert_eq!(boards.len(), 2);
+        assert!(boards.contains(&"/alice/art/".to_owned()));
+        assert!(boards.contains(&"/alice/other/".to_owned()));
     }
 
     #[test]

@@ -720,6 +720,7 @@ async fn download_collected(
                             url: link,
                             image_url: cached,
                             title: String::new(),
+                            board_url: None,
                         }));
                     }
                 }

@@ -147,6 +147,15 @@ impl Collector {
         self.session.close().await.map_err(browser_error)
     }
 
+    /// The pid of the browser behind this collector.
+    ///
+    /// The same browser serves every board of the run, so comparing the pid
+    /// before and after a board proves that the browser was reused instead
+    /// of being opened again.
+    pub fn process_id(&self) -> Option<u32> {
+        self.session.process_id()
+    }
+
     pub async fn collect_board(&self, board_url: &str) -> Result<CollectedBoard> {
         let target = validated_url(board_url)?;
         let page = self.session.new_page().await.map_err(browser_error)?;
@@ -500,6 +509,12 @@ fn board_metadata(snapshot: &PageSnapshot, target: &Url) -> BTreeMap<String, Pin
     }
     pins.into_values()
         .filter_map(|mut pin| {
+            // A pin that says which board it was saved to belongs to that
+            // board. The page of a board also asks for the feeds of other
+            // boards, and those pins are not part of the target.
+            if !belongs_to_board(pin.board_url.as_deref(), target) {
+                return None;
+            }
             let image = target.join(&pin.image_url).ok()?;
             if !matches!(image.scheme(), "http" | "https") {
                 return None;
@@ -514,6 +529,24 @@ fn board_metadata(snapshot: &PageSnapshot, target: &Url) -> BTreeMap<String, Pin
             Some((pin.id.clone(), pin))
         })
         .collect()
+}
+
+/// Whether a pin that names its board belongs to the board being collected.
+///
+/// A pin that says nothing about its board cannot be proven foreign, so it
+/// stays. A pin that names another board does not belong to the target.
+fn belongs_to_board(board_url: Option<&str>, target: &Url) -> bool {
+    let Some(raw) = board_url else {
+        return true;
+    };
+    let Ok(url) = target.join(raw) else {
+        return false;
+    };
+    if url.origin() != target.origin() {
+        return false;
+    }
+    let same_path = url.path().trim_end_matches('/') == target.path().trim_end_matches('/');
+    same_path
 }
 fn same_origin(target: &Url, raw: &str) -> bool {
     target

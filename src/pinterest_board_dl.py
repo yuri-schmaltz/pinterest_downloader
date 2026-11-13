@@ -507,6 +507,21 @@ def download_media(
     return False
 
 
+# O Pinterest real entrega as imagens com a chave "originals"; as capturas
+# antigas e os testes usam "orig". A ordem abaixo vai do maior para o
+# menor, e "originals" vem primeiro porque e a resolucao completa.
+IMAGE_SIZE_ORDER = ("originals", "orig", "1200x", "750x", "736x", "474x")
+
+
+def _best_image(images: dict) -> dict:
+    """Escolhe a imagem de maior resolucao entre as variantes conhecidas."""
+    for size in IMAGE_SIZE_ORDER:
+        candidate = images.get(size)
+        if isinstance(candidate, dict) and candidate.get("url"):
+            return candidate
+    return {}
+
+
 # ---------- Coleta de links ----------
 
 
@@ -531,8 +546,7 @@ def _pin_metadata_from_payload(pin: dict) -> PinMetadata | None:
         image_url = flat.get("url")
     else:
         images = pin.get("images") or {}
-        best = images.get("orig") or images.get("736x") or {}
-        image_url = best.get("url")
+        image_url = _best_image(images).get("url")
 
     if not image_url:
         return None
@@ -555,7 +569,14 @@ def _looks_like_pin(obj: dict) -> bool:
     """
     if not str(obj.get("entityId") or obj.get("id") or ""):
         return False
-    return bool(obj.get("images") or obj.get("images_orig") or obj.get("images_736x") or obj.get("images_474x"))
+    if obj.get("images") or obj.get("images_orig") or obj.get("images_736x") or obj.get("images_474x"):
+        return True
+    # O payload real traz as imagens em "originals"; sem esta checagem um
+    # pin cuja media so exista nessa resolucao seria descartado.
+    images = obj.get("images")
+    return isinstance(images, dict) and any(
+        isinstance(images.get(size), dict) for size in IMAGE_SIZE_ORDER
+    )
 
 
 def _find_pins_in_graphql(obj) -> List[dict]:
@@ -649,8 +670,7 @@ def _pin_from_pws_dict(d: dict) -> PinMetadata | None:
     if flat_orig:
         iurl = flat_orig.get("url")
     elif imgs_dict:
-        orig = imgs_dict.get("orig", {}) or imgs_dict.get("736x", {})
-        iurl = orig.get("url")
+        iurl = _best_image(imgs_dict).get("url")
 
     if not iurl:
         return None

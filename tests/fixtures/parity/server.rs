@@ -79,6 +79,8 @@ pub async fn serve() -> Server {
                 let (mime, body) = if path.starts_with("/resource/") {
                     let id = if path.ends_with("page=2") {
                         "102"
+                    } else if path.contains("DupeResource") {
+                        "901"
                     } else {
                         "101"
                     };
@@ -108,6 +110,69 @@ pub async fn serve() -> Server {
                     (
                         "text/html",
                         r#"<html><script id="__PWS_DATA__">{"pins":[{"id":"201","images":{"orig":{"url":"/public-media/201.jpg"}}}]}</script></html>"#.to_owned(),
+                    )
+                } else if path == "/mixed/art/" {
+                    // A board whose payload also carries the pins of another
+                    // board. The page of a board asks for the feeds of other
+                    // boards; those pins are not part of this board.
+                    (
+                        "text/html",
+                        r#"<html><script id="__PWS_DATA__">{"pins":[
+                            {"id":"801","images":{"orig":{"url":"/public-media/801.jpg"}},"board":{"url":"/mixed/art/","name":"Alvo"}},
+                            {"id":"802","images":{"orig":{"url":"/public-media/802.jpg"}},"board":{"url":"/mixed/outro/","name":"Outro"}},
+                            {"id":"803","images":{"orig":{"url":"/public-media/803.jpg"}}}
+                        ]}</script></html>"#
+                            .to_owned(),
+                    )
+                } else if path == "/dupes/art/" {
+                    // The same pin arrives three ways: the DOM, the network
+                    // payload and the DOM again after the scroll. The
+                    // collector has to keep exactly one entry for it.
+                    (
+                        "text/html",
+                        r#"<html><body><main data-test-id="board-feed">
+                            <a href="/pin/901/">No DOM</a>
+                        </main><script>
+                            async function load() {
+                                const response = await fetch('/resource/DupeResource/get/');
+                                const payload = await response.json();
+                                const main = document.querySelector('main');
+                                for (const pin of payload.resource_response.data) {
+                                    const a = document.createElement('a');
+                                    a.href = '/pin/' + pin.id + '/';
+                                    a.textContent = pin.title;
+                                    main.appendChild(a);
+                                }
+                                const end = document.createElement('div');
+                                end.dataset.testId = 'board-feed-end';
+                                main.appendChild(end);
+                            }
+                            document.cookie = 'fixture_cookie=ok; path=/';
+                            setTimeout(load, 100);
+                            window.addEventListener('scroll', () => setTimeout(load, 100));
+                        </script></body></html>"#
+                            .to_owned(),
+                    )
+                } else if path == "/session-expired/art/" {
+                    // A board whose session expires in the middle of the
+                    // collection: the pins show up first and the login form
+                    // arrives on the first scroll. The pins collected before
+                    // the expiry have to be kept.
+                    (
+                        "text/html",
+                        r#"<html><body><main data-test-id="board-feed">
+                            <a href="/pin/1001/">Primeiro</a>
+                            <a href="/pin/1002/">Segundo</a>
+                        </main><div style="height:1800px"></div><script>
+                            window.addEventListener('scroll', () => {
+                                if (!document.querySelector('[data-test-id="login-form"]')) {
+                                    const form = document.createElement('form');
+                                    form.dataset.testId = 'login-form';
+                                    document.body.appendChild(form);
+                                }
+                            });
+                        </script></body></html>"#
+                            .to_owned(),
                     )
                 } else if path == "/real/public/" {
                     // Uma captura real e sanitizada de um quadro publico. A

@@ -122,6 +122,7 @@ pub struct BrowserSession {
     _temporary_profile: Option<tempfile::TempDir>,
     options: BrowserOptions,
     cancel: CancellationToken,
+    process_id: Option<u32>,
 }
 
 impl BrowserSession {
@@ -150,8 +151,12 @@ impl BrowserSession {
             config = config.no_sandbox();
         }
         let config = config.build().map_err(BrowserError::Protocol)?;
-        let (browser, mut events) =
+        let (mut browser, mut events) =
             guarded(&cancel, options.operation_timeout, Browser::launch(config)).await?;
+        // The pid is read once, right after the launch: the child handle is
+        // only reachable through a mutable borrow, and the caller wants to
+        // compare the browser of one board with the browser of the next.
+        let process_id = browser.get_mut_child().and_then(|child| child.inner.id());
         let handler = tokio::spawn(async move {
             while let Some(event) = events.next().await {
                 if event.is_err() {
@@ -165,13 +170,13 @@ impl BrowserSession {
             _temporary_profile: temporary,
             options,
             cancel,
+            process_id,
         })
     }
 
-    pub fn process_id(&mut self) -> Option<u32> {
-        self.browser
-            .get_mut_child()
-            .and_then(|child| child.inner.id())
+    /// The pid of the browser process, when it could be read.
+    pub fn process_id(&self) -> Option<u32> {
+        self.process_id
     }
 
     pub async fn new_page(&self) -> Result<BrowserPage> {

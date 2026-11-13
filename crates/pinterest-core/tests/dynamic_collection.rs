@@ -47,6 +47,186 @@ async fn virtualized_feed_accumulates_exact_network_pin_ids() {
 
 #[tokio::test]
 #[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn only_the_pins_of_the_target_board_belong_to_it() {
+    // The page of a board also asks for the feeds of other boards. The pin
+    // that names another board does not belong to the target and must not be
+    // downloaded as if it were.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let board = collector
+        .collect_board(&format!("{}/mixed/art/", server.url))
+        .await
+        .unwrap();
+    let mut ids: Vec<_> = board.pin_links.keys().cloned().collect();
+    ids.sort();
+    assert_eq!(
+        ids,
+        ["801", "803"],
+        "a pin of another board was counted as part of the target"
+    );
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn the_same_pin_that_arrives_three_ways_is_counted_once() {
+    // The pin shows up in the DOM, in the network payload and in the DOM
+    // again after the scroll. The exact id has to be there, and only once.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let board = collector
+        .collect_board(&format!("{}/dupes/art/", server.url))
+        .await
+        .unwrap();
+    let mut ids: Vec<_> = board.pin_links.keys().cloned().collect();
+    ids.sort();
+    assert_eq!(ids, ["901"]);
+    assert_eq!(board.pins.len(), 1);
+    assert_eq!(board.pins["901"].id, "901");
+    // The pin came from the DOM and from the network, and it was counted
+    // once all the same.
+    assert_eq!(board.origin.sources.values().sum::<usize>(), 1);
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium and a display; the CI runs it under a virtual display"]
+async fn a_session_that_expires_midway_keeps_the_pins_that_were_already_collected() {
+    // The session expires after the first pins arrive. The user logs in and
+    // the collection continues; the pins collected before the expiry stay.
+    if cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_none() {
+        eprintln!("pulado: esta maquina nao tem display para o browser visivel");
+        return;
+    }
+    let server = fixture::serve().await;
+    let (operation, mut events) = Operation::new(32);
+    let resume = operation.clone();
+    let login_prompts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = std::sync::Arc::clone(&login_prompts);
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            if matches!(event.event, RunEvent::LoginRequired { .. }) {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                resume.resume_login();
+            }
+        }
+    });
+    let collector = Collector::launch(
+        CollectionOptions {
+            manual_login: true,
+            max_duration: Duration::from_secs(6),
+            ..options()
+        },
+        operation,
+    )
+    .await
+    .unwrap();
+    let board = collector
+        .collect_board(&format!("{}/session-expired/art/", server.url))
+        .await
+        .unwrap();
+    let mut ids: Vec<_> = board.pin_links.keys().cloned().collect();
+    ids.sort();
+    assert_eq!(
+        ids,
+        ["1001", "1002"],
+        "the pins collected before the session expired were lost"
+    );
+    assert!(
+        login_prompts.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+        "the expired session never asked for a login"
+    );
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium and a display; the CI runs it under a virtual display"]
+async fn cancelling_the_login_stops_the_run_right_away() {
+    // The user refuses to log in. The run has to stop promptly instead of
+    // waiting for the deadline, and it must not leave the browser behind.
+    if cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_none() {
+        eprintln!("pulado: esta maquina nao tem display para o browser visivel");
+        return;
+    }
+    let server = fixture::serve().await;
+    let (operation, mut events) = Operation::new(32);
+    let cancel = operation.clone();
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            if matches!(event.event, RunEvent::LoginRequired { .. }) {
+                cancel.cancel();
+            }
+        }
+    });
+    let collector = Collector::launch(
+        CollectionOptions {
+            manual_login: true,
+            max_duration: Duration::from_secs(120),
+            ..options()
+        },
+        operation,
+    )
+    .await
+    .unwrap();
+    let started = std::time::Instant::now();
+    let result = collector
+        .collect_board(&format!("{}/session-expired/art/", server.url))
+        .await;
+    assert!(
+        matches!(result, Err(pinterest_core::PinterestError::Cancelled)),
+        "the run did not stop: {result:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "cancelling the login took {:?}",
+        started.elapsed()
+    );
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn one_browser_serves_every_board_of_the_run() {
+    // Opening a Chromium per board is slow and heavy. The same browser has
+    // to serve the whole run: the pid before the first board and the pid
+    // after the last one have to be the same, and the process has to be
+    // gone once the collector is closed.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let first = collector.process_id().expect("the browser has no pid");
+
+    let first_board = collector
+        .collect_board(&format!("{}/alice/art/", server.url))
+        .await
+        .unwrap();
+    assert_eq!(first_board.pin_links.len(), 2);
+    assert_eq!(
+        collector.process_id(),
+        Some(first),
+        "the browser was replaced between two boards"
+    );
+
+    let second_board = collector
+        .collect_board(&format!("{}/alice/nature/", server.url))
+        .await
+        .unwrap();
+    assert!(!second_board.pin_links.is_empty());
+    assert_eq!(
+        collector.process_id(),
+        Some(first),
+        "the browser was replaced between two boards"
+    );
+
+    collector.close().await.unwrap();
+    #[cfg(target_os = "linux")]
+    assert!(
+        !std::path::Path::new(&format!("/proc/{first}")).exists(),
+        "the browser was not reaped"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
 async fn a_board_that_says_it_ended_does_not_wait_for_the_whole_stability_budget() {
     // The page tells the collector that the feed ended. That is evidence
     // that there is nothing more to load, so waiting the whole stability

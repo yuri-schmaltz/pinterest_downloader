@@ -71,6 +71,13 @@ pub struct PinMetadata {
     pub url: String,
     pub image_url: String,
     pub title: String,
+    /// The board the pin was saved to, when the payload says so.
+    ///
+    /// A board page also asks for the feeds of other boards. The pin that
+    /// comes from another board is not part of the target, and the payload
+    /// is what says so.
+    #[serde(default)]
+    pub board_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

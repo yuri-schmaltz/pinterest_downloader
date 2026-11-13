@@ -213,6 +213,7 @@ impl Downloader {
                         url: pin_url.into(),
                         image_url: pin.image_url,
                         title: pin.title,
+                        board_url: None,
                     }));
                 }
                 Ok(None) => {}
@@ -261,6 +262,7 @@ impl Downloader {
                         url: pin_url.into(),
                         image_url: url.to_string(),
                         title: String::new(),
+                        board_url: None,
                     }));
                 }
             }
