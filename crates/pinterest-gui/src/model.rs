@@ -38,6 +38,18 @@ impl Stage {
             Stage::Download => "Download",
         }
     }
+
+    /// The place of the step in the journey.
+    ///
+    /// The number is what the user sees in the circle of the step bar, and
+    /// it is also o que diz se a etapa ja passou.
+    pub fn index(self) -> usize {
+        match self {
+            Stage::Profile => 0,
+            Stage::Boards => 1,
+            Stage::Download => 2,
+        }
+    }
 }
 
 /// What the interface is doing right now.
@@ -183,6 +195,24 @@ impl AppModel {
     /// The login was answered.
     pub fn login_answered(&mut self) {
         self.login_request = None;
+    }
+
+    /// What the run is doing, in one line.
+    ///
+    /// The interface shows this next to the progress, para que o usuario
+    /// saiba se o download ainda corre ou ja terminou.
+    pub fn stage_state(&self) -> String {
+        match self.activity {
+            Activity::Discovering => "Procurando os quadros...".into(),
+            Activity::Downloading => "Baixando as midias...".into(),
+            Activity::Idle => {
+                if self.progress.is_cancelled() {
+                    "Cancelado; os arquivos ja prontos foram mantidos.".into()
+                } else {
+                    "Pronto.".into()
+                }
+            }
+        }
     }
 }
 

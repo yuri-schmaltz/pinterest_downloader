@@ -5,4 +5,5 @@ pub mod app;
 pub mod boards;
 pub mod model;
 pub mod progress;
+pub mod theme;
 pub mod thumbs;

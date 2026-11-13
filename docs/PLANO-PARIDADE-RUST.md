@@ -45,16 +45,16 @@ Paridade significa equivalência observável em cenários definidos. Não exige 
 | Rate limiting | Janelas de segundo/minuto/hora | Token bucket | Política equivalente, backoff e métricas |
 | Logs e métricas | JSON por fases, estatísticas | Texto de tracing | Eventos e arquivos estruturados |
 | Progresso/cancelamento | Callbacks e sinais da GUI | Resumo final | Eventos tipados e cancelamento cooperativo |
-| GUI | Perfil, seleção, capas, pasta, progresso, login | Ausente | Aplicação desktop Rust |
+| GUI | Perfil, seleção, capas, pasta, progresso, login | Aplicação desktop Rust (egui) | Aplicação desktop Rust |
 | Distribuição | PyInstaller, AppImage, DEB, Windows | Workflow CLI Linux/Windows definido | CLI/GUI e Chromium validados em máquinas limpas |
 
-A referência é o comportamento do código, confrontado com cenários e expectativas independentes. A suíte local registrada tem 218 testes Python e 53 Rust; isso não comprova compatibilidade atual com o Pinterest.
+A referência é o comportamento do código, confrontado com cenários e expectativas independentes. A suíte local registrada tem 246 testes Python e 128 Rust; isso não comprova compatibilidade atual com o Pinterest.
 
 Divergências conhecidas a resolver no contrato:
 
 - Python e Rust diferem em defaults, saída em disco e semântica de `--no-cache`.
-- Rust tem cache de metadados e `--cache-dir`, mas ainda sem expiração nem invalidação segura; o Python também não tem.
-- Rust redimensiona o paralelismo entre quadros, mas ainda não ajusta o número de tarefas em voo por CPU e memória como o `--adaptive-workers` do Python.
+- Rust tem cache de metadados e `--cache-dir`, com a mesma versão e a mesma validade de 30 dias (`--cache-ttl-days`) do Python; falta invalidação segura quando o formato muda.
+- Rust redimensiona o paralelismo entre quadros (`--boards-workers`) e ajusta as tarefas em voo por CPU e memória com `--adaptive-workers`, como o Python.
 - Um HTML vazio ou parcial não prova que um quadro está vazio ou completo.
 - Reuso de arquivos não vazios não prova integridade retrospectiva.
 

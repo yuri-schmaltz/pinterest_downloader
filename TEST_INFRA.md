@@ -1,21 +1,21 @@
 # Infraestrutura e limites dos testes
 
-Verificação local em **2026-11-06**, sobre as correções posteriores ao clone de `688243c`. Resultados locais não equivalem a CI remota nem validação dos artefatos publicados.
+Verificação local em **2026-11-13**, sobre as correções posteriores ao clone de `688243c`. Resultados locais não equivalem a CI remota nem validação dos artefatos publicados.
 
 ## Resultado reproduzido
 
 | Verificação | Resultado |
 |---|---|
-| Python 3.12.3, Qt offscreen e Chromium | **218 passaram**, nenhum skip, 0 avisos de depreciação |
-| Cobertura de `src/` | **67%** geral; scraper **57%**; GUI **72%** |
+| Python 3.12.3, Qt offscreen e Chromium | **246 passaram**, nenhum skip, 0 avisos de depreciação |
+| Cobertura de `src/` | **69%** geral; scraper **62%**; GUI **72%** |
 | Node: i18n + helpers de pins | **40 + 29 verificações** |
-| Rust 1.99.1 | **53 testes** (22 unitários no core, 4 do browser, 3 da CLI, 24 de integração), todos aprovados com Chromium |
+| Rust 1.99.1 | **128 testes** (89 no core, 30 na interface gráfica, 5 na CLI, 4 no browser), todos aprovados com Chromium |
 | Ruff / Black / mypy | Aprovados; mypy cobre scraper e app_version |
 | Rustfmt / Clippy | Aprovados; Clippy com `-D warnings` |
 | Versões | Manifest, Python, manifests Cargo e entradas locais do Cargo.lock sincronizados em 2.0.5 |
 | Diagnóstico `--deep` | 13 checagens, nenhuma falha ou aviso |
 
-Os avisos Python restantes vieram de `datetime.utcnow()`, removido de `json_logger.py`, `adaptive_workers.py` e `rate_limiter.py`; o formato dos timestamps foi preservado. Nenhum teste Rust da CLI é contado como teste unitário: os 13 unitários ficam no core, e os 23 restantes são de integração (browser, CLI, fluxo HTTP, coleta dinâmica e cache de metadados). O binário foi adicionalmente exercitado contra servidor local, verificando sucesso, extração vazia, workers zero e stream interrompido.
+Os avisos Python restantes vieram de `datetime.utcnow()`, removido de `json_logger.py`, `adaptive_workers.py` e `rate_limiter.py`; o formato dos timestamps foi preservado. Nenhum teste Rust da CLI é contado como teste unitário: os 89 do core, os 30 da interface gráfica, os 5 da CLI e os 4 do browser separam o que é unidade do que é integração (browser, CLI, fluxo HTTP, coleta dinâmica e cache de metadados). O binário foi adicionalmente exercitado contra servidor local, verificando sucesso, extração vazia, workers zero e stream interrompido.
 
 ## O que cada camada prova
 

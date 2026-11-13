@@ -7,6 +7,7 @@
 use crate::boards::BoardEntry;
 use crate::model::{Activity, AppModel, Stage};
 use crate::progress::LogLevel;
+use crate::theme;
 use crate::thumbs::ThumbnailCache;
 use eframe::egui;
 use pinterest_core::engine::{self, RunOptions};
@@ -46,6 +47,8 @@ pub struct App {
     /// The runtime that runs the engine in the background.
     pub runtime: Option<tokio::runtime::Runtime>,
     pub filter: String,
+    /// The folder where the files are written, as the user types it.
+    pub out_root_text: String,
     /// The texts the last frame showed.
     ///
     /// The drawing is the only place that knows what the user reads, so it
@@ -72,6 +75,7 @@ impl App {
             pending_thumbnails: HashSet::new(),
             runtime,
             filter: String::new(),
+            out_root_text: String::new(),
             last_labels: Vec::new(),
         }
     }
@@ -320,49 +324,211 @@ impl App {
         if self.model.stage == Stage::Boards {
             self.request_thumbnails();
         }
-        ctx.set_theme(egui::Theme::Dark);
+        theme::apply(ctx);
 
-        egui::TopBottomPanel::top("steps").show(ctx, |ui| {
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.heading("Pinterest Board Downloader");
-                ui.separator();
-                for stage in [Stage::Profile, Stage::Boards, Stage::Download] {
-                    let active = self.model.stage == stage;
-                    let text = if active {
-                        format!("● {}", stage.label())
-                    } else {
-                        format!("○ {}", stage.label())
-                    };
-                    if active {
-                        ui.label(egui::RichText::new(text).strong());
-                    } else {
-                        ui.label(text);
-                    }
-                }
-            });
-            ui.add_space(4.0);
-        });
+        self.steps_bar(ctx);
+        self.error_bar(ctx);
 
-        if let Some(error) = self.model.error.clone() {
-            egui::TopBottomPanel::top("error").show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    let text = self.label(format!("Erro: {error}"));
-                    ui.colored_label(egui::Color32::from_rgb(240, 120, 120), text);
-                    if ui.button("Fechar").clicked() {
-                        self.model.error = None;
-                    }
+        // The footer comes first: the panel do meio so sabe o espaco que
+        // sobrou, e o cartao nao invade a barra de baixo.
+        self.footer(ctx);
+
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::BG)
+                    .inner_margin(egui::Margin::symmetric(18, 12)),
+            )
+            .show(ctx, |ui| {
+                theme::card(ui, |ui| match self.model.stage {
+                    Stage::Profile => self.profile(ui),
+                    Stage::Boards => self.boards(ui),
+                    Stage::Download => self.download(ui),
                 });
             });
-        }
-
-        egui::CentralPanel::default().show(ctx, |ui| match self.model.stage {
-            Stage::Profile => self.profile(ui),
-            Stage::Boards => self.boards(ui),
-            Stage::Download => self.download(ui),
-        });
 
         self.login_dialog(ctx);
+    }
+
+    /// The bar at the top: the steps, the profile and the state of the run.
+    ///
+    /// The profile stays in this bar in every step, como na interface em
+    /// PyQt6: o usuario ve o que esta baixando sem precisar voltar.
+    fn steps_bar(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("steps")
+            .exact_height(66.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::SURFACE)
+                    .inner_margin(egui::Margin::symmetric(22, 14)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let current = self.model.stage.index();
+                    // The steps take a fixed width, so the profile and the
+                    // state of the run always find room on the right.
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(392.0, ui.available_height()),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            for (index, stage) in [Stage::Profile, Stage::Boards, Stage::Download]
+                                .into_iter()
+                                .enumerate()
+                            {
+                                if index > 0 {
+                                    theme::step_line(ui);
+                                    ui.add_space(14.0);
+                                }
+                                let state = if index == current {
+                                    theme::StepState::Active
+                                } else if index < current {
+                                    theme::StepState::Done
+                                } else {
+                                    theme::StepState::Pending
+                                };
+                                theme::step_badge(ui, &(index + 1).to_string(), state);
+                                ui.add_space(9.0);
+                                let color = match state {
+                                    theme::StepState::Active => theme::TEXT,
+                                    theme::StepState::Done => theme::GREEN,
+                                    theme::StepState::Pending => theme::TEXT_MUTED,
+                                };
+                                let text = self.label(stage.label());
+                                ui.label(egui::RichText::new(text).color(color).strong());
+                                ui.add_space(18.0);
+                            }
+                        },
+                    );
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let status = self.status_line();
+                        ui.colored_label(theme::TEXT_MUTED, status);
+                        ui.add_space(20.0);
+                        let response = theme::field(
+                            ui,
+                            &mut self.model.target,
+                            "usuario ou https://www.pinterest.com/usuario/",
+                            280.0,
+                        );
+                        // The field keeps the focus, so the user can
+                        // press Enter to start the search.
+                        if response.lost_focus()
+                            && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                        {
+                            self.start_discovery();
+                        }
+                    });
+                });
+            });
+    }
+
+    /// The bar that shows an error, when there is one.
+    fn error_bar(&mut self, ctx: &egui::Context) {
+        let Some(error) = self.model.error.clone() else {
+            return;
+        };
+        egui::TopBottomPanel::top("error")
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::BG)
+                    .inner_margin(egui::Margin::symmetric(22, 8)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let text = self.label(format!("Erro: {error}"));
+                    ui.colored_label(theme::ERROR, text);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if theme::button(ui, "Fechar", theme::ButtonKind::Quiet) {
+                            self.model.error = None;
+                        }
+                    });
+                });
+            });
+    }
+
+    /// The bar at the bottom: what the run is doing and what can be done.
+    fn footer(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::bottom("footer")
+            .exact_height(64.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::SURFACE)
+                    .inner_margin(egui::Margin::symmetric(22, 14)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let summary = self.footer_summary();
+                    ui.colored_label(theme::TEXT_MUTED, summary);
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| match self.model.stage {
+                            Stage::Profile => {}
+                            Stage::Boards => {
+                                let text = self.label("Baixar escolhidos");
+                                let running = self.model.activity.is_running();
+                                let enabled = !running && self.model.boards.selected_count() > 0;
+                                if theme::button_enabled(
+                                    ui,
+                                    &text,
+                                    theme::ButtonKind::Primary,
+                                    enabled,
+                                ) {
+                                    self.start_download();
+                                }
+                                ui.add_space(10.0);
+                                let back = self.label("Voltar");
+                                if theme::button(ui, &back, theme::ButtonKind::Quiet) {
+                                    self.model.stage = Stage::Profile;
+                                }
+                            }
+                            Stage::Download => {
+                                if self.model.activity.is_running() {
+                                    let text = self.label("Cancelar");
+                                    if theme::button(ui, &text, theme::ButtonKind::Danger) {
+                                        self.cancel();
+                                    }
+                                } else {
+                                    let back = self.label("Voltar aos quadros");
+                                    if theme::button(ui, &back, theme::ButtonKind::Quiet) {
+                                        self.model.stage = Stage::Boards;
+                                    }
+                                }
+                            }
+                        },
+                    );
+                });
+            });
+    }
+
+    /// What the interface says about the run, in one line.
+    fn status_line(&self) -> String {
+        if let Some(notice) = &self.model.notice {
+            return notice.clone();
+        }
+        match self.model.activity {
+            Activity::Discovering => "Procurando os quadros...".to_owned(),
+            Activity::Downloading => "Baixando as midias...".to_owned(),
+            Activity::Idle => "Pronto.".to_owned(),
+        }
+    }
+
+    /// What the footer says about the step the user is on.
+    fn footer_summary(&self) -> String {
+        match self.model.stage {
+            Stage::Profile => "Escreva o perfil e procure os quadros.".to_owned(),
+            Stage::Boards => format!(
+                "{} de {} quadro(s) escolhido(s).",
+                self.model.boards.selected_count(),
+                self.model.boards.boards().len()
+            ),
+            Stage::Download => {
+                let totals = self.model.progress.totals();
+                format!(
+                    "Novos: {}  ·  Reutilizados: {}  ·  Falhas: {}",
+                    totals.downloaded, totals.reused, totals.failed
+                )
+            }
+        }
     }
 }
 
@@ -387,55 +553,56 @@ fn decode_image(bytes: &[u8]) -> Option<egui::ColorImage> {
 
 impl App {
     fn profile(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(10.0);
-        ui.heading(self.label("Perfil"));
-        ui.label("Informe o usuario do Pinterest ou o endereco do perfil.");
+        theme::step_title(ui, &self.label("De qual perfil do Pinterest?"));
+        ui.add_space(6.0);
+        theme::hint(
+            ui,
+            "Escreva o usuario ou a URL do perfil no campo acima, a direita. As duas formas valem.",
+        );
+        ui.add_space(20.0);
+
+        let running = self.model.activity == Activity::Discovering;
         ui.horizontal(|ui| {
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut self.model.target)
-                    .hint_text("usuario ou https://www.pinterest.com/usuario/")
-                    .desired_width(420.0),
-            );
-            // The field keeps the focus, so the user can press Enter.
-            if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-                self.start_discovery();
-            }
-            let running = self.model.activity == Activity::Discovering;
             let text = self.label("Buscar quadros");
-            if ui.add_enabled(!running, egui::Button::new(text)).clicked() {
+            if theme::button_enabled(ui, &text, theme::ButtonKind::Secondary, !running) {
                 self.start_discovery();
             }
             if running {
+                ui.add_space(12.0);
                 ui.spinner();
+                ui.label(egui::RichText::new("Procurando os quadros...").color(theme::TEXT_MUTED));
             }
         });
-        if let Some(notice) = &self.model.notice {
-            ui.label(notice);
+
+        if let Some(notice) = self.model.notice.clone() {
+            ui.add_space(16.0);
+            theme::quiet(ui, notice);
         }
     }
 
     fn boards(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(8.0);
+        theme::step_title(ui, &self.label("Escolha os quadros que quer baixar"));
+        ui.add_space(12.0);
+
+        // The filter and the quick choices.
         ui.horizontal(|ui| {
-            ui.heading(self.label("Quadros"));
-            ui.separator();
-            ui.label(format!(
-                "{} de {} escolhido(s)",
-                self.model.boards.selected_count(),
-                self.model.boards.boards().len()
-            ));
-            ui.text_edit_singleline(&mut self.filter);
-            if ui.button("Filtrar").clicked() {
+            theme::field(ui, &mut self.filter, "Buscar quadro...", 240.0);
+            if theme::button(ui, "Filtrar", theme::ButtonKind::Quiet) {
                 self.model.boards.set_filter(self.filter.clone());
             }
-            if ui.button("Escolher todos").clicked() {
-                self.model.boards.select_all_visible();
-            }
-            if ui.button("Escolher nenhum").clicked() {
-                self.model.boards.clear_selection();
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let none = self.label("Escolher nenhum");
+                if theme::button(ui, &none, theme::ButtonKind::Quiet) {
+                    self.model.boards.clear_selection();
+                }
+                ui.add_space(8.0);
+                let all = self.label("Escolher todos");
+                if theme::button(ui, &all, theme::ButtonKind::Quiet) {
+                    self.model.boards.select_all_visible();
+                }
+            });
         });
-        ui.separator();
+        ui.add_space(14.0);
 
         // The list is copied before the drawing: the drawing records what
         // it shows and cannot hold a borrow of the model while it does so.
@@ -446,40 +613,81 @@ impl App {
             .into_iter()
             .map(|board| (board.url.clone(), board.title.clone(), board.pin_count))
             .collect();
+        if visible.is_empty() {
+            theme::hint(ui, "Nenhum quadro carregado.");
+            return;
+        }
+
         let mut chosen = Vec::new();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (url, title, pin_count) in visible {
-                let mut selected = self.model.boards.is_selected(&url);
-                ui.horizontal(|ui| {
-                    if ui.checkbox(&mut selected, "").changed() {
-                        chosen.push((url.clone(), selected));
+        // The grid is as wide as the card allows; each cover fills its own
+        // column, so the row of covers has no gap in the middle.
+        let cell = 150.0;
+        let spacing = 16.0;
+        let columns = ((ui.available_width() + spacing) / (cell + spacing))
+            .floor()
+            .max(1.0) as usize;
+        egui::ScrollArea::vertical()
+            .max_height(392.0)
+            .show(ui, |ui| {
+                ui.columns(columns, |columns_ui| {
+                    // The width of one column is the width of the cover.
+                    let side = columns_ui[0].available_width().clamp(96.0, 210.0);
+                    for (index, (url, title, pin_count)) in visible.iter().enumerate() {
+                        let column = index % columns;
+                        let column_ui = &mut columns_ui[column];
+                        let mut selected = self.model.boards.is_selected(url);
+                        let handle = self.thumbnails.get(url).cloned();
+
+                        column_ui.vertical(|ui| {
+                            let (rect, _) = ui
+                                .allocate_exact_size(egui::vec2(side, side), egui::Sense::hover());
+                            match handle {
+                                Some(handle) => {
+                                    let mut image = egui::Image::new(&handle);
+                                    image = image.fit_to_exact_size(egui::vec2(side, side));
+                                    image.paint_at(ui, rect);
+                                }
+                                None => {
+                                    // A square placeholder, so the grid keeps
+                                    // its shape while the cover is on its way.
+                                    ui.painter().rect_filled(rect, 8.0, theme::SURFACE_2);
+                                    ui.painter().rect_stroke(
+                                        rect,
+                                        8.0,
+                                        egui::Stroke::new(1.0_f32, theme::BORDER),
+                                        egui::StrokeKind::Inside,
+                                    );
+                                    ui.painter().text(
+                                        rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        "…",
+                                        egui::FontId::new(18.0, egui::FontFamily::Proportional),
+                                        theme::TEXT_DIM,
+                                    );
+                                }
+                            }
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                if ui.checkbox(&mut selected, "").changed() {
+                                    chosen.push((url.clone(), selected));
+                                }
+                                ui.vertical(|ui| {
+                                    let shown = self.label(title.clone());
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(shown).strong().color(theme::TEXT),
+                                        )
+                                        .truncate(),
+                                    );
+                                    if let Some(count) = pin_count {
+                                        theme::quiet(ui, format!("{count} pins"));
+                                    }
+                                });
+                            });
+                        });
                     }
-                    ui.add_space(8.0);
-                    // The cover is square, so it does not distort.
-                    let side = egui::vec2(56.0, 56.0);
-                    match self.thumbnails.get(&url) {
-                        Some(handle) => {
-                            ui.add(egui::Image::new(handle).fit_to_exact_size(side));
-                        }
-                        None => {
-                            // A square placeholder, so the list keeps its
-                            // shape while the cover is on its way.
-                            let (rect, _) = ui.allocate_exact_size(side, egui::Sense::hover());
-                            ui.painter()
-                                .rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
-                        }
-                    }
-                    let shown = self.label(title.clone());
-                    ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(shown).strong());
-                        if let Some(count) = pin_count {
-                            ui.small(format!("{count} pins"));
-                        }
-                        ui.small(&url);
-                    });
                 });
-            }
-        });
+            });
         for (url, selected) in chosen {
             self.model.boards.toggle(&url);
             if selected != self.model.boards.is_selected(&url) {
@@ -488,68 +696,94 @@ impl App {
             }
         }
 
-        ui.separator();
-        ui.horizontal(|ui| {
-            if ui.button("Voltar").clicked() {
-                self.model.stage = Stage::Profile;
-            }
-            let running = self.model.activity.is_running();
-            let text = self.label("Baixar escolhidos");
-            if ui
-                .add_enabled(
-                    !running && self.model.boards.selected_count() > 0,
-                    egui::Button::new(text),
-                )
-                .clicked()
-            {
-                self.start_download();
-            }
-            ui.label(format!("Workers: {}", self.model.workers));
-        });
+        ui.add_space(14.0);
+        self.options_strip(ui);
+    }
+
+    /// The strip with the destination and the adjustments of the run.
+    fn options_strip(&mut self, ui: &mut egui::Ui) {
+        egui::Frame::new()
+            .fill(theme::SURFACE_2)
+            .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
+            .corner_radius(egui::CornerRadius::same(theme::RADIUS_CARD))
+            .inner_margin(egui::Margin::symmetric(14, 10))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    theme::quiet(ui, "Destino");
+                    let mut out_root = self.out_root_text.clone();
+                    let response = theme::field(ui, &mut out_root, "pasta de destino", 280.0);
+                    if response.changed() {
+                        self.out_root_text = out_root.clone();
+                        self.model.out_root = std::path::PathBuf::from(&out_root);
+                    }
+                    ui.add_space(24.0);
+                    theme::quiet(ui, "Workers");
+                    ui.add(
+                        egui::DragValue::new(&mut self.model.workers)
+                            .range(1..=32)
+                            .speed(1),
+                    );
+                    ui.add_space(24.0);
+                    theme::quiet(ui, "Modo");
+                    let mut mode = self.model.mode;
+                    egui::ComboBox::from_id_salt("modo")
+                        .selected_text(match mode {
+                            pinterest_core::engine::CollectionMode::Auto => "Automatico",
+                            pinterest_core::engine::CollectionMode::Browser => "Browser",
+                            pinterest_core::engine::CollectionMode::Http => "HTTP",
+                        })
+                        .show_ui(ui, |ui| {
+                            for option in [
+                                pinterest_core::engine::CollectionMode::Auto,
+                                pinterest_core::engine::CollectionMode::Browser,
+                                pinterest_core::engine::CollectionMode::Http,
+                            ] {
+                                let text = match option {
+                                    pinterest_core::engine::CollectionMode::Auto => "Automatico",
+                                    pinterest_core::engine::CollectionMode::Browser => "Browser",
+                                    pinterest_core::engine::CollectionMode::Http => "HTTP",
+                                };
+                                ui.selectable_value(&mut mode, option, text);
+                            }
+                        });
+                    self.model.mode = mode;
+                });
+            });
     }
 
     fn download(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.heading(self.label("Download"));
-            ui.separator();
+        theme::step_title(ui, &self.label("Download"));
+        ui.add_space(12.0);
+
+        // The progress card.
+        let (current, total) = {
             let progress = &self.model.progress;
-            let current = progress.current();
-            let total = progress.total();
-            ui.add(
-                egui::ProgressBar::new(if total > 0 {
-                    current as f32 / total as f32
-                } else {
-                    0.0
-                })
-                .desired_width(320.0)
-                .text(format!("{current}/{total}")),
-            );
-            if self.model.activity.is_running() {
-                let text = self.label("Cancelar");
-                if ui.button(text).clicked() {
-                    self.cancel();
-                }
-            } else if ui.button("Voltar aos quadros").clicked() {
-                self.model.stage = Stage::Boards;
-            }
-        });
-        ui.separator();
-
-        egui::ScrollArea::vertical()
-            .max_height(220.0)
+            (progress.current(), progress.total())
+        };
+        egui::Frame::new()
+            .fill(theme::SURFACE_2)
+            .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
+            .corner_radius(egui::CornerRadius::same(theme::RADIUS_CARD))
+            .inner_margin(egui::Margin::symmetric(14, 12))
             .show(ui, |ui| {
-                for line in self.model.progress.logs() {
-                    let color = match line.level {
-                        LogLevel::Info => egui::Color32::LIGHT_GRAY,
-                        LogLevel::Warning => egui::Color32::from_rgb(240, 200, 120),
-                        LogLevel::Error => egui::Color32::from_rgb(240, 120, 120),
+                ui.horizontal(|ui| {
+                    let ratio = if total > 0 {
+                        current as f32 / total as f32
+                    } else {
+                        0.0
                     };
-                    ui.colored_label(color, &line.message);
-                }
+                    theme::progress_bar(ui, ratio, &format!("{current}/{total}"), 340.0);
+                    ui.add_space(18.0);
+                    if self.model.activity.is_running() {
+                        ui.spinner();
+                    }
+                    let state = self.model.stage_state();
+                    theme::quiet(ui, state);
+                });
             });
+        ui.add_space(12.0);
 
-        ui.separator();
+        // The totals.
         let totals = self.model.progress.totals().clone();
         ui.horizontal(|ui| {
             let novos = format!("Novos: {}", totals.downloaded);
@@ -559,6 +793,38 @@ impl App {
             ui.label(self.label(reutilizados));
             ui.label(self.label(falhas));
         });
+        ui.add_space(12.0);
+
+        // The log.
+        egui::Frame::new()
+            .fill(theme::SURFACE)
+            .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
+            .corner_radius(egui::CornerRadius::same(theme::RADIUS_CARD))
+            .inner_margin(egui::Margin::symmetric(14, 10))
+            .show(ui, |ui| {
+                theme::quiet(ui, "Registro");
+                ui.add_space(4.0);
+                let lines: Vec<(LogLevel, String)> = self
+                    .model
+                    .progress
+                    .logs()
+                    .iter()
+                    .map(|line| (line.level, line.message.clone()))
+                    .collect();
+                egui::ScrollArea::vertical()
+                    .max_height(240.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for (level, message) in lines {
+                            let color = match level {
+                                LogLevel::Info => theme::TEXT_MUTED,
+                                LogLevel::Warning => theme::WARNING,
+                                LogLevel::Error => theme::ERROR,
+                            };
+                            ui.label(egui::RichText::new(message).monospace().color(color));
+                        }
+                    });
+            });
     }
 
     /// The dialog that asks the user to log in.

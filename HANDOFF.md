@@ -56,11 +56,11 @@ O source precisa incluir `crates/`, `Cargo.toml`, `Cargo.lock`, o spec PyInstall
 - ZIP precisa ser recriado: atualizar um ZIP existente pode manter arquivos removidos.
 - O executável PyInstaller depende da árvore `_internal/`; distribua o diretório completo.
 - Arquivos `.part` não são cache. Downloads antigos não são verificados por checksum.
-- O cache de metadados (Python e Rust) usa `.pinterest_cache.json` e o mesmo formato nos dois lados; não tem expiração nem invalidação, e um arquivo corrompido é descartado em vez de recuperado.
+- O cache de metadados (Python e Rust) usa `.pinterest_cache.json` e o mesmo formato nos dois lados; a versão e a idade das entradas ficam em `.pinterest_cache_meta.json`, ao lado do mapa, e as entradas vencem depois de 30 dias por padrão (`--cache-ttl-days` nos dois lados). Um arquivo corrompido é descartado em vez de recuperado.
 - Os testes de navegador usam fixtures sintéticas e scripts injetados; não substituem teste da extensão instalada nem teste no Pinterest real.
 - O XPI ainda usa o manifest Chrome, sem assinatura nem validação Firefox.
 - CRLF continuava no índice do commit de origem, apesar de `.gitattributes` exigir LF. O checkout foi normalizado; a mudança aparecerá no diff até ser commitada.
 
 ## Próximos trabalhos
 
-Capturar fixtures reais, validar coleta no Pinterest, implementar paginação/coleta dinâmica Rust, cache de metadados com expiração, paralelismo entre quadros e workers adaptativos no Rust, GUI Rust, testar artefatos em Windows/Linux e preparar manifests/assinatura das lojas. Os detalhes e limites de cobertura estão em [TEST_INFRA.md](TEST_INFRA.md).
+Capturar fixtures reais, validar coleta no Pinterest, paginar a coleta dinâmica Rust, versionar o cache de metadados, testar artefatos em Windows/Linux e preparar manifests/assinatura das lojas. A interface Rust em egui já cobre perfil, seleção com capas, destino, progresso, cancelamento e login, e usa a mesma paleta da interface PyQt6. Os detalhes e limites de cobertura estão em [TEST_INFRA.md](TEST_INFRA.md).
