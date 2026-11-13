@@ -20,6 +20,14 @@ pub struct CollectionOptions {
     pub browser: BrowserOptions,
     pub scroll_pause: Duration,
     pub stable_rounds: usize,
+    /// How many quiet rounds are enough once the page itself says that the
+    /// feed ended.
+    ///
+    /// The end marker is evidence that the board has no more pins to give.
+    /// Only a payload that was still on its way can still arrive, and a
+    /// couple of quiet rounds cover it. Waiting the whole stability budget
+    /// would add half a minute to every board for nothing.
+    pub end_quiet_rounds: usize,
     pub max_duration: Duration,
     pub max_pins: Option<usize>,
     pub manual_login: bool,
@@ -30,6 +38,7 @@ impl Default for CollectionOptions {
             browser: BrowserOptions::default(),
             scroll_pause: Duration::from_millis(1200),
             stable_rounds: 20,
+            end_quiet_rounds: 3,
             max_duration: Duration::from_secs(150),
             max_pins: None,
             manual_login: false,
@@ -113,6 +122,7 @@ impl Collector {
     pub async fn launch(mut options: CollectionOptions, operation: Operation) -> Result<Self> {
         if options.scroll_pause.is_zero()
             || options.stable_rounds == 0
+            || options.end_quiet_rounds == 0
             || options.max_duration.is_zero()
             || options.max_pins == Some(0)
         {
@@ -247,7 +257,17 @@ impl Collector {
                 } else {
                     stable = 0;
                 }
-                if stable >= self.options.stable_rounds {
+                // The page that says the feed ended is evidence that there is
+                // nothing more to load. A few quiet rounds are enough to let
+                // a payload that was still on its way arrive; waiting the
+                // whole stability budget would add half a minute to every
+                // board for nothing.
+                let required = if end_seen {
+                    self.options.end_quiet_rounds
+                } else {
+                    self.options.stable_rounds
+                };
+                if stable >= required {
                     break if end_seen && !truncated && snapshot.pending_requests == 0 {
                         CompletionReason::EndOfFeed
                     } else {

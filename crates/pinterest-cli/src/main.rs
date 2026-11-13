@@ -81,6 +81,9 @@ struct Cli {
     no_sandbox: bool,
     #[arg(long, default_value_t = 1.2)]
     scroll_pause: f64,
+    /// Rondas de silêncio que provam que a página terminou o feed
+    #[arg(long, default_value_t = 3)]
+    end_quiet_rounds: usize,
     #[arg(long, default_value_t = 150)]
     collection_timeout: u64,
     /// Eventos JSONL em stdout; progresso humano vai para stderr
@@ -114,6 +117,7 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
     if cli.workers == 0
         || cli.boards_workers == 0
         || cli.max_pins == Some(0)
+        || cli.end_quiet_rounds == 0
         || !cli.scroll_pause.is_finite()
         || cli.scroll_pause <= 0.0
         || cli.scroll_pause > 3600.0
@@ -138,6 +142,7 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
     collection.browser.headless = !cli.headful;
     collection.browser.no_sandbox = cli.no_sandbox;
     collection.scroll_pause = Duration::from_secs_f64(cli.scroll_pause);
+    collection.end_quiet_rounds = cli.end_quiet_rounds;
     collection.max_duration = Duration::from_secs(cli.collection_timeout);
     collection.manual_login = cli.manual_login;
     let options = RunOptions {

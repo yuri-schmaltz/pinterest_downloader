@@ -47,6 +47,73 @@ async fn virtualized_feed_accumulates_exact_network_pin_ids() {
 
 #[tokio::test]
 #[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn a_board_that_says_it_ended_does_not_wait_for_the_whole_stability_budget() {
+    // The page tells the collector that the feed ended. That is evidence
+    // that there is nothing more to load, so waiting the whole stability
+    // budget (20 rounds) added half a minute to every single board.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(
+        CollectionOptions {
+            scroll_pause: Duration::from_millis(200),
+            stable_rounds: 20,
+            max_duration: Duration::from_secs(30),
+            ..options()
+        },
+        operation(),
+    )
+    .await
+    .unwrap();
+    let started = std::time::Instant::now();
+    let board = collector
+        .collect_board(&format!("{}/alice/art/", server.url))
+        .await
+        .unwrap();
+    let elapsed = started.elapsed();
+    assert_eq!(board.reason, CompletionReason::EndOfFeed);
+    assert_eq!(board.completeness, Completeness::Complete);
+    assert_eq!(board.pin_links.len(), 2);
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "a board that said it ended took {elapsed:?}"
+    );
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn a_board_without_the_end_marker_still_waits_for_the_stability_budget() {
+    // The fast path belongs to the end marker alone. A board that merely
+    // stopped changing has no proof that it is complete, so it keeps the
+    // whole budget and reports the result as unknown.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(
+        CollectionOptions {
+            scroll_pause: Duration::from_millis(200),
+            stable_rounds: 8,
+            max_duration: Duration::from_secs(30),
+            ..options()
+        },
+        operation(),
+    )
+    .await
+    .unwrap();
+    let started = std::time::Instant::now();
+    let board = collector
+        .collect_board(&format!("{}/still/art/", server.url))
+        .await
+        .unwrap();
+    let elapsed = started.elapsed();
+    assert_eq!(board.reason, CompletionReason::Stable);
+    assert_eq!(board.completeness, Completeness::Unknown);
+    assert!(
+        elapsed >= Duration::from_millis(8 * 200),
+        "the stability budget was skipped: {elapsed:?}"
+    );
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
 async fn profile_excludes_other_users_and_includes_late_board() {
     let server = fixture::serve().await;
     let collector = Collector::launch(options(), operation()).await.unwrap();
