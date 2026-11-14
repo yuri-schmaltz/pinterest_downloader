@@ -156,12 +156,17 @@ pub async fn serve() -> Server {
                 } else if path == "/session-expired/art/" {
                     // A board whose session expires in the middle of the
                     // collection: the pins show up first and the login form
-                    // arrives on the first scroll. The pins collected before
-                    // the expiry have to be kept.
+                    // arrives right after. The pins collected before the
+                    // expiry have to be kept.
                     //
-                    // The scroll is the trigger, and the time is the backup:
-                    // a window that is too tall never scrolls, and then the
-                    // session would never expire.
+                    // The expiry happens once per browser session, and the
+                    // marker in the session storage is what says so: after
+                    // the user logs in the page opens normally, and the
+                    // collection finishes instead of asking for a login
+                    // forever. The scroll is not the trigger, because a
+                    // window that is too tall never scrolls, and a scroll
+                    // that never happens would leave the collection
+                    // without the login it is supposed to ask for.
                     (
                         "text/html",
                         r#"<html><body><main data-test-id="board-feed">
@@ -169,14 +174,15 @@ pub async fn serve() -> Server {
                             <a href="/pin/1002/">Segundo</a>
                         </main><div style="height:1800px"></div><script>
                             const expire = () => {
+                                if (sessionStorage.getItem('session-expired')) return;
+                                sessionStorage.setItem('session-expired', '1');
                                 if (!document.querySelector('[data-test-id="login-form"]')) {
                                     const form = document.createElement('form');
                                     form.dataset.testId = 'login-form';
                                     document.body.appendChild(form);
                                 }
                             };
-                            window.addEventListener('scroll', expire);
-                            setTimeout(expire, 1200);
+                            setTimeout(expire, 250);
                         </script></body></html>"#
                             .to_owned(),
                     )
