@@ -379,7 +379,7 @@ fn o_cartao_de_ajustes_fica_na_barra_de_status() {
         .read_response(egui::Id::new("campo-destino"))
         .expect("the destination field was not drawn");
     assert!(
-        field.rect.min.y >= 760.0 - 76.0,
+        field.rect.min.y >= 760.0 - 80.0,
         "the card with the adjustments is not in the bar at the bottom: {:?}",
         field.rect
     );
@@ -485,6 +485,110 @@ fn o_texto_do_campo_do_perfil_tem_contraste() {
     );
 }
 
+/// The field of the profile takes the whole space of the bar.
+///
+/// The address of the Pinterest is long, and a narrow field cuts it in the
+/// middle: the field takes the space that is left in the bar.
+#[test]
+fn o_campo_do_perfil_ocupa_a_barra() {
+    let mut app = App::new();
+    app.model
+        .boards_found(vec![board("https://pinterest.com/a/arte/", "Arte")]);
+
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(1100.0, 760.0),
+        )),
+        ..Default::default()
+    };
+    let context = egui::Context::default();
+    let output = context.run(input, |ctx| {
+        app.update_ui(ctx);
+    });
+
+    let field = context
+        .read_response(egui::Id::new("campo-perfil"))
+        .expect("the profile field was not drawn");
+    let status = text_rect(&output, "encontrado(s)").expect("the status was not drawn");
+    assert!(
+        status.min.x - field.rect.max.x < 60.0,
+        "the field does not take the space of the bar: {:?} {status:?}",
+        field.rect
+    );
+    assert!(
+        field.rect.width() > 380.0,
+        "the field of the profile is still narrow: {:?}",
+        field.rect
+    );
+}
+
+/// Every control of the status bar has the same height.
+///
+/// The card with the adjustments is a control with a margin: the buttons of
+/// the bar have the height of the card, and a button that is lower than the
+/// card next to it looks like a mistake.
+#[test]
+fn os_controles_da_barra_de_status_tem_a_mesma_altura() {
+    let mut app = App::new();
+    app.model
+        .boards_found(vec![board("https://pinterest.com/a/arte/", "Arte")]);
+
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(1100.0, 760.0),
+        )),
+        ..Default::default()
+    };
+    let context = egui::Context::default();
+    let output = context.run(input, |ctx| {
+        app.update_ui(ctx);
+    });
+
+    let field = context
+        .read_response(egui::Id::new("campo-destino"))
+        .expect("the destination field was not drawn");
+
+    let painted: Vec<egui::Rect> = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect) => {
+                let fill = rect.fill;
+                if (fill.r(), fill.g(), fill.b()) == (0x2A, 0x2F, 0x38) {
+                    Some(rect.rect)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .collect();
+
+    // The card is the box that holds the field of the destination: the
+    // biggest box around it, because the field itself is painted too.
+    let card = painted
+        .iter()
+        .filter(|rect| rect.contains(field.rect.center()))
+        .max_by(|a, b| {
+            (a.width() * a.height())
+                .partial_cmp(&(b.width() * b.height()))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .expect("the card of the adjustments was not painted");
+    // The button is the first box on the right of the card.
+    let button = painted
+        .iter()
+        .find(|rect| rect.min.x > card.max.x - 1.0 && rect.min.y > 600.0)
+        .expect("the button of the bar was not painted");
+
+    assert!(
+        (card.height() - button.height()).abs() < 0.5,
+        "the card and the button do not have the same height: {card:?} {button:?}"
+    );
+}
+
 /// Where a text was drawn, in the screen.
 fn text_rect(output: &egui::FullOutput, needle: &str) -> Option<egui::Rect> {
     for clipped in &output.shapes {
@@ -571,7 +675,7 @@ fn check_fits(mut app: App, name: &str) {
 
     // The top of the footer: nothing of the screen may go past it. The
     // fundo das barras e do painel e largo demais e nao conta.
-    let limit = 760.0 - 76.0;
+    let limit = 760.0 - 80.0;
     for clipped in &output.shapes {
         if let egui::Shape::Rect(rect) = &clipped.shape {
             let rect = rect.rect;

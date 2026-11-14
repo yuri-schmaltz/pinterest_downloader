@@ -18,6 +18,19 @@ use std::io::Read;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 
+/// The height of the bar at the bottom.
+const FOOTER_HEIGHT: f32 = 80.0;
+
+/// The height of the controls in the bar at the bottom.
+///
+/// The card with the adjustments is a control with a margin of 8 pixels:
+/// the buttons of the bar have the height of the card, so every control of
+/// the status bar is the same height.
+const FOOTER_CONTROL_HEIGHT: f32 = 52.0;
+
+/// The margin of the card with the adjustments, inside the bar.
+const FOOTER_CARD_MARGIN: f32 = 8.0;
+
 /// What the background task sends to the interface.
 pub enum Message {
     /// The profile was discovered.
@@ -407,11 +420,15 @@ impl App {
                         let status = self.status_line();
                         ui.colored_label(theme::TEXT_MUTED, status);
                         ui.add_space(20.0);
+                        // O campo do perfil toma o espaco que sobra na
+                        // barra: o endereco do Pinterest e longo, e um
+                        // campo estreito corta o texto ao meio.
+                        let width = ui.available_width();
                         let response = theme::field(
                             ui,
                             &mut self.model.target,
                             "usuario ou https://www.pinterest.com/usuario/",
-                            280.0,
+                            width,
                             egui::Id::new("campo-perfil"),
                         );
                         // O Enter com o campo focalizado comeca a busca.
@@ -459,7 +476,7 @@ impl App {
     /// part of the status of the run, and not of the list of boards.
     fn footer(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("footer")
-            .exact_height(76.0)
+            .exact_height(FOOTER_HEIGHT)
             .frame(
                 egui::Frame::new()
                     .fill(theme::SURFACE)
@@ -472,9 +489,11 @@ impl App {
                     if self.model.stage == Stage::Boards {
                         self.options_strip(ui);
                     }
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| match self.model.stage {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Os botoes tem a altura do cartao de ajustes:
+                        // na barra de status, tudo tem a mesma altura.
+                        ui.spacing_mut().interact_size.y = FOOTER_CONTROL_HEIGHT;
+                        match self.model.stage {
                             Stage::Profile => {}
                             Stage::Boards => {
                                 let text = self.label("Baixar escolhidos");
@@ -507,8 +526,8 @@ impl App {
                                     }
                                 }
                             }
-                        },
-                    );
+                        }
+                    });
                 });
             });
     }
@@ -760,7 +779,7 @@ impl App {
             .fill(theme::SURFACE_2)
             .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
             .corner_radius(egui::CornerRadius::same(theme::RADIUS_CARD))
-            .inner_margin(egui::Margin::symmetric(12, 8))
+            .inner_margin(egui::Margin::symmetric(12, FOOTER_CARD_MARGIN as i8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     theme::quiet(ui, "Destino");

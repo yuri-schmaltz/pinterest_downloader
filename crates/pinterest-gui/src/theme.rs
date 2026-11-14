@@ -343,6 +343,9 @@ pub fn field(
             .hint_text(hint_text)
             .desired_width(width)
             .text_color(TEXT)
+            // O texto nao empurra a caixa: um campo que cresce com o
+            // endereco empurra o resto da barra para fora.
+            .clip_text(true)
             // A margem e a altura da caixa: o texto fica no meio do campo,
             // do mesmo tamanho que o botao ao lado.
             .margin(egui::Margin::symmetric(4, 8))
