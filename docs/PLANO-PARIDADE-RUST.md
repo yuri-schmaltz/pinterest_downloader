@@ -6,7 +6,7 @@
 
 - P0: contrato em `CONTRATO-PARIDADE.md`, matriz rastreável em `tests/fixtures/parity/requirements.json` e fixtures locais compartilhadas criados. Capturas reais e congelamento final dos contratos ainda pendentes.
 - P1: crate `pinterest-browser` com Chromium/CDP, descoberta de executável, perfis temporários isolados, eventos de rede, cookies e fechamento/cancelamento. Prova Linux executada; Windows depende da CI adicionada. Decisão em `adr/0001-browser-cdp.md`.
-- P2: coleta dinâmica de perfil/quadro por JSON, DOM e scroll, incluindo feed virtualizado; resultado distingue fim explícito, limite, estabilidade e timeout. A estabilidade só é declarada quando o documento terminou de parsear, não há payload JSON em voo e o quadro já entregou pins ou traz marcador de fim; um feed lento não pode ser reportado como quadro vazio. Atribuição de origem e critérios de fim no Pinterest real ainda pendentes.
+- P2: coleta dinâmica de perfil/quadro por JSON, DOM e scroll, incluindo feed virtualizado; resultado distingue fim explícito, limite, estabilidade, timeout e quadro bloqueado por login (`gated`), que para a coleta na hora em vez de esperar o prazo inteiro. A estabilidade só é declarada quando o documento terminou de parsear, não há payload JSON em voo e o quadro já entregou pins ou traz marcador de fim; um feed lento não pode ser reportado como quadro vazio. Atribuição de origem e critérios de fim no Pinterest real ainda pendentes.
 - P3: integração de cookies, resolução HTTP pela página do pin/metatags e protocolo de login/continuação/cancelamento iniciados. Login headful real, persistência e renovação de sessão ainda pendentes.
 - P5: motor compartilhado, canal limitado de eventos, CLI com modos auto/browser/http, opções de coleta, JSONL, códigos de saída e Ctrl+C. Cache de metadados entregue com `--cache-dir` e controle próprio `--no-metadata-cache`; paralelismo entre quadros entregue com `--boards-workers` e janelas de rate limiting com `Retry-After`. Workers adaptativos por CPU/memória ainda pendentes.
 - P4/P6/P7/P8: não entregues como marcos completos. Nenhum artefato foi publicado nem a paridade foi declarada.
@@ -45,16 +45,16 @@ Paridade significa equivalência observável em cenários definidos. Não exige 
 | Rate limiting | Janelas de segundo/minuto/hora | Token bucket | Política equivalente, backoff e métricas |
 | Logs e métricas | JSON por fases, estatísticas | Texto de tracing | Eventos e arquivos estruturados |
 | Progresso/cancelamento | Callbacks e sinais da GUI | Resumo final | Eventos tipados e cancelamento cooperativo |
-| GUI | Perfil, seleção, capas, pasta, progresso, login | Ausente | Aplicação desktop Rust |
+| GUI | Perfil, seleção, capas, pasta, progresso, login | Aplicação desktop Rust (egui) | Aplicação desktop Rust |
 | Distribuição | PyInstaller, AppImage, DEB, Windows | Workflow CLI Linux/Windows definido | CLI/GUI e Chromium validados em máquinas limpas |
 
-A referência é o comportamento do código, confrontado com cenários e expectativas independentes. A suíte local registrada tem 218 testes Python e 53 Rust; isso não comprova compatibilidade atual com o Pinterest.
+A referência é o comportamento do código, confrontado com cenários e expectativas independentes. A suíte local registrada tem 246 testes Python e 139 Rust; isso não comprova compatibilidade atual com o Pinterest.
 
 Divergências conhecidas a resolver no contrato:
 
 - Python e Rust diferem em defaults, saída em disco e semântica de `--no-cache`.
-- Rust tem cache de metadados e `--cache-dir`, mas ainda sem expiração nem invalidação segura; o Python também não tem.
-- Rust redimensiona o paralelismo entre quadros, mas ainda não ajusta o número de tarefas em voo por CPU e memória como o `--adaptive-workers` do Python.
+- Rust tem cache de metadados e `--cache-dir`, com a mesma versão e a mesma validade de 30 dias (`--cache-ttl-days`) do Python; falta invalidação segura quando o formato muda.
+- Rust redimensiona o paralelismo entre quadros (`--boards-workers`) e ajusta as tarefas em voo por CPU e memória com `--adaptive-workers`, como o Python.
 - Um HTML vazio ou parcial não prova que um quadro está vazio ou completo.
 - Reuso de arquivos não vazios não prova integridade retrospectiva.
 
@@ -284,3 +284,96 @@ Soma inicial: **43–69 dias de engenharia**, aproximadamente **9–14 semanas p
 - [ ] Documentação e notas de migração refletem a release entregue.
 
 Somente após esses itens a versão Rust pode ser declarada equiparada à versão Python como produto completo.
+
+## Capturas reais do Pinterest
+
+A captura real e feita por `scripts/capture_pinterest.py`:
+
+```
+python scripts/capture_pinterest.py https://www.pinterest.com/<perfil>/<quadro>/ \
+    --out tests/fixtures/real/<superficie> --trim
+```
+
+O que a captura guarda:
+
+- a pagina sanitizada, com o `__PWS_DATA__` tratado como JSON (e nao como
+  texto, para que nenhum token passe);
+- o formato dos payloads de rede, com o nome das chaves e o tipo de cada
+  uma, e nao o conteudo;
+- um `manifest.json` com a data, a origem, os seletores observados, as
+  chaves de payload e os limites: o que a captura cobre e o que ela nao
+  cobre.
+
+O que nunca entra na captura: cookie, token, nonce, identificador anonimo,
+nome de usuario, nome de quadro, id de pin e URL de midia. Cada um vira um
+placeholder estavel (`USUARIO_001`, `QUADRO_001`, `PIN_001`, `MIDIA_001`).
+Os testes em `tests/test_capture_sanitizer.py` verificam isso com uma
+pagina que carrega todos esses segredos.
+
+O que a captura real mostrou, e que os testes sinteticos nao mostravam:
+
+- a superficie publica entrega os pins **bloqueados** (`gated-pin-rep`) e o
+  feed vazio para quem nao esta logado. O quadro tem pins; quem nao ve nao
+  pode ver. O coletor agora pede login nesse caso, em vez de dizer que o
+  quadro esta vazio, e a coleta para assim que ve o bloqueio: esperar o
+  prazo inteiro nao muda nada, porque os pins so aparecem depois do login;
+- nenhuma superficie observada traz um marcador explicito de fim de feed.
+  A completude de um quadro real continua desconhecida, e o relatorio diz
+  isso;
+- os seletores reais (`feed`, `grid`, `masonry-container`,
+  `gated-pin-rep`) nao sao os da fixture sintetica. A fixture e a captura
+  sao coisas diferentes, e a captura e o que vale como prova.
+
+O que ainda falta: a superficie logada, os quadros privados e a conta de
+teste. Precisam de credenciais e nao podem ser provados por fixture
+publica.
+
+## A GUI Rust
+
+O crate `crates/pinterest-gui` tem as três etapas da jornada: o perfil, a
+escolha dos quadros e o download.
+
+### Framework e decisoes
+
+- **egui/eframe 0.32**: a interface e imediata, em Rust puro, sem sistema de
+  janelas proprio. O mesmo codigo roda em Linux e Windows e a interface
+  pode ser desenhada **sem tela**, o que permite testar o que o usuario ve
+  sem depender de um servidor de display.
+- **Tema escuro** por padrao, com a escala de tela do sistema respeitada
+  pelo `egui`.
+- **OpenGL com reserva**: a interface desenha com o `glow` e, quando a
+  maquina nao tem OpenGL 2.0 (um Windows sem driver de video, uma sessao
+  remota sem GPU), ela passa para o renderizador da `wgpu` em vez de
+  mostrar um erro e sair.
+- **Navegacao por teclado**: o egui entrega o foco e a navegacao por
+  `Tab`; o campo de perfil aceita `Enter` para comecar a busca.
+- **Downloads fora da thread que desenha**: o motor roda num runtime
+  `tokio` proprio e a interface le os eventos por um canal. A thread que
+  desenha nunca espera por uma operacao de rede.
+- **A GUI nao chama a CLI por subprocesso e nao tem um segundo coletor**:
+  ela usa `pinterest_core::engine`, o mesmo motor da CLI.
+
+### As tres etapas
+
+1. **Perfil**: o alvo e validado antes de gastar um browser; a descoberta
+   e assincrona; o erro aparece no lugar certo e a busca pode ser repetida.
+2. **Quadros**: busca por texto, escolha de um ou de todos, capa quadrada
+   sem distorcao, titulo e contagem de pins. O filtro **esconde** e nao
+   desescolhe: o que estava escolhido continua escolhido. As capas ficam
+   em um cache com limite, e so oito sao buscadas por vez.
+3. **Download**: progresso por quadro e total, log com numero limitado de
+   linhas, arquivos novos/reutilizados/falhos, cancelar e resumo do
+   resultado parcial. O dialogo de login abre o browser e espera por
+   "continuar" ou "cancelar"; cancelar tambem destrava a tarefa de
+   autenticacao.
+
+### O que os testes provam
+
+- `crates/pinterest-gui/tests/journey.rs`: perfil -> escolha -> download
+  gera **somente** as midias dos quadros escolhidos, e o resultado e o
+  mesmo que a CLI produz para o mesmo alvo.
+- `crates/pinterest-gui/tests/interface.rs`: a interface e desenhada sem
+  tela e mostra o que o usuario precisa ver em cada etapa.
+- `crates/pinterest-gui/src/`: o modelo, a lista de quadros, o cache de
+  capas e o progresso tem testes proprios, sem interface.
+- `scripts/smoke_gui.sh`: o binario construido abre a janela e fica de pe.

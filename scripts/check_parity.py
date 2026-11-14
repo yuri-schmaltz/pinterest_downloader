@@ -27,8 +27,13 @@ def main() -> int:
             raise SystemExit(f"Invalid requirement: {row['id']}")
         seen.add(row["id"])
         evidence = row.get("evidence")
-        if row["status"] != "planned" and (not evidence or not (ROOT / evidence).is_file()):
-            raise SystemExit(f"Evidence missing for {row['id']}")
+        if row["status"] != "planned":
+            paths = [evidence] if isinstance(evidence, str) else list(evidence or [])
+            if not paths:
+                raise SystemExit(f"Evidence missing for {row['id']}")
+            for path in paths:
+                if not (ROOT / path).is_file():
+                    raise SystemExit(f"Evidence file not found for {row['id']}: {path}")
     counts = Counter(row["status"] for row in rows)
     print(
         f"Parity matrix: {len(rows)} requirements; "

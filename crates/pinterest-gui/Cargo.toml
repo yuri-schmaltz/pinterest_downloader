@@ -1,0 +1,30 @@
+[package]
+name = "pinterest-gui"
+version = "2.0.5"
+edition = "2021"
+authors = ["Yuri Schmaltz"]
+description = "Graphical interface for Pinterest Board Downloader"
+license = "MIT"
+
+[dependencies]
+pinterest-core = { path = "../pinterest-core", features = ["browser"] }
+eframe = { version = "0.32", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "wgpu",
+    "wayland",
+    "x11",
+] }
+egui = "0.32"
+# A wgpu entra so com os backends: e ela que desenha quando a maquina nao
+# tem OpenGL 2.0 (um Windows sem driver de video, por exemplo).
+wgpu = { version = "25", default-features = false, features = ["dx12", "vulkan", "wgsl"] }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
+
+[dev-dependencies]
+tempfile = "3"

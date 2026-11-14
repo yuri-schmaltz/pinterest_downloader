@@ -79,6 +79,8 @@ pub async fn serve() -> Server {
                 let (mime, body) = if path.starts_with("/resource/") {
                     let id = if path.ends_with("page=2") {
                         "102"
+                    } else if path.contains("DupeResource") {
+                        "901"
                     } else {
                         "101"
                     };
@@ -109,6 +111,159 @@ pub async fn serve() -> Server {
                         "text/html",
                         r#"<html><script id="__PWS_DATA__">{"pins":[{"id":"201","images":{"orig":{"url":"/public-media/201.jpg"}}}]}</script></html>"#.to_owned(),
                     )
+                } else if path == "/mixed/art/" {
+                    // A board whose payload also carries the pins of another
+                    // board. The page of a board asks for the feeds of other
+                    // boards; those pins are not part of this board.
+                    (
+                        "text/html",
+                        r#"<html><script id="__PWS_DATA__">{"pins":[
+                            {"id":"801","images":{"orig":{"url":"/public-media/801.jpg"}},"board":{"url":"/mixed/art/","name":"Alvo"}},
+                            {"id":"802","images":{"orig":{"url":"/public-media/802.jpg"}},"board":{"url":"/mixed/outro/","name":"Outro"}},
+                            {"id":"803","images":{"orig":{"url":"/public-media/803.jpg"}}}
+                        ]}</script></html>"#
+                            .to_owned(),
+                    )
+                } else if path == "/dupes/art/" {
+                    // The same pin arrives three ways: the DOM, the network
+                    // payload and the DOM again after the scroll. The
+                    // collector has to keep exactly one entry for it.
+                    (
+                        "text/html",
+                        r#"<html><body><main data-test-id="board-feed">
+                            <a href="/pin/901/">No DOM</a>
+                        </main><script>
+                            async function load() {
+                                const response = await fetch('/resource/DupeResource/get/');
+                                const payload = await response.json();
+                                const main = document.querySelector('main');
+                                for (const pin of payload.resource_response.data) {
+                                    const a = document.createElement('a');
+                                    a.href = '/pin/' + pin.id + '/';
+                                    a.textContent = pin.title;
+                                    main.appendChild(a);
+                                }
+                                const end = document.createElement('div');
+                                end.dataset.testId = 'board-feed-end';
+                                main.appendChild(end);
+                            }
+                            document.cookie = 'fixture_cookie=ok; path=/';
+                            setTimeout(load, 100);
+                            window.addEventListener('scroll', () => setTimeout(load, 100));
+                        </script></body></html>"#
+                            .to_owned(),
+                    )
+                } else if path == "/session-expired/art/" {
+                    // A board whose session expires in the middle of the
+                    // collection: the pins show up first and the login form
+                    // arrives right after. The pins collected before the
+                    // expiry have to be kept.
+                    //
+                    // The expiry happens once per browser session, and the
+                    // marker in the session storage is what says so: after
+                    // the user logs in the page opens normally, and the
+                    // collection finishes instead of asking for a login
+                    // forever. The scroll is not the trigger, because a
+                    // window that is too tall never scrolls, and a scroll
+                    // that never happens would leave the collection
+                    // without the login it is supposed to ask for.
+                    (
+                        "text/html",
+                        r#"<html><body><main data-test-id="board-feed">
+                            <a href="/pin/1001/">Primeiro</a>
+                            <a href="/pin/1002/">Segundo</a>
+                        </main><div style="height:1800px"></div><script>
+                            const expire = () => {
+                                if (sessionStorage.getItem('session-expired')) return;
+                                sessionStorage.setItem('session-expired', '1');
+                                if (!document.querySelector('[data-test-id="login-form"]')) {
+                                    const form = document.createElement('form');
+                                    form.dataset.testId = 'login-form';
+                                    document.body.appendChild(form);
+                                }
+                            };
+                            setTimeout(expire, 250);
+                        </script></body></html>"#
+                            .to_owned(),
+                    )
+                } else if path == "/real/public/" {
+                    // Uma captura real e sanitizada de um quadro publico. A
+                    // pagina entrega os pins bloqueados para quem nao esta
+                    // logado, o que e o que a captura prova.
+                    (
+                        "text/html",
+                        include_str!("../real/quadro-publico.html").to_owned(),
+                    )
+                } else if path == "/neverend/art/" {
+                    // A board whose feed never says that it ended and never
+                    // stops changing. The collection has to stop on its own
+                    // timeout and report that the result is partial.
+                    (
+                        "text/html",
+                        r#"<html><body><main data-test-id="board-feed">
+                            <a href="/pin/701/">Sem fim</a>
+                            <img src="/public-media/701.jpg">
+                            <div id="grow"></div>
+                            <div style="height:3000px"></div>
+                        </main><script>
+                            window.addEventListener('scroll', () => {
+                                const grow = document.getElementById('grow');
+                                const item = document.createElement('div');
+                                item.style.height = '40px';
+                                item.textContent = 'mais';
+                                grow.appendChild(item);
+                            });
+                        </script></body></html>"#
+                            .to_owned(),
+                    )
+                } else if path == "/still/art/" {
+                    // A board that stops changing without ever saying that
+                    // it ended. The stability is not proof of completeness.
+                    (
+                        "text/html",
+                        r#"<html><body><main data-test-id="board-feed">
+                            <a href="/pin/702/">Parado</a>
+                            <img src="/public-media/702.jpg">
+                        </main></body></html>"#
+                            .to_owned(),
+                    )
+                } else if path == "/origin/art/" {
+                    // A board whose page also carries the pins that Pinterest
+                    // recommends. Only the pins of the board belong to it.
+                    (
+                        "text/html",
+                        r#"<html><body><main data-test-id="board-feed">
+                            <a href="/pin/601/">Do quadro</a>
+                        </main><section data-test-id="related-pins">
+                            <a href="/pin/999/">Recomendado</a>
+                        </section><script id="__PWS_DATA__">{"pins":[{"id":"602","images":{"orig":{"url":"/public-media/602.jpg"}}}],
+                            "recommendations":[{"id":"998","images":{"orig":{"url":"/public-media/998.jpg"}}}]}</script></body></html>"#
+                            .to_owned(),
+                    )
+                } else if path == "/expire/art/" {
+                    // A board whose media URL expired: the media answers 403
+                    // and the page of the pin knows the fresh URL.
+                    (
+                        "text/html",
+                        r#"<html><script id="__PWS_DATA__">{"pins":[{"id":"501","images":{"orig":{"url":"/expired-media/501.jpg"}}}]}</script></html>"#.to_owned(),
+                    )
+                } else if path == "/pin/501/" {
+                    (
+                        "text/html",
+                        r#"<html><meta content="/fresh-media/501.jpg" property="og:image"></html>"#
+                            .to_owned(),
+                    )
+                } else if path == "/fresh-media/501.jpg" {
+                    ("image/jpeg", "fresh image".to_owned())
+                } else if path == "/expired-media/501.jpg" {
+                    status = "403 Forbidden";
+                    ("image/jpeg", "expired".to_owned())
+                } else if path == "/slow/art/" {
+                    // A board that never answers in time. The client has to
+                    // give up on its own when the run is cancelled, without
+                    // waiting for the network timeout.
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    ("text/html", "<html>slow</html>".to_owned())
                 } else if path == "/empty/art/" {
                     ("text/html", "<html><main data-test-id='board-feed'><div data-test-id='board-feed-end'></div></main></html>".to_owned())
                 } else if path == "/login/" {
@@ -126,7 +281,15 @@ pub async fn serve() -> Server {
                 } else {
                     ("text/html", include_str!("dynamic_board.html").to_owned())
                 };
-                let _ = socket.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
+                // The page of the real capture asks for resources of other
+                // hosts. The browser waits for them before saying that the
+                // page is ready, and a machine without internet waits
+                // forever. The policy says that only the fixture itself can
+                // be used: the page loads at once and the test does not
+                // depend on the network.
+                let policy = "Content-Security-Policy: default-src 'self' \
+                              'unsafe-inline' 'unsafe-eval' data: blob:;";
+                let _ = socket.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: {mime}\r\n{policy}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
                 concurrency.leave();
             });
         }

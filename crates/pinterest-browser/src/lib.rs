@@ -122,6 +122,7 @@ pub struct BrowserSession {
     _temporary_profile: Option<tempfile::TempDir>,
     options: BrowserOptions,
     cancel: CancellationToken,
+    process_id: Option<u32>,
 }
 
 impl BrowserSession {
@@ -150,8 +151,12 @@ impl BrowserSession {
             config = config.no_sandbox();
         }
         let config = config.build().map_err(BrowserError::Protocol)?;
-        let (browser, mut events) =
+        let (mut browser, mut events) =
             guarded(&cancel, options.operation_timeout, Browser::launch(config)).await?;
+        // The pid is read once, right after the launch: the child handle is
+        // only reachable through a mutable borrow, and the caller wants to
+        // compare the browser of one board with the browser of the next.
+        let process_id = browser.get_mut_child().and_then(|child| child.inner.id());
         let handler = tokio::spawn(async move {
             while let Some(event) = events.next().await {
                 if event.is_err() {
@@ -165,13 +170,13 @@ impl BrowserSession {
             _temporary_profile: temporary,
             options,
             cancel,
+            process_id,
         })
     }
 
-    pub fn process_id(&mut self) -> Option<u32> {
-        self.browser
-            .get_mut_child()
-            .and_then(|child| child.inner.id())
+    /// The pid of the browser process, when it could be read.
+    pub fn process_id(&self) -> Option<u32> {
+        self.process_id
     }
 
     pub async fn new_page(&self) -> Result<BrowserPage> {
@@ -198,7 +203,7 @@ impl BrowserSession {
         }
         if forced {
             match tokio::time::timeout(Duration::from_secs(5), self.browser.kill()).await {
-                Ok(Some(Ok(()))) | Ok(None) => {}
+                Ok(Some(Ok(())) | None) => {}
                 Ok(Some(Err(error))) => {
                     // The browser may have exited between the wait and the kill.
                     // A process that is already gone was reaped, which is
@@ -232,6 +237,11 @@ pub struct LinkSnapshot {
     pub thumbnail: String,
     #[serde(default)]
     pub recommendation: bool,
+    /// The container of the page the link came from, given by its
+    /// `data-test-id` or `data-parity`. It tells a pin of the board apart
+    /// from a pin that Pinterest recommends next to it.
+    #[serde(default)]
+    pub origin: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkPayload {
@@ -251,6 +261,12 @@ pub struct PageSnapshot {
     /// conclude that nothing changed.
     pub document_ready: bool,
     pub login_required: bool,
+    /// The page shows the pins of the board only as a blurred preview.
+    ///
+    /// A visitor without a session sees the pins blocked and the feed
+    /// empty. Reporting that as "the board is empty" would be a wrong
+    /// answer: the board has pins, the visitor just cannot see them.
+    pub gated: bool,
     pub network: Vec<NetworkPayload>,
     pub network_truncated: bool,
     pub pending_requests: usize,
@@ -392,14 +408,27 @@ impl BrowserPage {
     pub async fn snapshot(&self) -> Result<PageSnapshot> {
         let value = self.evaluate(r#"(() => {
             const root = document.scrollingElement || document.documentElement;
+            // A recommendation can hide under many names. The board of the
+            // user is the only thing that belongs to the board, so anything
+            // that says it is a suggestion is left out.
+            const recommendationSelector = '[data-test-id*="recommend"], [data-test-id*="related"],'
+                + ' [data-test-id*="more-like"], [data-test-id*="morelike"], [data-test-id*="suggest"],'
+                + ' [data-parity*="recommend"], [data-parity*="related"], [data-parity*="suggest"],'
+                + ' [aria-label*="recommend" i], [aria-label*="more like this" i]';
             return {url: location.href, html: document.documentElement.outerHTML,
-                links: Array.from(document.querySelectorAll('a[href]')).slice(0,10000).map(a => ({
+                links: Array.from(document.querySelectorAll('a[href]')).slice(0,10000).map(a => {
+                    const container = a.closest('[data-test-id], [data-parity]');
+                    return {
                     href: a.href, title: (a.getAttribute('title') || a.textContent || '').trim(),
                     thumbnail: a.querySelector('img')?.src || '',
-                    recommendation: Boolean(a.closest('[data-test-id*="related"], [data-test-id*="recommend"], [data-parity="recommendations"]'))})),
+                    recommendation: Boolean(a.closest(recommendationSelector)),
+                    origin: container ? (container.getAttribute('data-test-id')
+                        || container.getAttribute('data-parity') || '') : ''};
+                }),
                 end_of_feed: Boolean(document.querySelector('[data-test-id="board-feed-end"]')),
                 document_ready: document.readyState !== 'loading',
                 login_required: /\/(login|signup)\/?$/.test(location.pathname) || Boolean(document.querySelector('[data-test-id="login-form"], form[action*="/login/"]')),
+                gated: Boolean(document.querySelector('[data-test-id="gated-pin-rep"], [data-test-id="gated-pin-image"]')),
                 height: Math.ceil(root.scrollHeight), at_bottom: root.scrollTop + innerHeight >= root.scrollHeight - 20};
         })()"#).await?;
         let mut log = self.network.lock().await;
@@ -417,6 +446,7 @@ impl BrowserPage {
             end_of_feed: value["end_of_feed"].as_bool().unwrap_or(false),
             document_ready: value["document_ready"].as_bool().unwrap_or(false),
             login_required: value["login_required"].as_bool().unwrap_or(false),
+            gated: value["gated"].as_bool().unwrap_or(false),
             network: entries,
             network_truncated: truncated,
             pending_requests,

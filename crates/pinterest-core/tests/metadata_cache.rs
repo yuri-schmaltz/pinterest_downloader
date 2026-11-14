@@ -13,7 +13,7 @@ use std::time::Duration;
 mod fixture;
 
 use pinterest_core::collector::CollectionOptions;
-use pinterest_core::engine::{run_target, RunOptions};
+use pinterest_core::engine::{run_target, CollectionMode, RunOptions};
 use pinterest_core::models::DownloadOptions;
 use pinterest_core::runtime::Operation;
 
@@ -39,7 +39,7 @@ fn operation() -> Operation {
 async fn cache_round_trips_metadata_and_survives_a_corrupt_file() {
     let directory = tempfile::tempdir().unwrap();
 
-    let mut cache = PinCache::load(directory.path());
+    let mut cache = PinCache::load(directory.path(), std::time::Duration::from_secs(3600));
     assert!(cache.is_empty());
     cache.insert(
         "https://www.pinterest.com/pin/1/",
@@ -54,7 +54,7 @@ async fn cache_round_trips_metadata_and_survives_a_corrupt_file() {
         "the temporary cache file was left behind"
     );
 
-    let reloaded = PinCache::load(directory.path());
+    let reloaded = PinCache::load(directory.path(), std::time::Duration::from_secs(3600));
     assert_eq!(
         reloaded.get("https://www.pinterest.com/pin/1/"),
         Some("https://i.pinimg.com/1.jpg")
@@ -63,7 +63,7 @@ async fn cache_round_trips_metadata_and_survives_a_corrupt_file() {
 
     // A corrupt file must not break the run; it is discarded instead.
     std::fs::write(&stored, "this is not json").unwrap();
-    let after_corruption = PinCache::load(directory.path());
+    let after_corruption = PinCache::load(directory.path(), std::time::Duration::from_secs(3600));
     assert!(after_corruption.is_empty());
 }
 
@@ -78,7 +78,7 @@ async fn the_cache_file_is_shared_with_the_python_format() {
     )
     .unwrap();
 
-    let cache = PinCache::load(directory.path());
+    let cache = PinCache::load(directory.path(), std::time::Duration::from_secs(3600));
     assert_eq!(
         cache.get("https://www.pinterest.com/pin/1/"),
         Some("https://i.pinimg.com/1.jpg")
@@ -169,5 +169,123 @@ async fn disabling_the_metadata_cache_never_writes_the_file() {
     assert!(
         !cache_dir.join(".pinterest_cache.json").exists(),
         "the cache file was written even with the metadata cache disabled"
+    );
+}
+
+#[tokio::test]
+async fn a_cache_that_is_too_old_is_not_used() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut cache = PinCache::load(directory.path(), std::time::Duration::from_secs(3600));
+    cache.insert(
+        "https://www.pinterest.com/pin/1/",
+        "https://i.pinimg.com/1.jpg",
+    );
+    cache.save().await.unwrap();
+
+    // Fresh enough: the entry is there.
+    let fresh = PinCache::load(directory.path(), std::time::Duration::from_secs(3600));
+    assert_eq!(fresh.len(), 1);
+    assert_eq!(fresh.version(), Some(1));
+
+    // Too old: the entry is not used, and the file stays where it is so the
+    // other tool can still read it.
+    let expired = PinCache::load(directory.path(), std::time::Duration::from_secs(0));
+    assert_eq!(expired.len(), 1, "a zero ttl never expires");
+
+    // A ttl of one second with a metadata file written long ago expires it.
+    let meta_path = directory.path().join(".pinterest_cache_meta.json");
+    let mut meta: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
+    meta["written_at"] = serde_json::json!(1_000_000_000u64);
+    std::fs::write(&meta_path, meta.to_string()).unwrap();
+    let stale = PinCache::load(directory.path(), std::time::Duration::from_secs(60));
+    assert_eq!(stale.len(), 0, "a stale cache was used");
+    assert!(
+        directory.path().join(".pinterest_cache.json").is_file(),
+        "the expired cache file was removed instead of being ignored"
+    );
+}
+
+#[tokio::test]
+async fn the_cache_map_keeps_the_format_the_other_tool_reads() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut cache = PinCache::load(directory.path(), std::time::Duration::from_secs(3600));
+    cache.insert(
+        "https://www.pinterest.com/pin/1/",
+        "https://i.pinimg.com/1.jpg",
+    );
+    cache.save().await.unwrap();
+
+    // The map is a plain object of pin URL to media URL: that is what the
+    // Python CLI reads and writes.
+    let raw = std::fs::read_to_string(directory.path().join(".pinterest_cache.json")).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert!(
+        parsed.is_object(),
+        "the cache map must stay a plain object for the other tool"
+    );
+    assert_eq!(
+        parsed["https://www.pinterest.com/pin/1/"],
+        "https://i.pinimg.com/1.jpg"
+    );
+
+    // The version and the age travel beside it.
+    let meta: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(directory.path().join(".pinterest_cache_meta.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(meta["version"], 1);
+    assert!(meta["written_at"].as_u64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn a_cache_without_metadata_is_still_accepted() {
+    // The Python CLI wrote the map before the sidecar existed. The entries
+    // are worth keeping: the other tool may have just written them.
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join(".pinterest_cache.json"),
+        r#"{"https://www.pinterest.com/pin/1/": "https://i.pinimg.com/1.jpg"}"#,
+    )
+    .unwrap();
+    let cache = PinCache::load(directory.path(), std::time::Duration::from_secs(60));
+    assert_eq!(cache.len(), 1, "a cache without metadata was thrown away");
+    assert_eq!(cache.version(), None);
+}
+
+#[tokio::test]
+async fn a_board_that_arrives_with_its_media_still_fills_the_cache() {
+    // The pins of an HTTP snapshot come with their media URL attached, so
+    // there is nothing to resolve. The cache has to record them anyway: the
+    // next run in browser mode can reuse them, and a cache that stays empty
+    // is a cache that never helps.
+    let server = fixture::serve().await;
+    let directory = tempfile::tempdir().unwrap();
+    let cache_dir = directory.path().join("cache");
+
+    let options = RunOptions {
+        mode: CollectionMode::Http,
+        download: DownloadOptions {
+            out_root: directory.path().join("downloads"),
+            rate_limiting: false,
+            cache_dir: Some(cache_dir.clone()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let report = run_target(
+        &format!("{}/snapshot/art/", server.url),
+        options,
+        operation(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.totals.downloaded, 1);
+
+    let stored = std::fs::read_to_string(cache_dir.join(".pinterest_cache.json")).unwrap();
+    assert!(
+        stored.contains("/pin/101/"),
+        "the pin that arrived with its media was not cached: {stored}"
     );
 }

@@ -28,25 +28,42 @@ struct Cli {
     target: Option<String>,
     #[arg(short, long)]
     user: Option<String>,
-    /// Destino (layout Rust atual: usuario_quadro)
-    #[arg(short, long, alias = "out", default_value = "downloads")]
+    /// Destino dos arquivos (layout usuario/quadro, o mesmo do Python)
+    #[arg(short, long, visible_alias = "out", default_value = "pins")]
     output: PathBuf,
-    #[arg(short, long, default_value_t = 8)]
+    #[arg(short, long, default_value_t = 16)]
     workers: usize,
     /// Quadros processados ao mesmo tempo; cada um abre o proprio browser
     #[arg(long, default_value_t = 1)]
     boards_workers: usize,
-    /// Ignora arquivos de mídia existentes (semântica Rust preservada)
+    /// Não usa o cache de metadados de pins (resolução sempre pela rede)
+    ///
+    /// Tem o mesmo significado do `--no-cache` do Python: as duas
+    /// ferramentas usam a mesma opção. Use `--force` para baixar
+    /// de novo as mídias que já estão no disco.
     #[arg(long)]
     no_cache: bool,
-    /// Não usa o cache de metadados de pins (resolução sempre pela rede)
+    /// Não usa o cache de metadados de pins (mesmo que --no-cache)
     #[arg(long)]
     no_metadata_cache: bool,
+    /// Baixa de novo as mídias que já estão no disco
+    #[arg(long)]
+    force: bool,
     /// Diretório do cache de metadados (default: cache do sistema)
     #[arg(long)]
     cache_dir: Option<PathBuf>,
-    #[arg(long)]
+    /// Dias que o cache de metadados vale; zero nunca expira
+    #[arg(long, default_value_t = 30)]
+    cache_ttl_days: u64,
+    /// Desativa o limitador de taxa
+    #[arg(long, alias = "no-rate-limiting")]
     no_rate_limit: bool,
+    /// Ativa o limitador de taxa (o mesmo que desligar --no-rate-limit)
+    #[arg(long)]
+    rate_limiting: bool,
+    /// Ajusta o numero de tarefas em voo conforme a carga da maquina
+    #[arg(long)]
+    adaptive_workers: bool,
     #[arg(long)]
     max_pins: Option<usize>,
     /// Auto usa Chromium; HTTP explícito tem completude desconhecida
@@ -64,13 +81,17 @@ struct Cli {
     no_sandbox: bool,
     #[arg(long, default_value_t = 1.2)]
     scroll_pause: f64,
+    /// Rondas de silêncio que provam que a página terminou o feed
+    #[arg(long, default_value_t = 3)]
+    end_quiet_rounds: usize,
     #[arg(long, default_value_t = 150)]
     collection_timeout: u64,
     /// Eventos JSONL em stdout; progresso humano vai para stderr
     #[arg(long)]
     json_log: bool,
-    /// Arquivo JSONL com os mesmos eventos tipados
-    #[arg(long)]
+    /// Arquivo JSONL com os mesmos eventos tipados; cada execucao acrescenta
+    /// as suas linhas e cada evento traz o `run_id` que a produziu
+    #[arg(long, default_value = "download_log.json")]
     log_file: Option<PathBuf>,
 }
 
@@ -97,6 +118,7 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
     if cli.workers == 0
         || cli.boards_workers == 0
         || cli.max_pins == Some(0)
+        || cli.end_quiet_rounds == 0
         || !cli.scroll_pause.is_finite()
         || cli.scroll_pause <= 0.0
         || cli.scroll_pause > 3600.0
@@ -106,6 +128,9 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
             2,
             "Workers, quadros em paralelo, limite, pausa e timeout devem ser positivos; pausa máxima: 3600s".into(),
         ));
+    }
+    if cli.rate_limiting && cli.no_rate_limit {
+        return Err((2, "--rate-limiting e --no-rate-limit se contradizem".into()));
     }
     if matches!(cli.mode, Mode::Http) && (cli.manual_login || cli.headful) {
         return Err((
@@ -118,6 +143,7 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
     collection.browser.headless = !cli.headful;
     collection.browser.no_sandbox = cli.no_sandbox;
     collection.scroll_pause = Duration::from_secs_f64(cli.scroll_pause);
+    collection.end_quiet_rounds = cli.end_quiet_rounds;
     collection.max_duration = Duration::from_secs(cli.collection_timeout);
     collection.manual_login = cli.manual_login;
     let options = RunOptions {
@@ -125,11 +151,13 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
             out_root: cli.output,
             workers: cli.workers,
             boards_workers: cli.boards_workers,
-            use_cache: !cli.no_cache,
-            rate_limiting: !cli.no_rate_limit,
+            use_cache: !cli.force,
+            rate_limiting: cli.rate_limiting || !cli.no_rate_limit,
+            adaptive: cli.adaptive_workers,
             max_pins: cli.max_pins,
             cache_dir: cli.cache_dir,
-            metadata_cache: !cli.no_metadata_cache,
+            metadata_cache: !(cli.no_cache || cli.no_metadata_cache),
+            cache_ttl: std::time::Duration::from_secs(cli.cache_ttl_days.saturating_mul(86_400)),
         },
         collection,
         mode: match cli.mode {
@@ -141,8 +169,16 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
     let (operation, mut events) = Operation::new(256);
     let presentation_operation = operation.clone();
     let log = if let Some(path) = cli.log_file {
+        // The file is opened in append mode and every event is written with
+        // a single call. Two runs that share the same file used to
+        // overwrite each other's bytes and left a line that was not valid
+        // JSON; appending keeps every line whole, and the run id that each
+        // event carries tells the runs apart.
         Some(
-            tokio::fs::File::create(path)
+            tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
                 .await
                 .map_err(|error| (1, error.to_string()))?,
         )
@@ -159,10 +195,12 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
         loop {
             tokio::select! {
                 line = login_input.recv(), if awaiting_login => {
-                    match line {
-                        Some(true) => { presentation_operation.resume_login(); awaiting_login = false; },
-                        _ => { presentation_operation.cancel(); awaiting_login = false; },
+                    if matches!(line, Some(true)) {
+                        presentation_operation.resume_login();
+                    } else {
+                        presentation_operation.cancel();
                     }
+                    awaiting_login = false;
                 },
                 event = events.recv() => {
                     let Some(event) = event else { break; };
@@ -172,8 +210,12 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
                         stdout.write_all(format!("{serialized}\n").as_bytes()).await.map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
                     }
                     if let Some(file) = &mut log {
-                        file.write_all(serialized.as_bytes()).await.map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
-                        file.write_all(b"\n").await.map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
+                        // One write per event: two writes would let another
+                        // run slip its newline between the two halves of a
+                        // line.
+                        file.write_all(format!("{serialized}\n").as_bytes())
+                            .await
+                            .map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
                     }
                     match &event.event {
                         RunEvent::LoginRequired { url } => {

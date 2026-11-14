@@ -1,0 +1,1510 @@
+[
+  {
+    "url": "https://www.pinterest.com/secure/arkose_data_exchange/",
+    "status": 200,
+    "shape": {
+      "blob": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/resource/ActivateExperimentResource/create/",
+    "status": 200,
+    "shape": {
+      "resource_response": {
+        "status": "str",
+        "code": "int",
+        "message": "str",
+        "endpoint_name": "str",
+        "data": [
+          {
+            "group": "str"
+          }
+        ],
+        "x_pinterest_sli_endpoint_name": "str",
+        "http_status": "int"
+      },
+      "client_context": {
+        "ads_grid_title_truncation_pharma_enabled": "bool",
+        "web_paid_partnership_grid_labeling_enabled": "bool",
+        "app_type_detailed": "int",
+        "app_version": "str",
+        "autologin": "null",
+        "browser_name": "str",
+        "browser_type": "int",
+        "browser_version": "str",
+        "country": "str",
+        "country_from_hostname": "str",
+        "country_from_ip": "str",
+        "current_url": "str",
+        "debug": "bool",
+        "deep_link": "str",
+        "enabled_advertiser_countries": [
+          "str"
+        ],
+        "full_path": "str",
+        "http_referrer": "str",
+        "invite_code": "str",
+        "invite_sender_id": "str",
+        "is_authenticated": "bool",
+        "is_bot": "str",
+        "is_perf_metrics_bot": "bool",
+        "is_vpn": "bool",
+        "is_proxy": "bool",
+        "is_tor": "bool",
+        "is_hosting": "bool",
+        "has_geo_is_anon": "bool",
+        "has_dcip": "bool",
+        "is_unauth_botspam_asn": "bool",
+        "is_full_page": "bool",
+        "is_mobile_agent": "bool",
+        "is_sterling_on_steroids": "bool",
+        "is_tablet_agent": "bool",
+        "language": "str",
+        "locale": "str",
+        "origin": "str",
+        "path": "str",
+        "placed_experiences": "null",
+        "referrer": "null",
+        "region_from_ip": "str",
+        "request_host": "str",
+        "request_identifier": "str",
+        "social_bot": "str",
+        "stage": "str",
+        "sterling_on_steroids_ldap": "null",
+        "sterling_on_steroids_user_type": "null",
+        "theme": "str",
+        "gestalt_theme": "str",
+        "seo_debug": "bool",
+        "user_agent_can_use_native_app": "bool",
+        "user_agent_platform": "str",
+        "user_agent_platform_version": "null",
+        "user": {
+          "ip_country": "str",
+          "ip_region": "str"
+        },
+        "utm_campaign": "null",
+        "visible_url": "str"
+      },
+      "resource": {
+        "name": "str",
+        "options": {
+          "bookmarks": [
+            "str"
+          ],
+          "experiments": [
+            {
+              "experiment_name": "str",
+              "experiment_group": "str"
+            }
+          ]
+        }
+      },
+      "request_identifier": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/manifest.json",
+    "status": 200,
+    "shape": {
+      "android_package_name": "str",
+      "background_color": "str",
+      "display": "str",
+      "icons": [
+        {
+          "src": "str",
+          "sizes": "str",
+          "type": "str"
+        }
+      ],
+      "gcm_sender_id": "str",
+      "gcm_user_visible_only": "bool",
+      "name": "str",
+      "orientation": "str",
+      "short_name": "str",
+      "start_url": "str",
+      "theme_color": "str",
+      "related_applications": [
+        {
+          "platform": "str",
+          "id": "str"
+        }
+      ],
+      "url_handlers": [
+        {
+          "origin": "str"
+        }
+      ]
+    }
+  },
+  {
+    "url": "https://accounts.google.com/gsi/fedcm/config/passive.json",
+    "status": 200,
+    "shape": {
+      "idtoken_endpoint": "str",
+      "id_token_endpoint": "str",
+      "id_assertion_endpoint": "str",
+      "metrics_endpoint": "str",
+      "accounts_endpoint": "str",
+      "client_metadata_endpoint": "str",
+      "client_id_metadata_endpoint": "str",
+      "signin_url": "str",
+      "login_url": "str",
+      "revocation_endpoint": "str",
+      "disconnect_endpoint": "str",
+      "supports_add_account": "bool",
+      "supports_use_other_account": "bool",
+      "accounts": {
+        "include": "str"
+      },
+      "account_label": "str",
+      "modes": {
+        "button": {
+          "supports_use_other_account": "bool"
+        },
+        "widget": {
+          "supports_use_other_account": "bool"
+        },
+        "active": {
+          "supports_use_other_account": "bool"
+        },
+        "passive": {
+          "supports_use_other_account": "bool"
+        }
+      },
+      "branding": {
+        "background_color": "str",
+        "color": "str",
+        "icons": [
+          {
+            "url": "str",
+            "size": "int"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/resource/UserExperienceResource/get/",
+    "status": 200,
+    "shape": {
+      "resource_response": {
+        "status": "str",
+        "code": "int",
+        "message": "str",
+        "endpoint_name": "str",
+        "data": {},
+        "x_pinterest_sli_endpoint_name": "str",
+        "http_status": "int"
+      },
+      "client_context": {
+        "ads_grid_title_truncation_pharma_enabled": "bool",
+        "web_paid_partnership_grid_labeling_enabled": "bool",
+        "app_type_detailed": "int",
+        "app_version": "str",
+        "autologin": "null",
+        "browser_name": "str",
+        "browser_type": "int",
+        "browser_version": "str",
+        "country": "str",
+        "country_from_hostname": "str",
+        "country_from_ip": "str",
+        "current_url": "str",
+        "debug": "bool",
+        "deep_link": "str",
+        "enabled_advertiser_countries": [
+          "str"
+        ],
+        "full_path": "str",
+        "http_referrer": "str",
+        "invite_code": "str",
+        "invite_sender_id": "str",
+        "is_authenticated": "bool",
+        "is_bot": "str",
+        "is_perf_metrics_bot": "bool",
+        "is_vpn": "bool",
+        "is_proxy": "bool",
+        "is_tor": "bool",
+        "is_hosting": "bool",
+        "has_geo_is_anon": "bool",
+        "has_dcip": "bool",
+        "is_unauth_botspam_asn": "bool",
+        "is_full_page": "bool",
+        "is_mobile_agent": "bool",
+        "is_sterling_on_steroids": "bool",
+        "is_tablet_agent": "bool",
+        "language": "str",
+        "locale": "str",
+        "origin": "str",
+        "path": "str",
+        "placed_experiences": "null",
+        "referrer": "null",
+        "region_from_ip": "str",
+        "request_host": "str",
+        "request_identifier": "str",
+        "social_bot": "str",
+        "stage": "str",
+        "sterling_on_steroids_ldap": "null",
+        "sterling_on_steroids_user_type": "null",
+        "theme": "str",
+        "gestalt_theme": "str",
+        "seo_debug": "bool",
+        "user_agent_can_use_native_app": "bool",
+        "user_agent_platform": "str",
+        "user_agent_platform_version": "null",
+        "user": {
+          "ip_country": "str",
+          "ip_region": "str"
+        },
+        "utm_campaign": "null",
+        "visible_url": "str"
+      },
+      "resource": {
+        "name": "str",
+        "options": {
+          "bookmarks": [
+            "str"
+          ],
+          "placement_ids": [
+            "int"
+          ],
+          "extra_context": "null"
+        }
+      },
+      "request_identifier": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/resource/UserResource/get/",
+    "status": 200,
+    "shape": {
+      "resource_response": {
+        "status": "str",
+        "code": "int",
+        "message": "str",
+        "endpoint_name": "str",
+        "data": {
+          "node_id": "str",
+          "show_creator_profile": "bool",
+          "show_engagement_tab": "bool",
+          "has_custom_board_sorting_order": "bool",
+          "domain_verified": "bool",
+          "interest_following_count": "null",
+          "is_private_profile": "bool",
+          "indexed": "bool",
+          "username": "str",
+          "show_impressum": "bool",
+          "partner": {
+            "node_id": "str",
+            "contact_phone": "str",
+            "contact_phone_country": {
+              "code": "str",
+              "phone_code": "str"
+            },
+            "is_boost_a_pin_partner": "bool",
+            "profile_place": "null",
+            "enable_profile_address": "bool",
+            "contact_email": "null",
+            "enable_profile_message": "bool"
+          },
+          "instagram_data": "null",
+          "is_partner": "bool",
+          "seo_description": "str",
+          "website_url": "null",
+          "last_name": "str",
+          "following_count": "int",
+          "profile_discovered_public": "bool",
+          "has_showcase": "bool",
+          "is_gco_account": "bool",
+          "is_ads_only_profile": "bool",
+          "full_name": "str",
+          "should_default_comments_off": "bool",
+          "follower_count": "int",
+          "profile_view": {},
+          "avatar_color_index": "int",
+          "board_count": "int",
+          "is_inspirational_merchant": "bool",
+          "type": "str",
+          "has_published_pins": "bool",
+          "profile_views": "int",
+          "storefront_management_enabled": "bool",
+          "pronouns": [],
+          "video_pin_count": "int",
+          "story_pin_count": "int",
+          "id": "str",
+          "image_medium_url": "str",
+          "seo_noindex_reason": "null",
+          "is_primary_website_verified": "bool",
+          "impressum_url": "null",
+          "joined_communities_count": "int",
+          "image_large_url": "str",
+          "domain_url": "null",
+          "last_pin_save_time": "str",
+          "profile_reach": "int",
+          "should_show_messaging": "bool",
+          "created_at": "str",
+          "eligible_profile_tabs": [
+            {
+              "id": "str",
+              "type": "str",
+              "tab_type": "int",
+              "name": "str",
+              "is_default": "bool"
+            }
+          ],
+          "pins_done_count": "int",
+          "pin_count": "int",
+          "third_party_ingestion_data": "null",
+          "group_board_count": "int",
+          "blocked_by_me": "bool",
+          "explicitly_followed_by_me": "bool",
+          "has_catalog": "bool",
+          "seo_canonical_domain": "str",
+          "image_xlarge_url": "str",
+          "show_discovered_feed": "bool",
+          "image_small_url": "str",
+          "about": "str",
+          "verified_identity": {
+            "name": "str",
+            "verified": "bool"
+          },
+          "storefront_search_enabled": "bool",
+          "is_verified_merchant": "bool",
+          "has_shopping_showcase": "bool",
+          "profile_cover": {
+            "type": "str",
+            "source": "str",
+            "images": {
+              "originals": {
+                "url": "str",
+                "width": "int",
+                "height": "int"
+              },
+              "750x": {
+                "url": "str",
+                "width": "int",
+                "height": "int"
+              },
+              "736x": {
+                "url": "str",
+                "width": "int",
+                "height": "int"
+              },
+              "474x": {
+                "url": "str",
+                "width": "int",
+                "height": "int"
+              },
+              "1200x": {
+                "url": "str",
+                "width": "int",
+                "height": "int"
+              }
+            },
+            "video": "null",
+            "source_id": "str"
+          },
+          "first_name": "str",
+          "amazon_data": {
+            "amazon_account_linking_status": "null",
+            "amazon_storefront_url": "null",
+            "amazon_storefront_id": "null",
+            "amazon_storefront_name": "null",
+            "is_amazon_deals_search_enabled": "bool",
+            "is_amazon_linking_eligible": "bool",
+            "amazon_linking_consent_status": "null",
+            "requires_amazon_reconsent": "bool",
+            "amazon_user_id": "null"
+          },
+          "is_tastemaker": "bool",
+          "seo_title": "str",
+          "is_default_image": "bool",
+          "native_pin_count": "int",
+          "ads_only_profile_site": "null",
+          "listed_website_url": "null",
+          "explicit_user_following_count": "int"
+        },
+        "x_pinterest_sli_endpoint_name": "str",
+        "http_status": "int"
+      },
+      "client_context": {
+        "ads_grid_title_truncation_pharma_enabled": "bool",
+        "web_paid_partnership_grid_labeling_enabled": "bool",
+        "app_type_detailed": "int",
+        "app_version": "str",
+        "autologin": "null",
+        "browser_name": "str",
+        "browser_type": "int",
+        "browser_version": "str",
+        "country": "str",
+        "country_from_hostname": "str",
+        "country_from_ip": "str",
+        "current_url": "str",
+        "debug": "bool",
+        "deep_link": "str",
+        "enabled_advertiser_countries": [
+          "str"
+        ],
+        "full_path": "str",
+        "http_referrer": "str",
+        "invite_code": "str",
+        "invite_sender_id": "str",
+        "is_authenticated": "bool",
+        "is_bot": "str",
+        "is_perf_metrics_bot": "bool",
+        "is_vpn": "bool",
+        "is_proxy": "bool",
+        "is_tor": "bool",
+        "is_hosting": "bool",
+        "has_geo_is_anon": "bool",
+        "has_dcip": "bool",
+        "is_unauth_botspam_asn": "bool",
+        "is_full_page": "bool",
+        "is_mobile_agent": "bool",
+        "is_sterling_on_steroids": "bool",
+        "is_tablet_agent": "bool",
+        "language": "str",
+        "locale": "str",
+        "origin": "str",
+        "path": "str",
+        "placed_experiences": "null",
+        "referrer": "null",
+        "region_from_ip": "str",
+        "request_host": "str",
+        "request_identifier": "str",
+        "social_bot": "str",
+        "stage": "str",
+        "sterling_on_steroids_ldap": "null",
+        "sterling_on_steroids_user_type": "null",
+        "theme": "str",
+        "gestalt_theme": "str",
+        "seo_debug": "bool",
+        "user_agent_can_use_native_app": "bool",
+        "user_agent_platform": "str",
+        "user_agent_platform_version": "null",
+        "user": {
+          "ip_country": "str",
+          "ip_region": "str"
+        },
+        "utm_campaign": "null",
+        "visible_url": "str"
+      },
+      "resource": {
+        "name": "str",
+        "options": {
+          "bookmarks": [
+            "str"
+          ],
+          "field_set_key": "str",
+          "username": "str"
+        }
+      },
+      "request_identifier": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/resource/UserExperienceResource/get/",
+    "status": 200,
+    "shape": {
+      "resource_response": {
+        "status": "str",
+        "code": "int",
+        "message": "str",
+        "endpoint_name": "str",
+        "data": {},
+        "x_pinterest_sli_endpoint_name": "str",
+        "http_status": "int"
+      },
+      "client_context": {
+        "ads_grid_title_truncation_pharma_enabled": "bool",
+        "web_paid_partnership_grid_labeling_enabled": "bool",
+        "app_type_detailed": "int",
+        "app_version": "str",
+        "autologin": "null",
+        "browser_name": "str",
+        "browser_type": "int",
+        "browser_version": "str",
+        "country": "str",
+        "country_from_hostname": "str",
+        "country_from_ip": "str",
+        "current_url": "str",
+        "debug": "bool",
+        "deep_link": "str",
+        "enabled_advertiser_countries": [
+          "str"
+        ],
+        "full_path": "str",
+        "http_referrer": "str",
+        "invite_code": "str",
+        "invite_sender_id": "str",
+        "is_authenticated": "bool",
+        "is_bot": "str",
+        "is_perf_metrics_bot": "bool",
+        "is_vpn": "bool",
+        "is_proxy": "bool",
+        "is_tor": "bool",
+        "is_hosting": "bool",
+        "has_geo_is_anon": "bool",
+        "has_dcip": "bool",
+        "is_unauth_botspam_asn": "bool",
+        "is_full_page": "bool",
+        "is_mobile_agent": "bool",
+        "is_sterling_on_steroids": "bool",
+        "is_tablet_agent": "bool",
+        "language": "str",
+        "locale": "str",
+        "origin": "str",
+        "path": "str",
+        "placed_experiences": "null",
+        "referrer": "null",
+        "region_from_ip": "str",
+        "request_host": "str",
+        "request_identifier": "str",
+        "social_bot": "str",
+        "stage": "str",
+        "sterling_on_steroids_ldap": "null",
+        "sterling_on_steroids_user_type": "null",
+        "theme": "str",
+        "gestalt_theme": "str",
+        "seo_debug": "bool",
+        "user_agent_can_use_native_app": "bool",
+        "user_agent_platform": "str",
+        "user_agent_platform_version": "null",
+        "user": {
+          "ip_country": "str",
+          "ip_region": "str"
+        },
+        "utm_campaign": "null",
+        "visible_url": "str"
+      },
+      "resource": {
+        "name": "str",
+        "options": {
+          "bookmarks": [
+            "str"
+          ],
+          "placement_ids": [
+            "int"
+          ],
+          "extra_context": {
+            "board_id": "str",
+            "board_ownership": "str"
+          }
+        }
+      },
+      "request_identifier": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/resource/ApiResource/get/",
+    "status": 200,
+    "shape": {
+      "resource_response": {
+        "status": "str",
+        "code": "int",
+        "message": "str",
+        "endpoint_name": "str",
+        "data": {
+          "requirements": [
+            "int"
+          ]
+        },
+        "x_pinterest_sli_endpoint_name": "str",
+        "http_status": "int"
+      },
+      "client_context": {
+        "ads_grid_title_truncation_pharma_enabled": "bool",
+        "web_paid_partnership_grid_labeling_enabled": "bool",
+        "app_type_detailed": "int",
+        "app_version": "str",
+        "autologin": "null",
+        "browser_name": "str",
+        "browser_type": "int",
+        "browser_version": "str",
+        "country": "str",
+        "country_from_hostname": "str",
+        "country_from_ip": "str",
+        "current_url": "str",
+        "debug": "bool",
+        "deep_link": "str",
+        "enabled_advertiser_countries": [
+          "str"
+        ],
+        "full_path": "str",
+        "http_referrer": "str",
+        "invite_code": "str",
+        "invite_sender_id": "str",
+        "is_authenticated": "bool",
+        "is_bot": "str",
+        "is_perf_metrics_bot": "bool",
+        "is_vpn": "bool",
+        "is_proxy": "bool",
+        "is_tor": "bool",
+        "is_hosting": "bool",
+        "has_geo_is_anon": "bool",
+        "has_dcip": "bool",
+        "is_unauth_botspam_asn": "bool",
+        "is_full_page": "bool",
+        "is_mobile_agent": "bool",
+        "is_sterling_on_steroids": "bool",
+        "is_tablet_agent": "bool",
+        "language": "str",
+        "locale": "str",
+        "origin": "str",
+        "path": "str",
+        "placed_experiences": "null",
+        "referrer": "null",
+        "region_from_ip": "str",
+        "request_host": "str",
+        "request_identifier": "str",
+        "social_bot": "str",
+        "stage": "str",
+        "sterling_on_steroids_ldap": "null",
+        "sterling_on_steroids_user_type": "null",
+        "theme": "str",
+        "gestalt_theme": "str",
+        "seo_debug": "bool",
+        "user_agent_can_use_native_app": "bool",
+        "user_agent_platform": "str",
+        "user_agent_platform_version": "null",
+        "user": {
+          "ip_country": "str",
+          "ip_region": "str"
+        },
+        "utm_campaign": "null",
+        "visible_url": "str"
+      },
+      "resource": {
+        "name": "str",
+        "options": {
+          "bookmarks": [
+            "str"
+          ],
+          "url": "str"
+        }
+      },
+      "request_identifier": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/resource/SearchTabResource/get/",
+    "status": 200,
+    "shape": {
+      "resource_response": {
+        "status": "str",
+        "code": "int",
+        "message": "str",
+        "endpoint_name": "str",
+        "data": [
+          {
+            "closeup_id": "null",
+            "relationships": {},
+            "custom_properties": {},
+            "content_ids": [
+              "str"
+            ],
+            "user": "null",
+            "objects": [
+              {
+                "node_id": "str",
+                "id": "str",
+                "title": {
+                  "format": "..."
+                },
+                "type": "str",
+                "dominant_colors": [
+                  "..."
+                ],
+                "action": {},
+                "curator": "null",
+                "aux_fields": {
+                  "image_sig": "...",
+                  "image_pin_id": "...",
+                  "response_product_type": "...",
+                  "multi_head_scores": "..."
+                },
+                "cover_images": [
+                  "..."
+                ],
+                "story_category": "int"
+              }
+            ],
+            "aux_fields": {},
+            "item_actions": [],
+            "display_options": {
+              "allow_pin_height_trimming": "null",
+              "hide_search_guides_when_visible": "bool",
+              "ideas_card_hide_when_offscreen": "bool",
+              "cover_image_url": "null",
+              "footer_display": "null",
+              "background_image_url": "null",
+              "carousel_fade_ends": "null",
+              "subtitle_text_color": "null",
+              "spacer_size": "null",
+              "vsa_display_configs": "null",
+              "scale_up": "null",
+              "extra_spacing_before": "int",
+              "show_follow_buttons": "null",
+              "board_display_options": "null",
+              "show_separator": "bool",
+              "action_button_location": "null",
+              "item_view_rep_style": "null",
+              "header_font": "null",
+              "ai_fwd_presentation_options": {},
+              "content_display": "null",
+              "horizontal_full_bleed": "bool",
+              "identifier_icon_name": "null",
+              "tiles_grid_layout": "null",
+              "title_text_color": "null",
+              "use_plain_text_display_mode": "bool",
+              "pin_image_ratio": "null",
+              "explore_article_display_options": "null",
+              "show_content_follow_buttons": "bool",
+              "header_hidden": "bool",
+              "show_top_divider": "bool",
+              "pin_display_options": "null",
+              "has_condensed_header": "bool",
+              "board_view_type": "null",
+              "display_view_state": "null",
+              "hide_education_in_stream": "null",
+              "show_dismiss_button": "null",
+              "show_product_indicator_overlay": "null",
+              "shopping_grid_display": "null",
+              "num_columns_requested": "int",
+              "stacked_card_cover_shade_colors": "null",
+              "extra_spacing_after": "int",
+              "item_column_span": "null",
+              "container_grid_span": "null",
+              "align_image_bottom": "bool",
+              "carousel_item_spacing": "null",
+              "module_header_alignment": "null",
+              "show_bottom_divider": "bool",
+              "show_simplified_pin": "bool",
+              "background_colors": "null",
+              "image_only": "null",
+              "hide_ui_in_stream": "null",
+              "header_display": "null",
+              "corner_radius": "null"
+            },
+            "id": "str",
+            "thematic_deal_module": "null",
+            "bookmarks_for_objects": "null",
+            "dynamic_insertion_options": {},
+            "title": {
+              "args_reformatted": [],
+              "args": [],
+              "format": "str",
+              "text": "null"
+            },
+            "experience_extra_context": {},
+            "type": "str",
+            "expanded_viewport_objects": [],
+            "copy": {},
+            "container_type": "int",
+            "action": {},
+            "seo_board_module": "null",
+            "slot": "int",
+            "shop_source": "null",
+            "tracking_params": "str",
+            "story_type": "str",
+            "description": "null",
+            "referring_source": "str",
+            "subtitle": "null",
+            "background_colour": "null",
+            "button_text": "null",
+            "mapped_display_options": {},
+            "experience": "null",
+            "items": [
+              {
+                "node_id": "str",
+                "id": "str",
+                "title": {
+                  "format": "..."
+                },
+                "type": "str",
+                "dominant_colors": [
+                  "..."
+                ],
+                "action": {},
+                "curator": "null",
+                "aux_fields": {
+                  "image_sig": "...",
+                  "image_pin_id": "...",
+                  "response_product_type": "...",
+                  "multi_head_scores": "..."
+                },
+                "cover_images": [
+                  "..."
+                ],
+                "story_category": "int",
+                "query": "str"
+              }
+            ]
+          }
+        ],
+        "x_pinterest_sli_endpoint_name": "str",
+        "http_status": "int"
+      },
+      "client_context": {
+        "ads_grid_title_truncation_pharma_enabled": "bool",
+        "web_paid_partnership_grid_labeling_enabled": "bool",
+        "app_type_detailed": "int",
+        "app_version": "str",
+        "autologin": "null",
+        "browser_name": "str",
+        "browser_type": "int",
+        "browser_version": "str",
+        "country": "str",
+        "country_from_hostname": "str",
+        "country_from_ip": "str",
+        "current_url": "str",
+        "debug": "bool",
+        "deep_link": "str",
+        "enabled_advertiser_countries": [
+          "str"
+        ],
+        "full_path": "str",
+        "http_referrer": "str",
+        "invite_code": "str",
+        "invite_sender_id": "str",
+        "is_authenticated": "bool",
+        "is_bot": "str",
+        "is_perf_metrics_bot": "bool",
+        "is_vpn": "bool",
+        "is_proxy": "bool",
+        "is_tor": "bool",
+        "is_hosting": "bool",
+        "has_geo_is_anon": "bool",
+        "has_dcip": "bool",
+        "is_unauth_botspam_asn": "bool",
+        "is_full_page": "bool",
+        "is_mobile_agent": "bool",
+        "is_sterling_on_steroids": "bool",
+        "is_tablet_agent": "bool",
+        "language": "str",
+        "locale": "str",
+        "origin": "str",
+        "path": "str",
+        "placed_experiences": "null",
+        "referrer": "null",
+        "region_from_ip": "str",
+        "request_host": "str",
+        "request_identifier": "str",
+        "social_bot": "str",
+        "stage": "str",
+        "sterling_on_steroids_ldap": "null",
+        "sterling_on_steroids_user_type": "null",
+        "theme": "str",
+        "gestalt_theme": "str",
+        "seo_debug": "bool",
+        "user_agent_can_use_native_app": "bool",
+        "user_agent_platform": "str",
+        "user_agent_platform_version": "null",
+        "user": {
+          "ip_country": "str",
+          "ip_region": "str"
+        },
+        "utm_campaign": "null",
+        "visible_url": "str"
+      },
+      "resource": {
+        "name": "str",
+        "options": {
+          "bookmarks": [
+            "str"
+          ]
+        }
+      },
+      "request_identifier": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/resource/AdvancedTypeaheadResource/get/",
+    "status": 200,
+    "shape": {
+      "resource_response": {
+        "status": "str",
+        "code": "int",
+        "message": "str",
+        "endpoint_name": "str",
+        "data": {
+          "items": []
+        },
+        "x_pinterest_sli_endpoint_name": "str",
+        "http_status": "int"
+      },
+      "client_context": {
+        "ads_grid_title_truncation_pharma_enabled": "bool",
+        "web_paid_partnership_grid_labeling_enabled": "bool",
+        "app_type_detailed": "int",
+        "app_version": "str",
+        "autologin": "null",
+        "browser_name": "str",
+        "browser_type": "int",
+        "browser_version": "str",
+        "country": "str",
+        "country_from_hostname": "str",
+        "country_from_ip": "str",
+        "current_url": "str",
+        "debug": "bool",
+        "deep_link": "str",
+        "enabled_advertiser_countries": [
+          "str"
+        ],
+        "full_path": "str",
+        "http_referrer": "str",
+        "invite_code": "str",
+        "invite_sender_id": "str",
+        "is_authenticated": "bool",
+        "is_bot": "str",
+        "is_perf_metrics_bot": "bool",
+        "is_vpn": "bool",
+        "is_proxy": "bool",
+        "is_tor": "bool",
+        "is_hosting": "bool",
+        "has_geo_is_anon": "bool",
+        "has_dcip": "bool",
+        "is_unauth_botspam_asn": "bool",
+        "is_full_page": "bool",
+        "is_mobile_agent": "bool",
+        "is_sterling_on_steroids": "bool",
+        "is_tablet_agent": "bool",
+        "language": "str",
+        "locale": "str",
+        "origin": "str",
+        "path": "str",
+        "placed_experiences": "null",
+        "referrer": "null",
+        "region_from_ip": "str",
+        "request_host": "str",
+        "request_identifier": "str",
+        "social_bot": "str",
+        "stage": "str",
+        "sterling_on_steroids_ldap": "null",
+        "sterling_on_steroids_user_type": "null",
+        "theme": "str",
+        "gestalt_theme": "str",
+        "seo_debug": "bool",
+        "user_agent_can_use_native_app": "bool",
+        "user_agent_platform": "str",
+        "user_agent_platform_version": "null",
+        "user": {
+          "ip_country": "str",
+          "ip_region": "str"
+        },
+        "utm_campaign": "null",
+        "visible_url": "str"
+      },
+      "resource": {
+        "name": "str",
+        "options": {
+          "bookmarks": [
+            "str"
+          ],
+          "term": "str",
+          "pin_scope": "str",
+          "autocomplete_request_surface": "int"
+        }
+      },
+      "request_identifier": "str"
+    }
+  },
+  {
+    "url": "https://google.com/.well-known/web-identity",
+    "status": 200,
+    "shape": {
+      "provider_urls": [
+        "str"
+      ],
+      "accounts_endpoint": "str",
+      "login_url": "str"
+    }
+  },
+  {
+    "url": "https://accounts.google.com/gsi/fedcm/listaccounts",
+    "status": 200,
+    "shape": {
+      "accounts": [],
+      "site_salt": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/resource/ApiSResource/create/",
+    "status": 200,
+    "shape": {
+      "resource_response": {
+        "status": "str",
+        "http_status": "int",
+        "data": "null"
+      },
+      "client_context": {
+        "ads_grid_title_truncation_pharma_enabled": "bool",
+        "web_paid_partnership_grid_labeling_enabled": "bool",
+        "app_type_detailed": "int",
+        "app_version": "str",
+        "autologin": "null",
+        "browser_name": "str",
+        "browser_type": "int",
+        "browser_version": "str",
+        "country": "str",
+        "country_from_hostname": "str",
+        "country_from_ip": "str",
+        "current_url": "str",
+        "debug": "bool",
+        "deep_link": "str",
+        "enabled_advertiser_countries": [
+          "str"
+        ],
+        "full_path": "str",
+        "http_referrer": "str",
+        "invite_code": "str",
+        "invite_sender_id": "str",
+        "is_authenticated": "bool",
+        "is_bot": "str",
+        "is_perf_metrics_bot": "bool",
+        "is_vpn": "bool",
+        "is_proxy": "bool",
+        "is_tor": "bool",
+        "is_hosting": "bool",
+        "has_geo_is_anon": "bool",
+        "has_dcip": "bool",
+        "is_unauth_botspam_asn": "bool",
+        "is_full_page": "bool",
+        "is_mobile_agent": "bool",
+        "is_sterling_on_steroids": "bool",
+        "is_tablet_agent": "bool",
+        "language": "str",
+        "locale": "str",
+        "origin": "str",
+        "path": "str",
+        "placed_experiences": "null",
+        "referrer": "null",
+        "region_from_ip": "str",
+        "request_host": "str",
+        "request_identifier": "str",
+        "social_bot": "str",
+        "stage": "str",
+        "sterling_on_steroids_ldap": "null",
+        "sterling_on_steroids_user_type": "null",
+        "theme": "str",
+        "gestalt_theme": "str",
+        "seo_debug": "bool",
+        "user_agent_can_use_native_app": "bool",
+        "user_agent_platform": "str",
+        "user_agent_platform_version": "null",
+        "user": {
+          "ip_country": "str",
+          "ip_region": "str"
+        },
+        "utm_campaign": "null",
+        "visible_url": "str"
+      },
+      "resource": {
+        "name": "str",
+        "options": {
+          "bookmarks": [],
+          "source": "str",
+          "stats": [
+            [
+              "str"
+            ]
+          ],
+          "keepAlive": "bool"
+        }
+      },
+      "request_identifier": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/resource/ApiResource/create/",
+    "status": 200,
+    "shape": {
+      "resource_response": {
+        "status": "str",
+        "code": "int",
+        "message": "str",
+        "endpoint_name": "str",
+        "data": "null",
+        "x_pinterest_sli_endpoint_name": "str",
+        "http_status": "int"
+      },
+      "client_context": {
+        "ads_grid_title_truncation_pharma_enabled": "bool",
+        "web_paid_partnership_grid_labeling_enabled": "bool",
+        "app_type_detailed": "int",
+        "app_version": "str",
+        "autologin": "null",
+        "browser_name": "str",
+        "browser_type": "int",
+        "browser_version": "str",
+        "country": "str",
+        "country_from_hostname": "str",
+        "country_from_ip": "str",
+        "current_url": "str",
+        "debug": "bool",
+        "deep_link": "str",
+        "enabled_advertiser_countries": [
+          "str"
+        ],
+        "full_path": "str",
+        "http_referrer": "str",
+        "invite_code": "str",
+        "invite_sender_id": "str",
+        "is_authenticated": "bool",
+        "is_bot": "str",
+        "is_perf_metrics_bot": "bool",
+        "is_vpn": "bool",
+        "is_proxy": "bool",
+        "is_tor": "bool",
+        "is_hosting": "bool",
+        "has_geo_is_anon": "bool",
+        "has_dcip": "bool",
+        "is_unauth_botspam_asn": "bool",
+        "is_full_page": "bool",
+        "is_mobile_agent": "bool",
+        "is_sterling_on_steroids": "bool",
+        "is_tablet_agent": "bool",
+        "language": "str",
+        "locale": "str",
+        "origin": "str",
+        "path": "str",
+        "placed_experiences": "null",
+        "referrer": "null",
+        "region_from_ip": "str",
+        "request_host": "str",
+        "request_identifier": "str",
+        "social_bot": "str",
+        "stage": "str",
+        "sterling_on_steroids_ldap": "null",
+        "sterling_on_steroids_user_type": "null",
+        "theme": "str",
+        "gestalt_theme": "str",
+        "seo_debug": "bool",
+        "user_agent_can_use_native_app": "bool",
+        "user_agent_platform": "str",
+        "user_agent_platform_version": "null",
+        "user": {
+          "ip_country": "str",
+          "ip_region": "str"
+        },
+        "utm_campaign": "null",
+        "visible_url": "str"
+      },
+      "resource": {
+        "name": "str",
+        "options": {
+          "bookmarks": [
+            "str"
+          ],
+          "url": "str",
+          "data": {
+            "fingerprint": "str"
+          }
+        }
+      },
+      "request_identifier": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/_/_/trace/trace/",
+    "status": 200,
+    "shape": {
+      "message": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/_/_/trace/trace/",
+    "status": 200,
+    "shape": {
+      "message": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/_/_/trace/trace/",
+    "status": 200,
+    "shape": {
+      "message": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/_/_/trace/trace/",
+    "status": 200,
+    "shape": {
+      "message": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/resource/UserRegisterTrackActionResource/update/",
+    "status": 200,
+    "shape": {
+      "resource_response": {
+        "status": "str",
+        "code": "int",
+        "message": "str",
+        "endpoint_name": "str",
+        "data": "null",
+        "x_pinterest_sli_endpoint_name": "str",
+        "http_status": "int"
+      },
+      "client_context": {
+        "ads_grid_title_truncation_pharma_enabled": "bool",
+        "web_paid_partnership_grid_labeling_enabled": "bool",
+        "app_type_detailed": "int",
+        "app_version": "str",
+        "autologin": "null",
+        "browser_name": "str",
+        "browser_type": "int",
+        "browser_version": "str",
+        "country": "str",
+        "country_from_hostname": "str",
+        "country_from_ip": "str",
+        "current_url": "str",
+        "debug": "bool",
+        "deep_link": "str",
+        "enabled_advertiser_countries": [
+          "str"
+        ],
+        "full_path": "str",
+        "http_referrer": "str",
+        "invite_code": "str",
+        "invite_sender_id": "str",
+        "is_authenticated": "bool",
+        "is_bot": "str",
+        "is_perf_metrics_bot": "bool",
+        "is_vpn": "bool",
+        "is_proxy": "bool",
+        "is_tor": "bool",
+        "is_hosting": "bool",
+        "has_geo_is_anon": "bool",
+        "has_dcip": "bool",
+        "is_unauth_botspam_asn": "bool",
+        "is_full_page": "bool",
+        "is_mobile_agent": "bool",
+        "is_sterling_on_steroids": "bool",
+        "is_tablet_agent": "bool",
+        "language": "str",
+        "locale": "str",
+        "origin": "str",
+        "path": "str",
+        "placed_experiences": "null",
+        "referrer": "null",
+        "region_from_ip": "str",
+        "request_host": "str",
+        "request_identifier": "str",
+        "social_bot": "str",
+        "stage": "str",
+        "sterling_on_steroids_ldap": "null",
+        "sterling_on_steroids_user_type": "null",
+        "theme": "str",
+        "gestalt_theme": "str",
+        "seo_debug": "bool",
+        "user_agent_can_use_native_app": "bool",
+        "user_agent_platform": "str",
+        "user_agent_platform_version": "null",
+        "user": {
+          "ip_country": "str",
+          "ip_region": "str"
+        },
+        "utm_campaign": "null",
+        "visible_url": "str"
+      },
+      "resource": {
+        "name": "str",
+        "options": {
+          "bookmarks": [],
+          "actions": [
+            {
+              "name": "str",
+              "aux_data": {
+                "tags": {}
+              }
+            }
+          ]
+        }
+      },
+      "request_identifier": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/resource/ActivateExperimentResource/create/",
+    "status": 200,
+    "shape": {
+      "resource_response": {
+        "status": "str",
+        "code": "int",
+        "message": "str",
+        "endpoint_name": "str",
+        "data": [
+          {
+            "group": "str"
+          }
+        ],
+        "x_pinterest_sli_endpoint_name": "str",
+        "http_status": "int"
+      },
+      "client_context": {
+        "ads_grid_title_truncation_pharma_enabled": "bool",
+        "web_paid_partnership_grid_labeling_enabled": "bool",
+        "app_type_detailed": "int",
+        "app_version": "str",
+        "autologin": "null",
+        "browser_name": "str",
+        "browser_type": "int",
+        "browser_version": "str",
+        "country": "str",
+        "country_from_hostname": "str",
+        "country_from_ip": "str",
+        "current_url": "str",
+        "debug": "bool",
+        "deep_link": "str",
+        "enabled_advertiser_countries": [
+          "str"
+        ],
+        "full_path": "str",
+        "http_referrer": "str",
+        "invite_code": "str",
+        "invite_sender_id": "str",
+        "is_authenticated": "bool",
+        "is_bot": "str",
+        "is_perf_metrics_bot": "bool",
+        "is_vpn": "bool",
+        "is_proxy": "bool",
+        "is_tor": "bool",
+        "is_hosting": "bool",
+        "has_geo_is_anon": "bool",
+        "has_dcip": "bool",
+        "is_unauth_botspam_asn": "bool",
+        "is_full_page": "bool",
+        "is_mobile_agent": "bool",
+        "is_sterling_on_steroids": "bool",
+        "is_tablet_agent": "bool",
+        "language": "str",
+        "locale": "str",
+        "origin": "str",
+        "path": "str",
+        "placed_experiences": "null",
+        "referrer": "null",
+        "region_from_ip": "str",
+        "request_host": "str",
+        "request_identifier": "str",
+        "social_bot": "str",
+        "stage": "str",
+        "sterling_on_steroids_ldap": "null",
+        "sterling_on_steroids_user_type": "null",
+        "theme": "str",
+        "gestalt_theme": "str",
+        "seo_debug": "bool",
+        "user_agent_can_use_native_app": "bool",
+        "user_agent_platform": "str",
+        "user_agent_platform_version": "null",
+        "user": {
+          "ip_country": "str",
+          "ip_region": "str"
+        },
+        "utm_campaign": "null",
+        "visible_url": "str"
+      },
+      "resource": {
+        "name": "str",
+        "options": {
+          "bookmarks": [
+            "str"
+          ],
+          "experiments": [
+            {
+              "experiment_name": "str",
+              "experiment_group": "str"
+            }
+          ]
+        }
+      },
+      "request_identifier": "str"
+    }
+  },
+  {
+    "url": "https://www.pinterest.com/resource/ApiSResource/create/",
+    "status": 200,
+    "shape": {
+      "resource_response": {
+        "status": "str",
+        "http_status": "int",
+        "data": "null"
+      },
+      "client_context": {
+        "ads_grid_title_truncation_pharma_enabled": "bool",
+        "web_paid_partnership_grid_labeling_enabled": "bool",
+        "app_type_detailed": "int",
+        "app_version": "str",
+        "autologin": "null",
+        "browser_name": "str",
+        "browser_type": "int",
+        "browser_version": "str",
+        "country": "str",
+        "country_from_hostname": "str",
+        "country_from_ip": "str",
+        "current_url": "str",
+        "debug": "bool",
+        "deep_link": "str",
+        "enabled_advertiser_countries": [
+          "str"
+        ],
+        "full_path": "str",
+        "http_referrer": "str",
+        "invite_code": "str",
+        "invite_sender_id": "str",
+        "is_authenticated": "bool",
+        "is_bot": "str",
+        "is_perf_metrics_bot": "bool",
+        "is_vpn": "bool",
+        "is_proxy": "bool",
+        "is_tor": "bool",
+        "is_hosting": "bool",
+        "has_geo_is_anon": "bool",
+        "has_dcip": "bool",
+        "is_unauth_botspam_asn": "bool",
+        "is_full_page": "bool",
+        "is_mobile_agent": "bool",
+        "is_sterling_on_steroids": "bool",
+        "is_tablet_agent": "bool",
+        "language": "str",
+        "locale": "str",
+        "origin": "str",
+        "path": "str",
+        "placed_experiences": "null",
+        "referrer": "null",
+        "region_from_ip": "str",
+        "request_host": "str",
+        "request_identifier": "str",
+        "social_bot": "str",
+        "stage": "str",
+        "sterling_on_steroids_ldap": "null",
+        "sterling_on_steroids_user_type": "null",
+        "theme": "str",
+        "gestalt_theme": "str",
+        "seo_debug": "bool",
+        "user_agent_can_use_native_app": "bool",
+        "user_agent_platform": "str",
+        "user_agent_platform_version": "null",
+        "user": {
+          "ip_country": "str",
+          "ip_region": "str"
+        },
+        "utm_campaign": "null",
+        "visible_url": "str"
+      },
+      "resource": {
+        "name": "str",
+        "options": {
+          "bookmarks": [],
+          "source": "str",
+          "stats": [
+            [
+              "str"
+            ]
+          ],
+          "keepAlive": "bool"
+        }
+      },
+      "request_identifier": "str"
+    }
+  }
+]

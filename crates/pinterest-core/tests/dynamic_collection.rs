@@ -47,6 +47,261 @@ async fn virtualized_feed_accumulates_exact_network_pin_ids() {
 
 #[tokio::test]
 #[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn only_the_pins_of_the_target_board_belong_to_it() {
+    // The page of a board also asks for the feeds of other boards. The pin
+    // that names another board does not belong to the target and must not be
+    // downloaded as if it were.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let board = collector
+        .collect_board(&format!("{}/mixed/art/", server.url))
+        .await
+        .unwrap();
+    let mut ids: Vec<_> = board.pin_links.keys().cloned().collect();
+    ids.sort();
+    assert_eq!(
+        ids,
+        ["801", "803"],
+        "a pin of another board was counted as part of the target"
+    );
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn the_same_pin_that_arrives_three_ways_is_counted_once() {
+    // The pin shows up in the DOM, in the network payload and in the DOM
+    // again after the scroll. The exact id has to be there, and only once.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let board = collector
+        .collect_board(&format!("{}/dupes/art/", server.url))
+        .await
+        .unwrap();
+    let mut ids: Vec<_> = board.pin_links.keys().cloned().collect();
+    ids.sort();
+    assert_eq!(ids, ["901"]);
+    assert_eq!(board.pins.len(), 1);
+    assert_eq!(board.pins["901"].id, "901");
+    // The pin came from the DOM and from the network, and it was counted
+    // once all the same.
+    assert_eq!(board.origin.sources.values().sum::<usize>(), 1);
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium and a display; the CI runs it under a virtual display"]
+async fn a_session_that_expires_midway_keeps_the_pins_that_were_already_collected() {
+    // The session expires after the first pins arrive. The user logs in and
+    // the collection continues; the pins collected before the expiry stay.
+    if cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_none() {
+        eprintln!("pulado: esta maquina nao tem display para o browser visivel");
+        return;
+    }
+    let server = fixture::serve().await;
+    let (operation, mut events) = Operation::new(32);
+    let resume = operation.clone();
+    let login_prompts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = std::sync::Arc::clone(&login_prompts);
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            if matches!(event.event, RunEvent::LoginRequired { .. }) {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                resume.resume_login();
+            }
+        }
+    });
+    let collector = Collector::launch(
+        CollectionOptions {
+            manual_login: true,
+            // The budget is generous: a machine that is busy with other
+            // browsers takes longer to load the page, and the test is about
+            // the login, not about the speed of the computer.
+            max_duration: Duration::from_secs(60),
+            ..options()
+        },
+        operation,
+    )
+    .await
+    .unwrap();
+    let board = collector
+        .collect_board(&format!("{}/session-expired/art/", server.url))
+        .await
+        .unwrap();
+    let mut ids: Vec<_> = board.pin_links.keys().cloned().collect();
+    ids.sort();
+    assert_eq!(
+        ids,
+        ["1001", "1002"],
+        "the pins collected before the session expired were lost"
+    );
+    assert!(
+        login_prompts.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+        "the expired session never asked for a login"
+    );
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium and a display; the CI runs it under a virtual display"]
+async fn cancelling_the_login_stops_the_run_right_away() {
+    // The user refuses to log in. The run has to stop promptly instead of
+    // waiting for the deadline, and it must not leave the browser behind.
+    if cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_none() {
+        eprintln!("pulado: esta maquina nao tem display para o browser visivel");
+        return;
+    }
+    let server = fixture::serve().await;
+    let (operation, mut events) = Operation::new(32);
+    let cancel = operation.clone();
+    // The moment the login was asked. The clock of the test starts here and
+    // not before: the speed of the computer does not decide whether the
+    // run stopped right away.
+    let asked_at = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let stamp = std::sync::Arc::clone(&asked_at);
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            if matches!(event.event, RunEvent::LoginRequired { .. }) {
+                *stamp.lock().unwrap() = Some(std::time::Instant::now());
+                cancel.cancel();
+            }
+        }
+    });
+    let collector = Collector::launch(
+        CollectionOptions {
+            manual_login: true,
+            max_duration: Duration::from_secs(120),
+            ..options()
+        },
+        operation,
+    )
+    .await
+    .unwrap();
+    let result = collector
+        .collect_board(&format!("{}/session-expired/art/", server.url))
+        .await;
+    assert!(
+        matches!(result, Err(pinterest_core::PinterestError::Cancelled)),
+        "the run did not stop: {result:?}"
+    );
+    let asked_at = asked_at.lock().unwrap().expect("the login was never asked");
+    assert!(
+        asked_at.elapsed() < Duration::from_secs(10),
+        "cancelling the login took {:?}",
+        asked_at.elapsed()
+    );
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn one_browser_serves_every_board_of_the_run() {
+    // Opening a Chromium per board is slow and heavy. The same browser has
+    // to serve the whole run: the pid before the first board and the pid
+    // after the last one have to be the same, and the process has to be
+    // gone once the collector is closed.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let first = collector.process_id().expect("the browser has no pid");
+
+    let first_board = collector
+        .collect_board(&format!("{}/alice/art/", server.url))
+        .await
+        .unwrap();
+    assert_eq!(first_board.pin_links.len(), 2);
+    assert_eq!(
+        collector.process_id(),
+        Some(first),
+        "the browser was replaced between two boards"
+    );
+
+    let second_board = collector
+        .collect_board(&format!("{}/alice/nature/", server.url))
+        .await
+        .unwrap();
+    assert!(!second_board.pin_links.is_empty());
+    assert_eq!(
+        collector.process_id(),
+        Some(first),
+        "the browser was replaced between two boards"
+    );
+
+    collector.close().await.unwrap();
+    #[cfg(target_os = "linux")]
+    assert!(
+        !std::path::Path::new(&format!("/proc/{first}")).exists(),
+        "the browser was not reaped"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn a_board_that_says_it_ended_does_not_wait_for_the_whole_stability_budget() {
+    // The page tells the collector that the feed ended. That is evidence
+    // that there is nothing more to load, so waiting the whole stability
+    // budget (20 rounds) added half a minute to every single board.
+    //
+    // The budget here is enormous (a thousand rounds) and the deadline is
+    // short: a collector that waits for the budget cannot finish inside
+    // the deadline, and the reason of the result says so. The clock of the
+    // computer does not take part in the proof.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(
+        CollectionOptions {
+            scroll_pause: Duration::from_millis(200),
+            stable_rounds: 1000,
+            max_duration: Duration::from_secs(30),
+            ..options()
+        },
+        operation(),
+    )
+    .await
+    .unwrap();
+    let board = collector
+        .collect_board(&format!("{}/alice/art/", server.url))
+        .await
+        .unwrap();
+    assert_eq!(board.reason, CompletionReason::EndOfFeed);
+    assert_eq!(board.completeness, Completeness::Complete);
+    assert_eq!(board.pin_links.len(), 2);
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn a_board_without_the_end_marker_still_waits_for_the_stability_budget() {
+    // The fast path belongs to the end marker alone. A board that merely
+    // stopped changing has no proof that it is complete, so it keeps the
+    // whole budget and reports the result as unknown.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(
+        CollectionOptions {
+            scroll_pause: Duration::from_millis(200),
+            stable_rounds: 8,
+            max_duration: Duration::from_secs(30),
+            ..options()
+        },
+        operation(),
+    )
+    .await
+    .unwrap();
+    let started = std::time::Instant::now();
+    let board = collector
+        .collect_board(&format!("{}/still/art/", server.url))
+        .await
+        .unwrap();
+    let elapsed = started.elapsed();
+    assert_eq!(board.reason, CompletionReason::Stable);
+    assert_eq!(board.completeness, Completeness::Unknown);
+    assert!(
+        elapsed >= Duration::from_millis(8 * 200),
+        "the stability budget was skipped: {elapsed:?}"
+    );
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
 async fn profile_excludes_other_users_and_includes_late_board() {
     let server = fixture::serve().await;
     let collector = Collector::launch(options(), operation()).await.unwrap();
@@ -146,8 +401,14 @@ async fn runner_transfers_browser_cookies_downloads_and_reports_cache_hits() {
         assert_eq!(report.totals.reused, if cached { 2 } else { 0 });
         for id in ["101", "102"] {
             assert_eq!(
-                std::fs::read(directory.path().join("alice_art").join(format!("{id}.jpg")))
-                    .unwrap(),
+                std::fs::read(
+                    directory
+                        .path()
+                        .join("alice")
+                        .join("art")
+                        .join(format!("{id}.jpg"))
+                )
+                .unwrap(),
                 b"fixture image"
             );
         }
@@ -199,7 +460,7 @@ async fn resolves_dom_only_pin_using_its_page_and_session() {
     assert_eq!(report.totals.downloaded, 1);
     assert_eq!(report.totals.failed, 0);
     assert_eq!(
-        std::fs::read(directory.path().join("dom_art/103.jpg")).unwrap(),
+        std::fs::read(directory.path().join("dom").join("art").join("103.jpg")).unwrap(),
         b"fixture image"
     );
 }
@@ -241,4 +502,140 @@ async fn cancelled_run_drains_terminal_event_and_closes_browser() {
         Err(pinterest_core::PinterestError::Cancelled)
     ));
     assert!(presenter.await.unwrap());
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn the_recommended_pins_are_not_part_of_the_board() {
+    // The page of the board carries the pins of the board and, next to them,
+    // the pins that Pinterest recommends. A recommendation is not part of
+    // the board and must not be downloaded as one.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let board = collector
+        .collect_board(&format!("{}/origin/art/", server.url))
+        .await
+        .unwrap();
+    let mut ids: Vec<_> = board.pin_links.keys().cloned().collect();
+    ids.sort();
+    assert_eq!(ids, ["601", "602"]);
+    assert_eq!(board.origin.excluded_recommendations, 1);
+    assert_eq!(board.origin.sources.get("board-feed"), Some(&1));
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn a_board_that_never_ends_reports_the_timeout_as_a_partial_result() {
+    // The feed of this board never says that it ended. The collection has to
+    // stop on its own timeout, and the report has to say that the result is
+    // partial instead of pretending the board is complete.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(
+        CollectionOptions {
+            max_duration: Duration::from_secs(3),
+            ..options()
+        },
+        operation(),
+    )
+    .await
+    .unwrap();
+    let board = collector
+        .collect_board(&format!("{}/neverend/art/", server.url))
+        .await
+        .unwrap();
+    assert_eq!(board.reason, CompletionReason::Timeout);
+    assert_eq!(board.completeness, Completeness::Unknown);
+    assert_eq!(board.pin_links.len(), 1);
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium and a display; the CI runs it under a virtual display"]
+async fn a_page_that_always_asks_for_a_login_cannot_keep_the_run_forever() {
+    // Every prompt for a login used to push the deadline away, so a page
+    // that always asks for a login never ended. The collection has to stop
+    // on the timeout it was given.
+    if cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_none() {
+        eprintln!("pulado: esta maquina nao tem display para o browser visivel");
+        return;
+    }
+    let server = fixture::serve().await;
+    let (operation, mut events) = Operation::new(32);
+    let resume = operation.clone();
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            if matches!(event.event, RunEvent::LoginRequired { .. }) {
+                resume.resume_login();
+            }
+        }
+    });
+    let collector = Collector::launch(
+        CollectionOptions {
+            manual_login: true,
+            max_duration: Duration::from_secs(3),
+            ..options()
+        },
+        operation,
+    )
+    .await
+    .unwrap();
+    let result = tokio::time::timeout(
+        Duration::from_secs(30),
+        collector.collect_board(&format!("{}/login/", server.url)),
+    )
+    .await;
+    assert!(result.is_ok(), "the collection never ended");
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn a_board_that_stops_without_saying_it_ended_is_not_complete() {
+    // The feed stopped changing, but nothing proved that the board is
+    // complete. The stability is not proof: the result stays unknown.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let board = collector
+        .collect_board(&format!("{}/still/art/", server.url))
+        .await
+        .unwrap();
+    assert_eq!(board.reason, CompletionReason::Stable);
+    assert_eq!(board.completeness, Completeness::Unknown);
+    assert_eq!(board.pin_links.len(), 1);
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn a_real_public_board_asks_for_a_login_instead_of_saying_it_is_empty() {
+    // Captura real e sanitizada de um quadro publico do Pinterest. Sem
+    // sessao, a pagina entrega os pins bloqueados e o feed vazio. Dizer
+    // "nenhum pin encontrado" seria uma resposta errada: o quadro tem pins,
+    // quem nao esta logado e que nao os ve.
+    let server = fixture::serve().await;
+    // The deadline is generous: a busy computer takes longer to load the
+    // page, and the test is about what the interface says, not about the
+    // speed of the machine. The collection stops as soon as it sees that
+    // the board is behind a login.
+    let collector = Collector::launch(
+        CollectionOptions {
+            max_duration: Duration::from_secs(60),
+            ..options()
+        },
+        operation(),
+    )
+    .await
+    .unwrap();
+    let result = collector
+        .collect_board(&format!("{}/real/public/", server.url))
+        .await;
+    assert!(
+        matches!(
+            result,
+            Err(pinterest_core::PinterestError::AuthenticationRequired(_))
+        ),
+        "a gated board did not ask for a login: {result:?}"
+    );
+    collector.close().await.unwrap();
 }

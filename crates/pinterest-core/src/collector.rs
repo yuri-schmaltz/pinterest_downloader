@@ -20,6 +20,14 @@ pub struct CollectionOptions {
     pub browser: BrowserOptions,
     pub scroll_pause: Duration,
     pub stable_rounds: usize,
+    /// How many quiet rounds are enough once the page itself says that the
+    /// feed ended.
+    ///
+    /// The end marker is evidence that the board has no more pins to give.
+    /// Only a payload that was still on its way can still arrive, and a
+    /// couple of quiet rounds cover it. Waiting the whole stability budget
+    /// would add half a minute to every board for nothing.
+    pub end_quiet_rounds: usize,
     pub max_duration: Duration,
     pub max_pins: Option<usize>,
     pub manual_login: bool,
@@ -30,11 +38,26 @@ impl Default for CollectionOptions {
             browser: BrowserOptions::default(),
             scroll_pause: Duration::from_millis(1200),
             stable_rounds: 20,
+            end_quiet_rounds: 3,
             max_duration: Duration::from_secs(150),
             max_pins: None,
             manual_login: false,
         }
     }
+}
+
+/// Where the pins of a board came from.
+///
+/// Pinterest shows the pins of the board next to the pins it recommends. The
+/// recommendations are not part of the board, so they are left out and
+/// counted here instead of disappearing without a trace.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FeedOrigin {
+    /// The container of the page each pin came from, and how many pins each
+    /// one brought.
+    pub sources: BTreeMap<String, usize>,
+    /// The pins that were left out because Pinterest recommends them.
+    pub excluded_recommendations: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +67,8 @@ pub struct CollectedBoard {
     pub pin_links: BTreeMap<String, String>,
     pub reason: CompletionReason,
     pub completeness: Completeness,
+    /// Where the pins came from and what was left out.
+    pub origin: FeedOrigin,
     // Kept in memory only to transfer the session to the HTTP client later.
     #[serde(skip)]
     pub cookies: Vec<Value>,
@@ -56,6 +81,38 @@ pub struct CollectedProfile {
     pub completeness: Completeness,
 }
 
+/// The deadline of a collection.
+///
+/// The first manual login buys the collection the time it needs. A later
+/// login does not: a page that always asks for a login would otherwise keep
+/// the run alive forever, because every prompt pushed the deadline away.
+#[derive(Debug, Clone)]
+struct Deadline {
+    limit: Instant,
+    granted: bool,
+}
+
+impl Deadline {
+    fn new(max_duration: Duration) -> Self {
+        Self {
+            limit: Instant::now() + max_duration,
+            granted: false,
+        }
+    }
+
+    /// Give the collection more time, once.
+    fn extend_for_login(&mut self, max_duration: Duration) {
+        if !self.granted {
+            self.granted = true;
+            self.limit = Instant::now() + max_duration;
+        }
+    }
+
+    fn expired(&self) -> bool {
+        Instant::now() >= self.limit
+    }
+}
+
 pub struct Collector {
     session: BrowserSession,
     options: CollectionOptions,
@@ -65,6 +122,7 @@ impl Collector {
     pub async fn launch(mut options: CollectionOptions, operation: Operation) -> Result<Self> {
         if options.scroll_pause.is_zero()
             || options.stable_rounds == 0
+            || options.end_quiet_rounds == 0
             || options.max_duration.is_zero()
             || options.max_pins == Some(0)
         {
@@ -89,6 +147,15 @@ impl Collector {
         self.session.close().await.map_err(browser_error)
     }
 
+    /// The pid of the browser behind this collector.
+    ///
+    /// The same browser serves every board of the run, so comparing the pid
+    /// before and after a board proves that the browser was reused instead
+    /// of being opened again.
+    pub fn process_id(&self) -> Option<u32> {
+        self.session.process_id()
+    }
+
     pub async fn collect_board(&self, board_url: &str) -> Result<CollectedBoard> {
         let target = validated_url(board_url)?;
         let page = self.session.new_page().await.map_err(browser_error)?;
@@ -96,23 +163,31 @@ impl Collector {
             page.navigate(target.as_str())
                 .await
                 .map_err(browser_error)?;
-            let mut deadline = Instant::now() + self.options.max_duration;
+            let mut deadline = Deadline::new(self.options.max_duration);
             let cancel = self.operation.cancellation();
             let mut pins = BTreeMap::new();
             let mut links = BTreeMap::new();
+            let mut origin = FeedOrigin::default();
+            let mut excluded = std::collections::BTreeSet::new();
             let mut stable = 0;
             let mut previous_count = 0;
             let mut previous_height = 0;
             let mut truncated = false;
             let mut end_seen = false;
+            let mut gated = false;
             let reason = loop {
                 let snapshot = tokio::select! {
                     biased;
                     _ = cancel.cancelled() => return Err(PinterestError::Cancelled),
-                    _ = tokio::time::sleep_until(deadline) => break CompletionReason::Timeout,
+                    _ = tokio::time::sleep_until(deadline.limit) => break CompletionReason::Timeout,
                     result = page.snapshot() => result.map_err(browser_error)?,
                 };
                 if snapshot.login_required {
+                    if deadline.expired() {
+                        // The collection is already over: asking the user to
+                        // log in would only keep the run alive.
+                        break CompletionReason::Timeout;
+                    }
                     if !self.options.manual_login {
                         return Err(PinterestError::AuthenticationRequired(target.to_string()));
                     }
@@ -120,18 +195,32 @@ impl Collector {
                     page.navigate(target.as_str())
                         .await
                         .map_err(browser_error)?;
-                    deadline = Instant::now() + self.options.max_duration;
+                    deadline.extend_for_login(self.options.max_duration);
                     continue;
                 }
                 truncated |= snapshot.network_truncated;
+                gated |= snapshot.gated;
                 for link in &snapshot.links {
                     if link.recommendation {
+                        // A recommendation is not part of the board. It is
+                        // counted so that the report can say what was left
+                        // out instead of pretending the board is all there.
+                        if let Ok(url) = target.join(&link.href) {
+                            if let Some(id) = pin_id(&url) {
+                                excluded.insert(id);
+                            }
+                        }
                         continue;
                     }
                     if let Ok(url) = target.join(&link.href) {
                         if url.origin() == target.origin() {
                             if let Some(id) = pin_id(&url) {
-                                links.entry(id).or_insert_with(|| url.to_string());
+                                if links.insert(id.clone(), url.to_string()).is_none() {
+                                    *origin
+                                        .sources
+                                        .entry(origin_label(&link.origin))
+                                        .or_default() += 1;
+                                }
                             }
                         }
                     }
@@ -145,6 +234,14 @@ impl Collector {
                             .to_string()
                     });
                     pins.insert(pin.id.clone(), pin);
+                }
+                if gated && links.is_empty() {
+                    // A pagina mostra os pins bloqueados para quem nao esta
+                    // logado. Esperar a estabilidade nao muda nada: o quadro
+                    // so aparece depois do login. Dizer isso agora evita
+                    // que o usuario espere o prazo inteiro por um quadro
+                    // que ele so vai ver depois de entrar.
+                    break CompletionReason::Gated;
                 }
                 end_seen |= snapshot.end_of_feed;
                 self.operation
@@ -177,7 +274,17 @@ impl Collector {
                 } else {
                     stable = 0;
                 }
-                if stable >= self.options.stable_rounds {
+                // The page that says the feed ended is evidence that there is
+                // nothing more to load. A few quiet rounds are enough to let
+                // a payload that was still on its way arrive; waiting the
+                // whole stability budget would add half a minute to every
+                // board for nothing.
+                let required = if end_seen {
+                    self.options.end_quiet_rounds
+                } else {
+                    self.options.stable_rounds
+                };
+                if stable >= required {
                     break if end_seen && !truncated && snapshot.pending_requests == 0 {
                         CompletionReason::EndOfFeed
                     } else {
@@ -189,7 +296,7 @@ impl Collector {
                 page.scroll().await.map_err(browser_error)?;
                 tokio::select! {
                     _ = cancel.cancelled() => return Err(PinterestError::Cancelled),
-                    _ = tokio::time::sleep_until(deadline) => break CompletionReason::Timeout,
+                    _ = tokio::time::sleep_until(deadline.limit) => break CompletionReason::Timeout,
                     _ = tokio::time::sleep(self.options.scroll_pause) => {},
                 }
             };
@@ -199,6 +306,7 @@ impl Collector {
                 pins.retain(|id, _| links.contains_key(id));
             }
             let completeness = completeness(&reason);
+            origin.excluded_recommendations = excluded.len();
             if truncated {
                 self.operation
                     .emit(
@@ -213,6 +321,12 @@ impl Collector {
                     .await;
             }
             if links.is_empty() && completeness != Completeness::Complete {
+                if gated {
+                    // The page shows the pins as a blurred preview and the
+                    // feed comes empty. The board is not empty: the visitor
+                    // is not logged in.
+                    return Err(PinterestError::AuthenticationRequired(target.to_string()));
+                }
                 return Err(PinterestError::Extraction(
                     "Nenhum pin encontrado; quadro vazio não foi comprovado".into(),
                 ));
@@ -235,6 +349,7 @@ impl Collector {
                 pin_links: links,
                 reason,
                 completeness,
+                origin,
                 cookies,
             })
         }
@@ -262,7 +377,7 @@ impl Collector {
             page.navigate(target.as_str())
                 .await
                 .map_err(browser_error)?;
-            let mut deadline = Instant::now() + self.options.max_duration;
+            let mut deadline = Deadline::new(self.options.max_duration);
             let cancel = self.operation.cancellation();
             let mut boards = BTreeMap::new();
             let mut previous = (0, 0);
@@ -270,10 +385,15 @@ impl Collector {
             let reason = loop {
                 let snapshot = tokio::select! {
                     _ = cancel.cancelled() => return Err(PinterestError::Cancelled),
-                    _ = tokio::time::sleep_until(deadline) => break CompletionReason::Timeout,
+                    _ = tokio::time::sleep_until(deadline.limit) => break CompletionReason::Timeout,
                     result = page.snapshot() => result.map_err(browser_error)?,
                 };
                 if snapshot.login_required {
+                    if deadline.expired() {
+                        // The collection is already over: asking the user to
+                        // log in would only keep the run alive.
+                        break CompletionReason::Timeout;
+                    }
                     if !self.options.manual_login {
                         return Err(PinterestError::AuthenticationRequired(target.to_string()));
                     }
@@ -281,7 +401,7 @@ impl Collector {
                     page.navigate(target.as_str())
                         .await
                         .map_err(browser_error)?;
-                    deadline = Instant::now() + self.options.max_duration;
+                    deadline.extend_for_login(self.options.max_duration);
                     continue;
                 }
                 let mut entries = extract_boards_from_html(&snapshot.html, username);
@@ -297,7 +417,7 @@ impl Collector {
                     let raw = serde_json::json!({"url":link.href,"name":link.title});
                     let mut parsed = extract_boards_from_pws(&raw, username);
                     for board in &mut parsed {
-                        board.thumbnail_url = link.thumbnail.clone();
+                        board.thumbnail_url.clone_from(&link.thumbnail);
                     }
                     entries.extend(parsed);
                 }
@@ -311,11 +431,11 @@ impl Collector {
                             .entry(board.url.clone())
                             .and_modify(|existing: &mut BoardMetadata| {
                                 if existing.thumbnail_url.is_empty() {
-                                    existing.thumbnail_url = board.thumbnail_url.clone();
+                                    existing.thumbnail_url.clone_from(&board.thumbnail_url);
                                 }
                                 if existing.pin_count_int.is_none() {
                                     existing.pin_count_int = board.pin_count_int;
-                                    existing.pin_count = board.pin_count.clone();
+                                    existing.pin_count.clone_from(&board.pin_count);
                                 }
                             })
                             .or_insert(board);
@@ -334,7 +454,7 @@ impl Collector {
                 page.scroll().await.map_err(browser_error)?;
                 tokio::select! {
                     _ = cancel.cancelled() => return Err(PinterestError::Cancelled),
-                    _ = tokio::time::sleep_until(deadline) => break CompletionReason::Timeout,
+                    _ = tokio::time::sleep_until(deadline.limit) => break CompletionReason::Timeout,
                     _ = tokio::time::sleep(self.options.scroll_pause) => {},
                 }
             };
@@ -370,6 +490,16 @@ impl Collector {
     }
 }
 
+/// The name of the container a pin came from.
+fn origin_label(origin: &str) -> String {
+    let trimmed = origin.trim();
+    if trimmed.is_empty() {
+        "desconhecido".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn board_metadata(snapshot: &PageSnapshot, target: &Url) -> BTreeMap<String, PinMetadata> {
     let mut pins = extract_pws_metadata_from_html(&snapshot.html);
     for payload in &snapshot.network {
@@ -387,14 +517,44 @@ fn board_metadata(snapshot: &PageSnapshot, target: &Url) -> BTreeMap<String, Pin
     }
     pins.into_values()
         .filter_map(|mut pin| {
+            // A pin that says which board it was saved to belongs to that
+            // board. The page of a board also asks for the feeds of other
+            // boards, and those pins are not part of the target.
+            if !belongs_to_board(pin.board_url.as_deref(), target) {
+                return None;
+            }
             let image = target.join(&pin.image_url).ok()?;
             if !matches!(image.scheme(), "http" | "https") {
                 return None;
             }
             pin.image_url = image.to_string();
+            // The URL of the pin follows the origin of the board. The parser
+            // builds an absolute Pinterest URL, and using it here would make
+            // the cache of one origin useless for another.
+            if let Ok(url) = target.join(&format!("/pin/{}/", pin.id)) {
+                pin.url = url.to_string();
+            }
             Some((pin.id.clone(), pin))
         })
         .collect()
+}
+
+/// Whether a pin that names its board belongs to the board being collected.
+///
+/// A pin that says nothing about its board cannot be proven foreign, so it
+/// stays. A pin that names another board does not belong to the target.
+fn belongs_to_board(board_url: Option<&str>, target: &Url) -> bool {
+    let Some(raw) = board_url else {
+        return true;
+    };
+    let Ok(url) = target.join(raw) else {
+        return false;
+    };
+    if url.origin() != target.origin() {
+        return false;
+    }
+    let same_path = url.path().trim_end_matches('/') == target.path().trim_end_matches('/');
+    same_path
 }
 fn same_origin(target: &Url, raw: &str) -> bool {
     target
@@ -431,5 +591,32 @@ fn browser_error(error: BrowserError) -> PinterestError {
     match error {
         BrowserError::Cancelled => PinterestError::Cancelled,
         _ => PinterestError::Browser(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+
+    #[test]
+    fn o_primeiro_login_da_mais_tempo_e_os_outros_nao() {
+        let mut deadline = Deadline::new(Duration::from_millis(50));
+        assert!(!deadline.expired());
+        std::thread::sleep(Duration::from_millis(70));
+        assert!(deadline.expired());
+
+        // The first login buys the collection a new budget of 200ms.
+        deadline.extend_for_login(Duration::from_millis(200));
+        assert!(!deadline.expired());
+        std::thread::sleep(Duration::from_millis(70));
+        assert!(!deadline.expired(), "o novo prazovigia");
+
+        // A later login does not extend it: the collection still ends.
+        deadline.extend_for_login(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(
+            deadline.expired(),
+            "um login que nao e o primeiro nao pode manter a coleta viva"
+        );
     }
 }
