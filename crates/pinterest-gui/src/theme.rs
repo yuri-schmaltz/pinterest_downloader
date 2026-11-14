@@ -307,6 +307,12 @@ pub enum ButtonKind {
     Quiet,
 }
 
+/// A height of one control of the product.
+///
+/// The field and the button have the same height: a field lower than the
+/// button next to it looks like a mistake, and the eye stops on it.
+pub const CONTROL_HEIGHT: f32 = 32.0;
+
 /// A field where the user types.
 ///
 /// The field has an id proprio: e assim que o teste consegue dar o foco
@@ -322,18 +328,29 @@ pub fn field(
     // back: a field does not change the fields that come after it.
     let saved_bg = ui.visuals().text_edit_bg_color;
     let saved_stroke = ui.visuals().selection.stroke;
+    let saved_weak = ui.visuals().weak_text_color;
     ui.visuals_mut().text_edit_bg_color = Some(SURFACE_2);
     // Com o foco, a borda fica vermelha, como no produto.
     ui.visuals_mut().selection.stroke = egui::Stroke::new(1.0_f32, ACCENT);
+    // O egui escreve o texto do campo com a cor do traço do controle
+    // inativo, e no produto esse traço e a cor da borda: o texto do campo
+    // saia cinza escuro, quase invisivel. Aqui o texto e o texto do
+    // produto, e a dica e o cinza legivel.
+    ui.visuals_mut().weak_text_color = Some(TEXT_MUTED);
     let response = ui.add(
         egui::TextEdit::singleline(text)
             .id(id)
             .hint_text(hint_text)
             .desired_width(width)
+            .text_color(TEXT)
+            // A margem e a altura da caixa: o texto fica no meio do campo,
+            // do mesmo tamanho que o botao ao lado.
+            .margin(egui::Margin::symmetric(4, 8))
             .frame(true),
     );
     ui.visuals_mut().text_edit_bg_color = saved_bg;
     ui.visuals_mut().selection.stroke = saved_stroke;
+    ui.visuals_mut().weak_text_color = saved_weak;
     response
 }
 

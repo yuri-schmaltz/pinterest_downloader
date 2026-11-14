@@ -453,9 +453,13 @@ impl App {
     }
 
     /// The bar at the bottom: what the run is doing and what can be done.
+    ///
+    /// The card with the destination and the adjustments of the run lives
+    /// here, between the count of the chosen boards and the buttons: it is
+    /// part of the status of the run, and not of the list of boards.
     fn footer(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("footer")
-            .exact_height(64.0)
+            .exact_height(76.0)
             .frame(
                 egui::Frame::new()
                     .fill(theme::SURFACE)
@@ -465,6 +469,9 @@ impl App {
                 ui.horizontal(|ui| {
                     let summary = self.footer_summary();
                     ui.colored_label(theme::TEXT_MUTED, summary);
+                    if self.model.stage == Stage::Boards {
+                        self.options_strip(ui);
+                    }
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| match self.model.stage {
@@ -668,8 +675,13 @@ impl App {
         let columns = ((ui.available_width() + spacing) / (cell + spacing))
             .floor()
             .max(1.0) as usize;
+        // The grid takes the space that is left in the card: the strip with
+        // the adjustments moved to the bar at the bottom, and an empty
+        // space under the covers looks like a mistake.
+        let height = (ui.available_height() - 8.0).max(120.0);
         egui::ScrollArea::vertical()
-            .max_height(392.0)
+            .max_height(height)
+            .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.columns(columns, |columns_ui| {
                     // The width of one column is the width of the cover.
@@ -737,18 +749,18 @@ impl App {
                 self.model.boards.toggle(&url);
             }
         }
-
-        ui.add_space(14.0);
-        self.options_strip(ui);
     }
 
     /// The strip with the destination and the adjustments of the run.
+    ///
+    /// The strip lives in the bar at the bottom, so it is compact: the
+    /// field of the destination is narrower and the gaps are short.
     fn options_strip(&mut self, ui: &mut egui::Ui) {
         egui::Frame::new()
             .fill(theme::SURFACE_2)
             .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
             .corner_radius(egui::CornerRadius::same(theme::RADIUS_CARD))
-            .inner_margin(egui::Margin::symmetric(14, 10))
+            .inner_margin(egui::Margin::symmetric(12, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     theme::quiet(ui, "Destino");
@@ -757,21 +769,21 @@ impl App {
                         ui,
                         &mut out_root,
                         "pasta de destino",
-                        280.0,
+                        236.0,
                         egui::Id::new("campo-destino"),
                     );
                     if response.changed() {
                         self.out_root_text = out_root.clone();
                         self.model.out_root = std::path::PathBuf::from(&out_root);
                     }
-                    ui.add_space(24.0);
+                    ui.add_space(16.0);
                     theme::quiet(ui, "Workers");
                     ui.add(
                         egui::DragValue::new(&mut self.model.workers)
                             .range(1..=32)
                             .speed(1),
                     );
-                    ui.add_space(24.0);
+                    ui.add_space(16.0);
                     theme::quiet(ui, "Modo");
                     let mut mode = self.model.mode;
                     egui::ComboBox::from_id_salt("modo")

@@ -352,9 +352,175 @@ fn is_the_box_of(shape: &egui::Rect, field: &egui::Rect) -> bool {
         && shape.max.x <= field.max.x + 4.0
 }
 
+/// The card with the destination and the adjustments is in the status bar.
+///
+/// The card used to be in the middle of the screen, taking the space of the
+/// list of boards. Now it is in the bar at the bottom, between the count of
+/// the chosen boards and the button that goes back.
+#[test]
+fn o_cartao_de_ajustes_fica_na_barra_de_status() {
+    let mut app = App::new();
+    app.model
+        .boards_found(vec![board("https://pinterest.com/a/arte/", "Arte")]);
+
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(1100.0, 760.0),
+        )),
+        ..Default::default()
+    };
+    let context = egui::Context::default();
+    let output = context.run(input, |ctx| {
+        app.update_ui(ctx);
+    });
+
+    let field = context
+        .read_response(egui::Id::new("campo-destino"))
+        .expect("the destination field was not drawn");
+    assert!(
+        field.rect.min.y >= 760.0 - 76.0,
+        "the card with the adjustments is not in the bar at the bottom: {:?}",
+        field.rect
+    );
+
+    // The count of the chosen boards is on the left of the card...
+    let summary = text_rect(&output, "escolhido(s)").expect("the count was not drawn");
+    assert!(
+        summary.max.x <= field.rect.min.x,
+        "the count is not on the left of the card: {summary:?} {:?}",
+        field.rect
+    );
+
+    // ...and the button that goes back is on the right of it.
+    let back = text_rect(&output, "Voltar").expect("the back button was not drawn");
+    assert!(
+        field.rect.max.x <= back.min.x,
+        "the card is not on the left of the back button: {:?} {back:?}",
+        field.rect
+    );
+}
+
+/// The field of the search has the height of the buttons next to it.
+///
+/// A field lower than the button beside it looks like a mistake, and the
+/// eye stops on it before reading a single word.
+#[test]
+fn o_campo_do_filtro_tem_a_altura_dos_botoes() {
+    let mut app = App::new();
+    app.model
+        .boards_found(vec![board("https://pinterest.com/a/arte/", "Arte")]);
+
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(1100.0, 760.0),
+        )),
+        ..Default::default()
+    };
+    let context = egui::Context::default();
+    let output = context.run(input, |ctx| {
+        app.update_ui(ctx);
+    });
+
+    let field = context
+        .read_response(egui::Id::new("campo-filtro"))
+        .expect("the filter field was not drawn");
+    assert!(
+        (field.rect.height() - pinterest_gui::theme::CONTROL_HEIGHT).abs() < 0.5,
+        "the field is not the height of a control of the product: {:?}",
+        field.rect
+    );
+
+    // The button next to the field: the first painted box on its right.
+    let button = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect) => Some(rect),
+            _ => None,
+        })
+        .find(|rect| {
+            let fill = rect.fill;
+            (fill.r(), fill.g(), fill.b()) == (0x2A, 0x2F, 0x38)
+                && rect.rect.min.x > field.rect.max.x - 1.0
+                && rect.rect.min.x < field.rect.max.x + 40.0
+        })
+        .expect("the button next to the field was not painted");
+    assert!(
+        (button.rect.height() - field.rect.height()).abs() < 0.5,
+        "the field and the button do not have the same height: {:?} {:?}",
+        field.rect,
+        button.rect
+    );
+}
+
+/// The text of the profile field can be read.
+///
+/// The egui writes the text of a field with the color of the stroke of the
+/// inactive control, and in the product that stroke is the color of the
+/// border: the text of the address came out almost invisible.
+#[test]
+fn o_texto_do_campo_do_perfil_tem_contraste() {
+    let mut app = App::new();
+    app.model.target = "https://br.pinterest.com/yuri_schmaltz/".to_owned();
+
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(1100.0, 760.0),
+        )),
+        ..Default::default()
+    };
+    let context = egui::Context::default();
+    let output = context.run(input, |ctx| {
+        app.update_ui(ctx);
+    });
+
+    let color = text_color(&output, "br.pinterest.com").expect("the address was not drawn");
+    assert_eq!(
+        (color.r(), color.g(), color.b()),
+        (0xE6, 0xE8, 0xEC),
+        "the text of the address is not the text of the product: {color:?}"
+    );
+}
+
+/// Where a text was drawn, in the screen.
+fn text_rect(output: &egui::FullOutput, needle: &str) -> Option<egui::Rect> {
+    for clipped in &output.shapes {
+        if let egui::Shape::Text(text) = &clipped.shape {
+            if text.galley.job.text.contains(needle) {
+                let rect = text.galley.rect;
+                return Some(egui::Rect::from_min_max(
+                    text.pos + rect.min.to_vec2(),
+                    text.pos + rect.max.to_vec2(),
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// The color a text was drawn with.
+fn text_color(output: &egui::FullOutput, needle: &str) -> Option<egui::Color32> {
+    for clipped in &output.shapes {
+        if let egui::Shape::Text(text) = &clipped.shape {
+            if text.galley.job.text.contains(needle) {
+                return text
+                    .galley
+                    .job
+                    .sections
+                    .first()
+                    .map(|section| section.format.color);
+            }
+        }
+    }
+    None
+}
+
 /// Every step fits inside the window.
 ///
-/// The window is 1100x760: the bar de cima tem 66 pixels, a de baixo 64.
+/// The window is 1100x760: the bar de cima tem 66 pixels, a de baixo 76.
 /// O que nao cabe na parte do meio e cortado, e o usuario perde um botao
 /// sem avisar.
 #[test]
@@ -405,7 +571,7 @@ fn check_fits(mut app: App, name: &str) {
 
     // The top of the footer: nothing of the screen may go past it. The
     // fundo das barras e do painel e largo demais e nao conta.
-    let limit = 760.0 - 64.0;
+    let limit = 760.0 - 76.0;
     for clipped in &output.shapes {
         if let egui::Shape::Rect(rect) = &clipped.shape {
             let rect = rect.rect;
