@@ -200,41 +200,14 @@ impl Collector {
                 }
                 truncated |= snapshot.network_truncated;
                 gated |= snapshot.gated;
-                for link in &snapshot.links {
-                    if link.recommendation {
-                        // A recommendation is not part of the board. It is
-                        // counted so that the report can say what was left
-                        // out instead of pretending the board is all there.
-                        if let Ok(url) = target.join(&link.href) {
-                            if let Some(id) = pin_id(&url) {
-                                excluded.insert(id);
-                            }
-                        }
-                        continue;
-                    }
-                    if let Ok(url) = target.join(&link.href) {
-                        if url.origin() == target.origin() {
-                            if let Some(id) = pin_id(&url) {
-                                if links.insert(id.clone(), url.to_string()).is_none() {
-                                    *origin
-                                        .sources
-                                        .entry(origin_label(&link.origin))
-                                        .or_default() += 1;
-                                }
-                            }
-                        }
-                    }
-                }
-                let metadata = board_metadata(&snapshot, &target);
-                for pin in metadata.into_values() {
-                    links.entry(pin.id.clone()).or_insert_with(|| {
-                        target
-                            .join(&format!("/pin/{}/", pin.id))
-                            .unwrap()
-                            .to_string()
-                    });
-                    pins.insert(pin.id.clone(), pin);
-                }
+                merge_snapshot(
+                    &snapshot,
+                    &target,
+                    &mut links,
+                    &mut pins,
+                    &mut origin,
+                    &mut excluded,
+                );
                 if gated && links.is_empty() {
                     // A pagina mostra os pins bloqueados para quem nao esta
                     // logado. Esperar a estabilidade nao muda nada: o quadro
@@ -300,6 +273,41 @@ impl Collector {
                     _ = tokio::time::sleep(self.options.scroll_pause) => {},
                 }
             };
+            // A page that says the feed ended does not mean that the
+            // payload with the details of the pins has arrived: the
+            // browser answers the DOM first and the body of the JSON
+            // after. Without a last look, the pins of the board are
+            // counted, but their details (the image) are lost.
+            //
+            // The wait is short and only happens when the page proved
+            // that the feed ended; a board that is still scrolling is not
+            // affected.
+            if end_seen {
+                let mut quiet = 0;
+                let mut rounds = 0;
+                while quiet < 5 && rounds < 20 && !cancel.is_cancelled() {
+                    rounds += 1;
+                    tokio::time::sleep(DRAIN_PAUSE).await;
+                    let Ok(snapshot) = page.snapshot().await else {
+                        break;
+                    };
+                    truncated |= snapshot.network_truncated;
+                    let arrived = !snapshot.network.is_empty();
+                    merge_snapshot(
+                        &snapshot,
+                        &target,
+                        &mut links,
+                        &mut pins,
+                        &mut origin,
+                        &mut excluded,
+                    );
+                    if arrived || snapshot.pending_requests > 0 {
+                        quiet = 0;
+                    } else {
+                        quiet += 1;
+                    }
+                }
+            }
             if let Some(max) = self.options.max_pins {
                 // Stable ordering makes a requested limit reproducible across DOM/network sources.
                 links = links.into_iter().take(max).collect();
@@ -497,6 +505,64 @@ impl Collector {
         }
     }
 }
+
+/// What one snapshot of the page adds to the collection.
+///
+/// The pins of a board arrive in two ways: the DOM shows them as links and
+/// the payload of the network brings their details (the image, the name).
+/// Both go into the same collection, and a pin that arrives in both ways is
+/// counted once.
+fn merge_snapshot(
+    snapshot: &PageSnapshot,
+    target: &Url,
+    links: &mut BTreeMap<String, String>,
+    pins: &mut BTreeMap<String, PinMetadata>,
+    origin: &mut FeedOrigin,
+    excluded: &mut std::collections::BTreeSet<String>,
+) {
+    for link in &snapshot.links {
+        if link.recommendation {
+            // A recommendation is not part of the board. It is counted so
+            // that the report can say what was left out instead of
+            // pretending the board is all there.
+            if let Ok(url) = target.join(&link.href) {
+                if let Some(id) = pin_id(&url) {
+                    excluded.insert(id);
+                }
+            }
+            continue;
+        }
+        if let Ok(url) = target.join(&link.href) {
+            if url.origin() == target.origin() {
+                if let Some(id) = pin_id(&url) {
+                    if links.insert(id.clone(), url.to_string()).is_none() {
+                        *origin
+                            .sources
+                            .entry(origin_label(&link.origin))
+                            .or_default() += 1;
+                    }
+                }
+            }
+        }
+    }
+    let metadata = board_metadata(snapshot, target);
+    for pin in metadata.into_values() {
+        links.entry(pin.id.clone()).or_insert_with(|| {
+            target
+                .join(&format!("/pin/{}/", pin.id))
+                .unwrap()
+                .to_string()
+        });
+        pins.insert(pin.id.clone(), pin);
+    }
+}
+
+/// How long the collector waits between the extra looks it takes after the
+/// page says the feed ended.
+///
+/// It is short enough to not bother the user and long enough for the
+/// payload of the browser to arrive.
+const DRAIN_PAUSE: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// The name of the container a pin came from.
 fn origin_label(origin: &str) -> String {

@@ -236,6 +236,27 @@ async fn one_browser_serves_every_board_of_the_run() {
 
 #[tokio::test]
 #[ignore = "requires Chromium; browser CI runs explicitly"]
+async fn the_payload_that_arrives_after_the_end_marker_is_not_lost() {
+    // The page says the feed ended and only later asks for the payload with
+    // the pins. A collector that closes the board the moment the marker
+    // shows up reports a board without pins, even though the browser had
+    // them all along.
+    let server = fixture::serve().await;
+    let collector = Collector::launch(options(), operation()).await.unwrap();
+    let board = collector
+        .collect_board(&format!("{}/late/art/", server.url))
+        .await
+        .unwrap();
+    assert!(
+        board.pins.contains_key("905"),
+        "the pin of the late payload was lost: {:?}",
+        board.pins.keys().collect::<Vec<_>>()
+    );
+    collector.close().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Chromium; browser CI runs explicitly"]
 async fn a_board_that_says_it_ended_does_not_wait_for_the_whole_stability_budget() {
     // The page tells the collector that the feed ended. That is evidence
     // that there is nothing more to load, so waiting the whole stability

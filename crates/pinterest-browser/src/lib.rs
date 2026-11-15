@@ -347,14 +347,32 @@ impl BrowserPage {
                     let url = pending.remove(&request).unwrap();
                     loaded.remove(&request);
                     captured.lock().await.pending = pending.len() + 1;
-                    if let Ok(body) = guarded(
-                        &stop,
-                        timeout,
-                        capture_page.execute(GetResponseBodyParams::new(request)),
-                    )
-                    .await
-                    {
-                        let body = body.result;
+                    // The body of a response that just finished is not always
+                    // ready to be read. The browser answers the page first
+                    // and releases the body a moment later; asking again is
+                    // what keeps a slow machine from losing the payload of
+                    // the last pins of a board.
+                    let mut body = None;
+                    for attempt in 0..4 {
+                        match guarded(
+                            &stop,
+                            timeout,
+                            capture_page.execute(GetResponseBodyParams::new(request.clone())),
+                        )
+                        .await
+                        {
+                            Ok(result) => {
+                                body = Some(result.result);
+                                break;
+                            }
+                            Err(_) => {
+                                if attempt < 3 {
+                                    tokio::time::sleep(Duration::from_millis(100)).await;
+                                }
+                            }
+                        }
+                    }
+                    if let Some(body) = body {
                         let data = if body.base64_encoded {
                             match base64::engine::general_purpose::STANDARD.decode(&body.body) {
                                 Ok(data) => data,

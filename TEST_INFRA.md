@@ -9,7 +9,7 @@ Verificação local em **2026-11-13**, sobre as correções posteriores ao clone
 | Python 3.12.3, Qt offscreen e Chromium | **246 passaram**, nenhum skip, 0 avisos de depreciação |
 | Cobertura de `src/` | **69%** geral; scraper **62%**; GUI **72%** |
 | Node: i18n + helpers de pins | **40 + 29 verificações** |
-| Rust 1.99.1 | **145 testes** (95 no core, 41 na interface gráfica, 5 na CLI, 4 no browser), todos aprovados com Chromium |
+| Rust 1.99.1 | **146 testes** (96 no core, 41 na interface gráfica, 5 na CLI, 4 no browser), todos aprovados com Chromium |
 | Ruff / Black / mypy | Aprovados; mypy cobre scraper e app_version |
 | Rustfmt / Clippy | Aprovados; Clippy com `-D warnings` |
 | Versões | Manifest, Python, manifests Cargo e entradas locais do Cargo.lock sincronizados em 2.0.5 |

@@ -81,6 +81,8 @@ pub async fn serve() -> Server {
                         "102"
                     } else if path.contains("DupeResource") {
                         "901"
+                    } else if path.contains("LateResource") {
+                        "905"
                     } else {
                         "101"
                     };
@@ -92,6 +94,22 @@ pub async fn serve() -> Server {
                     )
                 } else if path == "/alice/" {
                     ("text/html", r#"<html><body><a href="/alice/art/"><img src="/public-media/101.jpg">Art</a><a href="/bob/other/">Other user</a><a href="/alice/_saved/">Navigation</a><div style="height:1800px"></div><script>window.addEventListener('scroll',()=>{ if(!document.getElementById('later')){const a=document.createElement('a');a.id='later';a.href='/alice/nature/';a.textContent='Nature';document.body.appendChild(a);}});</script></body></html>"#.to_owned())
+                } else if path == "/late/art/" {
+                    // The page says the feed ended right away, but the
+                    // payload with the pins only shows up later. The
+                    // collector has to wait for it instead of closing the
+                    // board with nothing in it.
+                    (
+                        "text/html",
+                        r#"<html><main data-test-id="board-feed">
+                            <div data-test-id="board-feed-end"></div>
+                        </main><script>
+                            setTimeout(async () => {
+                                await fetch('/resource/LateResource/get/');
+                            }, 600);
+                        </script></body></html>"#
+                            .to_owned(),
+                    )
                 } else if path == "/dom/art/" {
                     ("text/html", r#"<html><main data-test-id='board-feed'><a href='/pin/103/'>DOM only</a><div data-test-id='board-feed-end'></div></main><script>document.cookie='fixture_cookie=ok; path=/';</script></html>"#.to_owned())
                 } else if path == "/pin/103/" {
