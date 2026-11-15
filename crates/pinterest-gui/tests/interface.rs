@@ -777,3 +777,99 @@ fn as_capas_dos_quadros_fazem_uma_grade() {
     rows.dedup_by(|a, b| (*a - *b).abs() < 0.5);
     assert!(rows.len() >= 2, "the covers are all in one row: {covers:?}");
 }
+
+/// The error of the run is inside the card of the step.
+///
+/// The message used to live in a band of its own, above the card, and the
+/// band pushed the card down every time an error appeared. Now the message
+/// is inside the card, next to the action that failed.
+#[test]
+fn a_mensagem_de_erro_fica_dentro_do_cartao() {
+    let mut app = App::new();
+    app.model
+        .discovery_failed("Nenhum quadro identificado no perfil");
+
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(1100.0, 760.0),
+        )),
+        ..Default::default()
+    };
+    let context = egui::Context::default();
+    let output = context.run(input, |ctx| {
+        app.update_ui(ctx);
+    });
+
+    let error = text_rect(&output, "Nenhum quadro identificado").expect("the error was not drawn");
+    let card = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect) => {
+                let fill = rect.fill;
+                if (fill.r(), fill.g(), fill.b()) == (0x22, 0x26, 0x2E) {
+                    Some(rect.rect)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .find(|rect| rect.contains(error.center()))
+        .expect("the error is not inside the card of the step");
+    assert!(
+        card.contains(error.center()),
+        "the error is outside of the card: {error:?} {card:?}"
+    );
+}
+
+/// The window has rounded corners at the bottom, like at the top.
+///
+/// The window is transparent where the interface does not paint, and the
+/// band of the bottom is drawn with the lower corners rounded.
+#[test]
+fn os_cantos_de_baixo_da_janela_sao_arredondados() {
+    let mut app = App::new();
+
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(1100.0, 760.0),
+        )),
+        ..Default::default()
+    };
+    let context = egui::Context::default();
+    let output = context.run(input, |ctx| {
+        app.update_ui(ctx);
+    });
+
+    let footer = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect) => {
+                let fill = rect.fill;
+                if (fill.r(), fill.g(), fill.b()) == (0x22, 0x26, 0x2E) && rect.rect.max.y >= 759.0
+                {
+                    Some((rect.rect, rect.corner_radius))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .next_back()
+        .expect("the band of the bottom was not painted");
+    let (rect, radius) = footer;
+    assert!(
+        radius.sw > 0 && radius.se > 0,
+        "the lower corners are not rounded: {radius:?}"
+    );
+    assert_eq!(radius.nw, 0, "the upper corners must stay straight");
+    assert_eq!(radius.ne, 0, "the upper corners must stay straight");
+    assert!(
+        rect.max.y >= 759.0,
+        "the band is not at the bottom: {rect:?}"
+    );
+}

@@ -3,17 +3,24 @@
 use crate::models::{BoardMetadata, PinMetadata};
 use regex::Regex;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
 
+/// The scripts of the page that carry the data of Pinterest.
+///
+/// The real Pinterest puts the data of the profile in
+/// `__PWS_INITIAL_PROPS__` and the data of the board in `__PWS_DATA__`.
+/// Reading only one of them loses half of the page.
 static PWS_DATA_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?is)<script\b[^>]*\bid\s*=\s*["']__PWS_DATA__["'][^>]*>(.*?)</script\s*>"#)
-        .unwrap()
+    Regex::new(
+        r#"(?is)<script\b[^>]*\bid\s*=\s*["'](?:__PWS_DATA__|__PWS_INITIAL_PROPS__)["'][^>]*>(.*?)</script\s*>"#,
+    )
+    .unwrap()
 });
 
 pub fn extract_pws_metadata_from_html(html: &str) -> HashMap<String, PinMetadata> {
     let mut out = HashMap::new();
-    if let Some(caps) = PWS_DATA_RE.captures(html) {
+    for caps in PWS_DATA_RE.captures_iter(html) {
         if let Some(json_str) = caps.get(1) {
             if let Ok(val) = serde_json::from_str::<Value>(json_str.as_str()) {
                 walk_pws_data(&val, &mut out);
@@ -146,11 +153,16 @@ fn pin_from_pws_dict(d: &serde_json::Map<String, Value>) -> Option<PinMetadata> 
 }
 
 pub fn extract_boards_from_html(html: &str, username: &str) -> Vec<BoardMetadata> {
-    PWS_DATA_RE
-        .captures(html)
-        .and_then(|caps| serde_json::from_str::<Value>(&caps[1]).ok())
-        .map(|data| extract_boards_from_pws(&data, username))
-        .unwrap_or_default()
+    let mut boards: BTreeMap<String, BoardMetadata> = BTreeMap::new();
+    for caps in PWS_DATA_RE.captures_iter(html) {
+        let Ok(data) = serde_json::from_str::<Value>(&caps[1]) else {
+            continue;
+        };
+        for board in extract_boards_from_pws(&data, username) {
+            boards.entry(board.url.clone()).or_insert(board);
+        }
+    }
+    boards.into_values().collect()
 }
 
 pub fn extract_boards_from_pws(val: &Value, username: &str) -> Vec<BoardMetadata> {
@@ -270,6 +282,35 @@ mod tests {
         assert_eq!(boards.len(), 1);
         assert_eq!(boards[0].pin_count_int, Some(123));
     }
+    #[test]
+    fn the_boards_of_the_profile_come_from_the_initial_props() {
+        // O Pinterest real guarda os quadros do perfil em
+        // `__PWS_INITIAL_PROPS__`, e nao em `__PWS_DATA__`. Ler so um dos
+        // dois deixa o perfil sem quadros.
+        let html = r#"<script id="__PWS_INITIAL_PROPS__" type="application/json">
+            {"props":{"initialReduxState":{"users":{"alice":{"created_boards":[
+                {"url":"/alice/art/","name":"Art","pin_count":12},
+                {"url":"/alice/photo/","name":"Photo","pin_count":34}
+            ]}}}}}
+        </script>"#;
+        let boards = extract_boards_from_html(html, "alice");
+        assert_eq!(boards.len(), 2, "{boards:?}");
+        assert_eq!(boards[0].title, "Art");
+        assert_eq!(boards[1].pin_count_int, Some(34));
+    }
+
+    #[test]
+    fn the_boards_of_both_scripts_are_together() {
+        let html = r#"<script id="__PWS_INITIAL_PROPS__" type="application/json">
+            {"url":"/alice/art/","name":"Art"}
+        </script>
+        <script id="__PWS_DATA__" type="application/json">
+            {"url":"/alice/photo/","name":"Photo"}
+        </script>"#;
+        let boards = extract_boards_from_html(html, "alice");
+        assert_eq!(boards.len(), 2, "{boards:?}");
+    }
+
     #[test]
     fn metatags_preserve_signed_queries_decode_entities_and_prefer_video() {
         let html = r#"<meta content='https://cdn.example/image.jpg?x=1&amp;y=2' property='og:image'>

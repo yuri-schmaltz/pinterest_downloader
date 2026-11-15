@@ -410,11 +410,15 @@ impl Collector {
                         entries.extend(extract_boards_from_pws(&payload.body, username));
                     }
                 }
+                // Os links da tela trazem a capa do quadro e, as vezes, um
+                // nome com a contagem de pins e o tempo ("Figuras, 924
+                // Pins, 11 h"). O nome vem do payload da pagina, que e
+                // limpo; o link so serve para a capa.
                 for link in &snapshot.links {
                     if link.recommendation {
                         continue;
                     }
-                    let raw = serde_json::json!({"url":link.href,"name":link.title});
+                    let raw = serde_json::json!({"url":link.href,"name":board_name(&link.title)});
                     let mut parsed = extract_boards_from_pws(&raw, username);
                     for board in &mut parsed {
                         board.thumbnail_url.clone_from(&link.thumbnail);
@@ -422,24 +426,28 @@ impl Collector {
                     entries.extend(parsed);
                 }
                 for mut board in entries {
-                    if let Ok(url) = target.join(&board.url) {
-                        if url.origin() != target.origin() {
-                            continue;
-                        }
-                        board.url = url.to_string();
-                        boards
-                            .entry(board.url.clone())
-                            .and_modify(|existing: &mut BoardMetadata| {
-                                if existing.thumbnail_url.is_empty() {
-                                    existing.thumbnail_url.clone_from(&board.thumbnail_url);
-                                }
-                                if existing.pin_count_int.is_none() {
-                                    existing.pin_count_int = board.pin_count_int;
-                                    existing.pin_count.clone_from(&board.pin_count);
-                                }
-                            })
-                            .or_insert(board);
-                    }
+                    let Some(url) = canonical_board_url(&target, &board.url) else {
+                        continue;
+                    };
+                    board.url = url.to_string();
+                    boards
+                        .entry(board.url.clone())
+                        .and_modify(|existing: &mut BoardMetadata| {
+                            if existing.thumbnail_url.is_empty() {
+                                existing.thumbnail_url.clone_from(&board.thumbnail_url);
+                            }
+                            if existing.pin_count_int.is_none() {
+                                existing.pin_count_int = board.pin_count_int;
+                                existing.pin_count.clone_from(&board.pin_count);
+                            }
+                            // O nome vem do payload da pagina. O link da
+                            // tela traz o nome com a contagem, e ele nao
+                            // deve substituir o nome limpo.
+                            if existing.title.is_empty() {
+                                existing.title.clone_from(&board.title);
+                            }
+                        })
+                        .or_insert(board);
                 }
                 let current = (boards.len(), snapshot.height);
                 if current == previous {
@@ -559,7 +567,80 @@ fn belongs_to_board(board_url: Option<&str>, target: &Url) -> bool {
 fn same_origin(target: &Url, raw: &str) -> bool {
     target
         .join(raw)
-        .is_ok_and(|url| url.origin() == target.origin())
+        .is_ok_and(|url| url.origin() == target.origin() || same_site(target, &url))
+}
+
+/// The URL of a board, always with the origin of the target.
+///
+/// Pinterest answers with the domain of the country (br.pinterest.com) and
+/// the page carries links of another domain (www.pinterest.com). The same
+/// board appears with the two addresses, and the list would show it twice.
+fn canonical_board_url(target: &Url, raw: &str) -> Option<Url> {
+    let joined = target.join(raw).ok()?;
+    if joined.origin() == target.origin() {
+        return Some(joined);
+    }
+    if !same_site(&joined, target) {
+        return None;
+    }
+    let mut canonical = target.clone();
+    canonical.set_path(joined.path());
+    canonical.set_query(joined.query());
+    Some(canonical)
+}
+
+/// The name of a board, without the numbers of the screen.
+///
+/// The link of a board carries the name, the count of pins and the time of
+/// the last pin ("Figuras, 924 Pins, 11 h"). Only the name belongs to the
+/// board.
+fn board_name(raw: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in raw.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        // A part with a number e a sigla e o resumo, nao o nome.
+        if part.contains("Pin") || part.contains("pin") {
+            break;
+        }
+        let digits = part
+            .chars()
+            .filter(|character| character.is_ascii_digit())
+            .count();
+        if digits > 0 && part.chars().any(|character| character.is_alphabetic()) {
+            break;
+        }
+        parts.push(part);
+    }
+    if parts.is_empty() {
+        return raw.trim().to_string();
+    }
+    parts.join(", ")
+}
+
+/// Whether two URLs belong to the same Pinterest.
+///
+/// Pinterest answers with the domain of the country of the visitor
+/// (br.pinterest.com, www.pinterest.com, ...) and the page asks for its data
+/// to that domain. Comparing the origins strictly throws these payloads
+/// away, and the profile or the board comes out empty.
+fn same_site(left: &Url, right: &Url) -> bool {
+    fn site(host: &str) -> Option<&str> {
+        let host = host.strip_prefix("www.").unwrap_or(host);
+        if host == "pinterest.com" {
+            return Some(host);
+        }
+        host.strip_suffix(".pinterest.com").map(|_| "pinterest.com")
+    }
+    match (
+        site(left.host_str().unwrap_or_default()),
+        site(right.host_str().unwrap_or_default()),
+    ) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
 }
 fn pin_id(url: &Url) -> Option<String> {
     let parts: Vec<_> = url
@@ -597,6 +678,23 @@ fn browser_error(error: BrowserError) -> PinterestError {
 #[cfg(test)]
 mod deadline_tests {
     use super::*;
+
+    #[test]
+    fn o_nome_do_quadro_da_tela_nao_traz_a_contagem() {
+        assert_eq!(board_name("Figuras, 924 Pins, 11 h"), "Figuras");
+        assert_eq!(board_name("Figuras"), "Figuras");
+        assert_eq!(board_name("Arte e Cultura"), "Arte e Cultura");
+    }
+
+    #[test]
+    fn o_endereco_do_quadro_usa_o_dominio_do_alvo() {
+        let target = Url::parse("https://www.pinterest.com/alice/").unwrap();
+        let canonical =
+            canonical_board_url(&target, "https://br.pinterest.com/alice/art/").unwrap();
+        assert_eq!(canonical.as_str(), "https://www.pinterest.com/alice/art/");
+        // Um endereco de outro site nao entra na lista.
+        assert!(canonical_board_url(&target, "https://example.com/alice/art/").is_none());
+    }
 
     #[test]
     fn o_primeiro_login_da_mais_tempo_e_os_outros_nao() {

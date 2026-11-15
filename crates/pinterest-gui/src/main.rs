@@ -44,7 +44,12 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1100.0, 760.0])
             .with_min_inner_size([720.0, 520.0])
-            .with_title("Pinterest Board Downloader"),
+            .with_title("Pinterest Board Downloader")
+            // A janela e transparente: os cantos do rodape sao
+            // arredondados, e o que fica fora deles mostra o fundo da
+            // area de trabalho, como no topo, que o gerenciador de janelas
+            // arredonda.
+            .with_transparent(true),
         ..Default::default()
     };
     run(options)

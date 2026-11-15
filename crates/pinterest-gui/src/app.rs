@@ -313,6 +313,16 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_ui(ctx);
     }
+
+    /// The window is transparent where the interface does not paint.
+    ///
+    /// A window with square corners shows the rectangle of the window, and
+    /// the bottom of the interface fica com o canto reto, ao contrario do
+    /// topo, que o gerenciador de janelas arredonda. A cor de limpeza
+    /// transparente deixa o cantos arredondados do rodape aparecerem.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        egui::Color32::TRANSPARENT.to_normalized_gamma_f32()
+    }
 }
 
 impl Default for App {
@@ -343,7 +353,6 @@ impl App {
         theme::apply(ctx);
 
         self.steps_bar(ctx);
-        self.error_bar(ctx);
 
         // The footer comes first: the panel do meio so sabe o espaco que
         // sobrou, e o cartao nao invade a barra de baixo.
@@ -356,10 +365,16 @@ impl App {
                     .inner_margin(egui::Margin::symmetric(18, 12)),
             )
             .show(ctx, |ui| {
-                theme::card(ui, |ui| match self.model.stage {
-                    Stage::Profile => self.profile(ui),
-                    Stage::Boards => self.boards(ui),
-                    Stage::Download => self.download(ui),
+                theme::card(ui, |ui| {
+                    // O erro fica dentro do cartao do passo: a mensagem
+                    // diz o que deu errado perto da acao que deu errado,
+                    // e a tela nao ganha uma faixa a parte.
+                    self.error_inside(ui);
+                    match self.model.stage {
+                        Stage::Profile => self.profile(ui),
+                        Stage::Boards => self.boards(ui),
+                        Stage::Download => self.download(ui),
+                    }
                 });
             });
 
@@ -445,28 +460,25 @@ impl App {
             });
     }
 
-    /// The bar that shows an error, when there is one.
-    fn error_bar(&mut self, ctx: &egui::Context) {
+    /// The error of the run, dentro do cartao do passo.
+    ///
+    /// A mensagem fica perto da acao que falhou (o botao de buscar
+    /// quadros, o download) e nao numa faixa a parte, que empurrava o
+    /// conteudo do cartao para baixo a cada erro.
+    fn error_inside(&mut self, ui: &mut egui::Ui) {
         let Some(error) = self.model.error.clone() else {
             return;
         };
-        egui::TopBottomPanel::top("error")
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::BG)
-                    .inner_margin(egui::Margin::symmetric(22, 8)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    let text = self.label(format!("Erro: {error}"));
-                    ui.colored_label(theme::ERROR, text);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if theme::button(ui, "Fechar", theme::ButtonKind::Quiet) {
-                            self.model.error = None;
-                        }
-                    });
-                });
+        ui.horizontal(|ui| {
+            let text = self.label(format!("Erro: {error}"));
+            ui.colored_label(theme::ERROR, text);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if theme::button(ui, "Fechar", theme::ButtonKind::Quiet) {
+                    self.model.error = None;
+                }
             });
+        });
+        ui.add_space(12.0);
     }
 
     /// The bar at the bottom: what the run is doing and what can be done.
@@ -480,6 +492,16 @@ impl App {
             .frame(
                 egui::Frame::new()
                     .fill(theme::SURFACE)
+                    // Os cantos de baixo da janela sao arredondados, como
+                    // os de cima. A janela e transparente, entao o que
+                    // fica fora do desenho mostra o fundo da area de
+                    // trabalho.
+                    .corner_radius(egui::CornerRadius {
+                        nw: 0,
+                        ne: 0,
+                        sw: theme::RADIUS_CARD,
+                        se: theme::RADIUS_CARD,
+                    })
                     .inner_margin(egui::Margin::symmetric(22, 14)),
             )
             .show(ctx, |ui| {
