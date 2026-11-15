@@ -188,6 +188,11 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
     let json = cli.json_log;
     let presenter = tokio::spawn(async move {
         let mut log = log;
+        // A single handle for the whole run: the stdout buffer of the standard
+        // library only reaches the pipe when it fills up or when it is
+        // flushed. Without an explicit flush the last events of the run (the
+        // terminal one) could be lost when the process ends.
+        let mut stdout = tokio::io::stdout();
         let (login_sender, mut login_input) = tokio::sync::mpsc::channel(1);
         // Tokio stdin uses blocking reads that can delay runtime shutdown until Enter.
         // A detached OS thread permits Ctrl+C to finish while a login prompt is pending.
@@ -206,8 +211,8 @@ async fn execute(cli: Cli) -> Result<u8, (u8, String)> {
                     let Some(event) = event else { break; };
                     let serialized = serde_json::to_string(&event).map_err(|error| error.to_string())?;
                     if json {
-                        let mut stdout = tokio::io::stdout();
                         stdout.write_all(format!("{serialized}\n").as_bytes()).await.map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
+                        stdout.flush().await.map_err(|error| { presentation_operation.cancel(); error.to_string() })?;
                     }
                     if let Some(file) = &mut log {
                         // One write per event: two writes would let another
