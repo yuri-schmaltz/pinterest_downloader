@@ -355,8 +355,8 @@ fn is_the_box_of(shape: &egui::Rect, field: &egui::Rect) -> bool {
 /// The card with the destination and the adjustments is in the status bar.
 ///
 /// The card used to be in the middle of the screen, taking the space of the
-/// list of boards. Now it is in the bar at the bottom, between the count of
-/// the chosen boards and the button that goes back.
+/// list of boards. Now it is in the bar at the bottom, and the button that
+/// goes back is on the right of it.
 #[test]
 fn o_cartao_de_ajustes_fica_na_barra_de_status() {
     let mut app = App::new();
@@ -384,20 +384,145 @@ fn o_cartao_de_ajustes_fica_na_barra_de_status() {
         field.rect
     );
 
-    // The count of the chosen boards is on the left of the card...
-    let summary = text_rect(&output, "escolhido(s)").expect("the count was not drawn");
-    assert!(
-        summary.max.x <= field.rect.min.x,
-        "the count is not on the left of the card: {summary:?} {:?}",
-        field.rect
-    );
-
-    // ...and the button that goes back is on the right of it.
+    // The button that goes back is on the right of the card.
     let back = text_rect(&output, "Voltar").expect("the back button was not drawn");
     assert!(
         field.rect.max.x <= back.min.x,
         "the card is not on the left of the back button: {:?} {back:?}",
         field.rect
+    );
+}
+
+/// The cover of a board is scaled to fit inside the card, without
+/// distortion.
+///
+/// A cover that is stretched to fill the square deforms the picture: the
+/// first thing the user sees of a board is wrong before a single word is
+/// read.
+#[test]
+fn a_capa_do_quadro_cabe_no_cartao_sem_distorcao() {
+    let mut app = App::new();
+    app.model
+        .boards_found(vec![board("https://pinterest.com/a/arte/", "Arte")]);
+
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(1100.0, 760.0),
+        )),
+        ..Default::default()
+    };
+    let context = egui::Context::default();
+
+    // A picture twice as wide as it is tall, so a stretched cover would
+    // be easy to see.
+    let texture = context.load_texture(
+        "capa-larga",
+        egui::ColorImage::new([200, 100], vec![egui::Color32::WHITE; 200 * 100]),
+        egui::TextureOptions::LINEAR,
+    );
+    app.thumbnails
+        .insert("https://pinterest.com/a/arte/", texture.clone());
+
+    let output = context.run(input, |ctx| {
+        app.update_ui(ctx);
+    });
+
+    // The drawn cover is the shape that uses the texture of the cover.
+    let drawn: Vec<egui::Rect> = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect) if rect.fill_texture_id() == texture.id() => Some(rect.rect),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(drawn.len(), 1, "the cover was not drawn: {drawn:?}");
+
+    let cover = drawn[0];
+    // The proportion of the picture is the same: twice as wide as tall.
+    let ratio = cover.width() / cover.height();
+    assert!(
+        (ratio - 2.0).abs() < 0.05,
+        "the cover was stretched: {cover:?} (ratio {ratio})"
+    );
+
+    // And it fits inside the card, without taking more space than it has.
+    let squares: Vec<egui::Rect> = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect) => Some(rect.rect),
+            _ => None,
+        })
+        .filter(|rect| (rect.width() - rect.height()).abs() < 0.5 && rect.width() > 90.0)
+        .collect();
+    let card = squares
+        .iter()
+        .find(|rect| rect.contains(cover.center()))
+        .expect("the card of the cover was not painted");
+    assert!(
+        cover.width() <= card.width() + 0.5 && cover.height() <= card.height() + 0.5,
+        "the cover does not fit inside the card: {cover:?} {card:?}"
+    );
+}
+
+/// The counts of the boards live with the list of boards.
+///
+/// The count of the boards the profile has and the count of the ones the
+/// user chose belong to the screen where the choice is made. When they are
+/// in the bars of the window, the user has to look away from the list to
+/// read them.
+#[test]
+fn as_contagens_dos_quadros_ficam_na_area_de_visualizacao() {
+    let mut app = App::new();
+    app.model.boards_found(vec![
+        board("https://pinterest.com/a/arte/", "Arte"),
+        board("https://pinterest.com/a/fotografia/", "Fotografia"),
+    ]);
+
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(1100.0, 760.0),
+        )),
+        ..Default::default()
+    };
+    let context = egui::Context::default();
+    let output = context.run(input, |ctx| {
+        app.update_ui(ctx);
+    });
+
+    // The bar of the top ends before the card of the boards begins, and
+    // the bar of the bottom begins after the card ends.
+    let title = text_rect(&output, "Escolha os quadros").expect("the title was not drawn");
+    let found = text_rect(&output, "encontrado(s)").expect("the count was not drawn");
+    let chosen = text_rect(&output, "escolhido(s)").expect("the count was not drawn");
+
+    // Both counts are under the bar of the top...
+    assert!(
+        found.min.y > 66.0,
+        "the count of the boards is in the bar of the top: {found:?}"
+    );
+    assert!(
+        chosen.min.y > 66.0,
+        "the count of the chosen boards is in the bar of the top: {chosen:?}"
+    );
+
+    // ...and above the bar of the bottom.
+    assert!(
+        found.max.y < 760.0 - 76.0,
+        "the count of the boards is in the bar of the bottom: {found:?}"
+    );
+    assert!(
+        chosen.max.y < 760.0 - 76.0,
+        "the count of the chosen boards is in the bar of the bottom: {chosen:?}"
+    );
+
+    // The count of the boards is beside the title of the list.
+    assert!(
+        found.min.x > title.max.x,
+        "the count of the boards is not beside the title: {title:?} {found:?}"
     );
 }
 

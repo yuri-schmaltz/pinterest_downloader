@@ -506,8 +506,9 @@ impl App {
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    let summary = self.footer_summary();
-                    ui.colored_label(theme::TEXT_MUTED, summary);
+                    if let Some(summary) = self.footer_summary() {
+                        ui.colored_label(theme::TEXT_MUTED, summary);
+                    }
                     if self.model.stage == Stage::Boards {
                         self.options_strip(ui);
                     }
@@ -567,21 +568,20 @@ impl App {
     }
 
     /// What the footer says about the step the user is on.
-    fn footer_summary(&self) -> String {
+    ///
+    /// The step of the boards says nothing here: the count of the chosen
+    /// boards lives with the list that the user chooses from.
+    fn footer_summary(&self) -> Option<String> {
         match self.model.stage {
-            Stage::Profile => "Escreva o perfil e procure os quadros.".to_owned(),
-            Stage::Boards => format!(
-                "{} de {} quadro(s) escolhido(s).",
-                self.model.boards.selected_count(),
-                self.model.boards.boards().len()
-            ),
-            Stage::Download => {
+            Stage::Profile => Some("Escreva o perfil e procure os quadros.".to_owned()),
+            Stage::Boards => None,
+            Stage::Download => Some({
                 let totals = self.model.progress.totals();
                 format!(
                     "Novos: {}  ·  Reutilizados: {}  ·  Falhas: {}",
                     totals.downloaded, totals.reused, totals.failed
                 )
-            }
+            }),
         }
     }
 }
@@ -603,6 +603,20 @@ fn decode_image(bytes: &[u8]) -> Option<egui::ColorImage> {
         [width, height],
         image.as_raw(),
     ))
+}
+
+/// The size a picture takes inside a square of the given side, keeping the
+/// proportion of the picture.
+///
+/// A picture wider than it is tall uses the whole width and leaves the top
+/// and the bottom empty; a taller one does the opposite. Nothing is ever
+/// stretched.
+fn fit_inside_square(picture: egui::Vec2, side: f32) -> egui::Vec2 {
+    if picture.x <= 0.0 || picture.y <= 0.0 {
+        return egui::vec2(side, side);
+    }
+    let scale = (side / picture.x).min(side / picture.y);
+    egui::vec2(picture.x * scale, picture.y * scale)
 }
 
 impl App {
@@ -635,7 +649,17 @@ impl App {
     }
 
     fn boards(&mut self, ui: &mut egui::Ui) {
-        theme::step_title(ui, &self.label("Escolha os quadros que quer baixar"));
+        // As contagens dos quadros moram aqui, com a lista que elas
+        // contam: quantos o perfil tem e quantos o usuario ja escolheu.
+        // Nenhuma delas precisa ocupar a barra de cima nem a de baixo.
+        let total = self.model.boards.boards().len();
+        let chosen = self.model.boards.selected_count();
+        ui.horizontal(|ui| {
+            theme::step_title(ui, &self.label("Escolha os quadros que quer baixar"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                theme::quiet(ui, format!("{total} quadro(s) encontrado(s)"));
+            });
+        });
         ui.add_space(12.0);
 
         // The filter and the quick choices.
@@ -660,6 +684,8 @@ impl App {
                 if theme::button(ui, &all, theme::ButtonKind::Quiet) {
                     self.model.boards.select_all_visible();
                 }
+                ui.add_space(12.0);
+                theme::quiet(ui, format!("{chosen} de {total} quadro(s) escolhido(s)."));
             });
         });
         ui.add_space(14.0);
@@ -738,9 +764,16 @@ impl App {
                                 .allocate_exact_size(egui::vec2(side, side), egui::Sense::hover());
                             match handle {
                                 Some(handle) => {
-                                    let mut image = egui::Image::new(&handle);
-                                    image = image.fit_to_exact_size(egui::vec2(side, side));
-                                    image.paint_at(ui, rect);
+                                    // A capa e escalada para CABER no
+                                    // quadrado, sem alterar a proporcao da
+                                    // imagem. Esticar a capa deformaria a
+                                    // foto, e a miniatura do quadro e a
+                                    // primeira coisa que o usuario ve.
+                                    let painted = fit_inside_square(handle.size_vec2(), side);
+                                    ui.painter().rect_filled(rect, 8.0, theme::SURFACE_2);
+                                    let image_rect =
+                                        egui::Rect::from_center_size(rect.center(), painted);
+                                    egui::Image::new(&handle).paint_at(ui, image_rect);
                                 }
                                 None => {
                                     // A square placeholder, so the grid keeps

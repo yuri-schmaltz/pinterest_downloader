@@ -154,10 +154,9 @@ impl AppModel {
         self.boards.set_boards(boards);
         self.stage = Stage::Boards;
         self.activity = Activity::Idle;
-        self.notice = Some(format!(
-            "{} quadro(s) encontrado(s)",
-            self.boards.boards().len()
-        ));
+        // A contagem dos quadros mora na tela dos quadros: e la que o
+        // usuario ve o que pode escolher.
+        self.notice = None;
     }
 
     /// The discovery failed.
