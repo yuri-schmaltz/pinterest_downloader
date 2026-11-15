@@ -3,5 +3,6 @@ members = [
     "crates/pinterest-core",
     "crates/pinterest-cli",
     "crates/pinterest-browser",
+    "crates/pinterest-gui",
 ]
 resolver = "2"

@@ -9,6 +9,7 @@ Baixa mídias de quadros públicos do Pinterest. Versão declarada: **2.0.5**.
 | CLI Python | Playwright + requests | Coleta dinâmica de quadros e perfis, scroll e login manual |
 | GUI Python | PyQt6, mesmo motor da CLI | Perfil → escolher quadros → baixar |
 | CLI Rust | Tokio + reqwest + Chromium/CDP | Coleta dinâmica por DOM/rede e scroll; modo HTTP explícito para snapshots. Migração em andamento |
+| GUI Rust | egui, mesmo motor da CLI Rust | Perfil → escolher quadros → baixar, com a mesma paleta da GUI PyQt6 |
 | Extensão | JavaScript, Manifest V3 | Coleta no navegador; Chrome empacotado e XPI experimental |
 
 Os testes usam fixtures e servidores locais. Eles não comprovam compatibilidade com o layout atual do Pinterest. A implementação Rust tem testes HTTP e Chromium com fixtures locais, mas ainda não tem paridade completa com o produto Python nem benchmarks comparativos.
@@ -51,7 +52,7 @@ Use o toolchain **stable atual via rustup**. O lockfile usa formato 4; o Cargo 1
 ```bash
 cargo build --release --locked
 ./target/release/pinterest-cli https://www.pinterest.com/usuario/quadro/ -w 8 --max-pins 20
-./target/release/pinterest-cli --user usuario --output downloads
+./target/release/pinterest-cli --user usuario --output pins
 ./target/release/pinterest-cli --help
 ```
 
@@ -74,7 +75,7 @@ A coleta acumula IDs entre páginas/scroll e captura respostas JSON. Pins sem me
 
 O modo automático ainda não possui fast path HTTP com prova de completude. Estabilidade/timeout produzem completude desconhecida; um limite pedido é informado separadamente. Código 0 indica conclusão conhecida/limitada sem falhas, 6 indica resultado parcial/desconhecido, 7 indica extração não comprovada; cancelamento retorna 130. Falhas de browser e autenticação usam 3 e 4. A interpretação de fim de feed ainda depende de fixtures sintéticas e precisa ser validada no Pinterest atual.
 
-A saída Rust mantém `downloads/<usuario>_<quadro>/`. O cache de metadados é `.pinterest_cache.json` no diretório de `--cache-dir` (cache do sistema por padrão) e tem o mesmo formato do Python, então o diretório pode ser compartilhado entre as duas CLIs; `--no-metadata-cache` desliga apenas esse cache, sem alterar `--no-cache`. O limitador usa janelas deslizantes de segundo, minuto e hora, com backoff exponencial e `Retry-After`. Cache persistente com expiração, workers adaptativos, GUI e migração dos arquivos estão pendentes. O progresso está registrado em [docs/PLANO-PARIDADE-RUST.md](docs/PLANO-PARIDADE-RUST.md) e no [contrato de paridade](docs/CONTRATO-PARIDADE.md).
+A saída Rust usa `pins/<usuario>/<quadro>/`, o mesmo layout e o mesmo diretório padrão do Python: as duas ferramentas enxergam os mesmos arquivos e não baixam de novo o que já está no disco. Um diretório `<usuario>_<quadro>/` deixado por versões antigas do Rust é migrado no começo da execução, sem perder nem duplicar arquivos. O cache de metadados é `.pinterest_cache.json` no diretório de `--cache-dir` (cache do sistema por padrão) e tem o mesmo formato do Python, então o diretório pode ser compartilhado entre as duas CLIs; `--no-cache` (e `--no-metadata-cache`) desligam esse cache, como no Python; `--force` baixa de novo as mídias que já estão no disco. O cache tem versão e validade (`--cache-ttl-days`, 30 dias por padrão). O limitador usa janelas deslizantes de segundo, minuto e hora, com backoff exponencial e `Retry-After`, e conta as janelas **por host**: um `429` de um servidor não segura as tarefas de outro. Workers adaptativos (`--adaptive-workers`), resolução de novo quando a URL da mídia expira e cancelamento em até dois segundos estão prontos. A captura real do Pinterest é feita por `scripts/capture_pinterest.py`, grava a página e o formato dos payloads sem cookie, token nem dado de pessoa, e registra data, origem e limites em `tests/fixtures/real/manifest.json`. Ela mostrou que a superfície pública entrega os pins bloqueados para quem não está logado: nesse caso o pedido é de login, não de quadro vazio. A GUI Rust (`pinterest-gui`) tem as três etapas — perfil, escolha dos quadros e download —, usa o mesmo motor da CLI, baixa só os quadros escolhidos e desenha com a mesma paleta escura da interface PyQt6 (barras de etapas numeradas, cartões, botões coloridos e a faixa de opções na barra de status, entre a contagem dos quadros escolhidos e o botão Voltar). Ela desenha com o OpenGL e, quando a máquina não tem OpenGL 2.0 (um Windows sem driver de vídeo, por exemplo), passa para o renderizador da wgpu em vez de mostrar um erro. O download roda fora da thread que desenha a interface, e o cancelamento é observado em até dois segundos. O progresso está registrado em [docs/PLANO-PARIDADE-RUST.md](docs/PLANO-PARIDADE-RUST.md) e no [contrato de paridade](docs/CONTRATO-PARIDADE.md).
 
 ## Extensão
 

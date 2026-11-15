@@ -476,3 +476,7 @@ PinterestDownloader.AppDir/usr/bin/_internal/setuptools/_vendor/jaraco/text/Lore
 appimagetool
 PinterestDownloader-x86_64.AppImage
 PinterestDownloader.AppDir/.DirIcon
+
+# The event log of a run is an artifact of the run, not a source file. It
+# used to be tracked, and every run changed it.
+download_log.json

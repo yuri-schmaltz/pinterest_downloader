@@ -5,18 +5,73 @@
 //! on both sides, so a cache directory can be shared between the Python and
 //! the Rust CLI.
 //!
-//! The cache is an optimisation, never a source of truth: a missing, empty or
-//! corrupt file yields an empty cache instead of failing the run, and a failed
-//! write is reported as a warning.
+//! The version and the age of the cache live in a second file, next to the
+//! map. Keeping the map itself in the plain format is what lets the two
+//! tools share the directory: a sidecar file can be added without making
+//! the map unreadable for the other tool.
+//!
+//! The cache is an optimisation, never a source of truth: a missing, empty,
+//! corrupt or expired file yields an empty cache instead of failing the run,
+//! and a failed write is reported as a warning.
 
 use crate::Result;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::fs;
 
 const CACHE_FILE_NAME: &str = ".pinterest_cache.json";
+const META_FILE_NAME: &str = ".pinterest_cache_meta.json";
 const APP_DIR_NAME: &str = "pinterest-downloader";
+
+/// The version of the cache format this build writes.
+pub const CACHE_VERSION: u32 = 1;
+
+/// How long a cache stays usable when the caller does not say otherwise.
+pub const DEFAULT_TTL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+/// The version and the age of the cache.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CacheMeta {
+    pub version: u32,
+    /// When the map was written, in seconds since the epoch.
+    pub written_at: u64,
+}
+
+impl CacheMeta {
+    /// The metadata of a cache written now.
+    pub fn now() -> Self {
+        Self {
+            version: CACHE_VERSION,
+            written_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|delta| delta.as_secs())
+                .unwrap_or(0),
+        }
+    }
+
+    /// Whether the cache is older than the given age.
+    ///
+    /// A cache with no metadata, or one written by a format this build does
+    /// not know, is not expired by age: the other tool may have just
+    /// written it, and throwing it away would be worse than using it.
+    pub fn is_expired(&self, ttl: Duration) -> bool {
+        if ttl.is_zero() {
+            return false;
+        }
+        if self.version != CACHE_VERSION {
+            return false;
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|delta| delta.as_secs())
+            .unwrap_or(0);
+        let age = now.saturating_sub(self.written_at);
+        age > ttl.as_secs()
+    }
+}
 
 /// Resolve the cache directory.
 ///
@@ -51,6 +106,8 @@ pub fn resolve_cache_dir(override_dir: Option<&Path>) -> PathBuf {
 pub struct PinCache {
     entries: BTreeMap<String, String>,
     path: PathBuf,
+    meta_path: PathBuf,
+    meta: Option<CacheMeta>,
     dirty: bool,
 }
 
@@ -60,17 +117,43 @@ impl PinCache {
     /// A missing file yields an empty cache. A file that is not a JSON object
     /// of strings is discarded rather than propagated, so a cache written by
     /// another version cannot break a run.
-    pub fn load(dir: &Path) -> Self {
+    ///
+    /// A cache older than `ttl` is not loaded at all. The file stays where
+    /// it is; the next write replaces it.
+    pub fn load(dir: &Path, ttl: Duration) -> Self {
         let path = dir.join(CACHE_FILE_NAME);
-        let entries = std::fs::read_to_string(&path)
+        let meta_path = dir.join(META_FILE_NAME);
+        let meta: Option<CacheMeta> = std::fs::read_to_string(&meta_path)
             .ok()
-            .map(|raw| parse_entries(&raw))
-            .unwrap_or_default();
+            .and_then(|raw| serde_json::from_str(&raw).ok());
+        let expired = meta.as_ref().is_some_and(|meta| meta.is_expired(ttl));
+        let entries = if expired {
+            BTreeMap::new()
+        } else {
+            std::fs::read_to_string(&path)
+                .ok()
+                .map(|raw| parse_entries(&raw))
+                .unwrap_or_default()
+        };
         Self {
             entries,
             path,
+            meta_path,
+            meta,
             dirty: false,
         }
+    }
+
+    /// Whether the cache on disk was too old to be used.
+    pub fn was_expired(&self) -> bool {
+        self.meta
+            .as_ref()
+            .is_some_and(|meta| meta.is_expired(DEFAULT_TTL))
+    }
+
+    /// The version of the cache that was read, when it is known.
+    pub fn version(&self) -> Option<u32> {
+        self.meta.as_ref().map(|meta| meta.version)
     }
 
     /// An empty cache that is never persisted.
@@ -81,6 +164,8 @@ impl PinCache {
         Self {
             entries: BTreeMap::new(),
             path: PathBuf::new(),
+            meta_path: PathBuf::new(),
+            meta: None,
             dirty: false,
         }
     }
@@ -127,6 +212,15 @@ impl PinCache {
         let temporary = self.path.with_extension("json.part");
         fs::write(&temporary, payload).await?;
         fs::rename(&temporary, &self.path).await?;
+
+        // The version and the age travel in a sidecar, so the map itself
+        // stays in the format the other tool reads.
+        let meta = CacheMeta::now();
+        let payload = serde_json::to_string_pretty(&meta)?;
+        let temporary = self.meta_path.with_extension("json.part");
+        fs::write(&temporary, payload).await?;
+        fs::rename(&temporary, &self.meta_path).await?;
+        self.meta = Some(meta);
         self.dirty = false;
         Ok(())
     }

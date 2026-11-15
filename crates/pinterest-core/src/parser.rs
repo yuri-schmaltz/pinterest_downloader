@@ -3,17 +3,24 @@
 use crate::models::{BoardMetadata, PinMetadata};
 use regex::Regex;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
 
+/// The scripts of the page that carry the data of Pinterest.
+///
+/// The real Pinterest puts the data of the profile in
+/// `__PWS_INITIAL_PROPS__` and the data of the board in `__PWS_DATA__`.
+/// Reading only one of them loses half of the page.
 static PWS_DATA_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?is)<script\b[^>]*\bid\s*=\s*["']__PWS_DATA__["'][^>]*>(.*?)</script\s*>"#)
-        .unwrap()
+    Regex::new(
+        r#"(?is)<script\b[^>]*\bid\s*=\s*["'](?:__PWS_DATA__|__PWS_INITIAL_PROPS__)["'][^>]*>(.*?)</script\s*>"#,
+    )
+    .unwrap()
 });
 
 pub fn extract_pws_metadata_from_html(html: &str) -> HashMap<String, PinMetadata> {
     let mut out = HashMap::new();
-    if let Some(caps) = PWS_DATA_RE.captures(html) {
+    for caps in PWS_DATA_RE.captures_iter(html) {
         if let Some(json_str) = caps.get(1) {
             if let Ok(val) = serde_json::from_str::<Value>(json_str.as_str()) {
                 walk_pws_data(&val, &mut out);
@@ -41,10 +48,7 @@ fn walk_pws_data(val: &Value, out: &mut HashMap<String, PinMetadata>) {
                 out.entry(meta.url.clone()).or_insert(meta);
             }
             for (key, v) in map {
-                if matches!(
-                    key.as_str(),
-                    "recommendations" | "related_pins" | "more_like_this"
-                ) {
+                if is_recommendation_key(key) {
                     continue;
                 }
                 if v.is_array() || v.is_object() {
@@ -54,6 +58,33 @@ fn walk_pws_data(val: &Value, out: &mut HashMap<String, PinMetadata>) {
         }
         _ => {}
     }
+}
+
+/// Whether a key of the Pinterest payload holds recommendations.
+///
+/// The payload of a board carries the pins of the board and, next to them,
+/// the pins that Pinterest suggests. The suggestions live under keys whose
+/// name says so, under many different names, and they are not part of the
+/// board.
+fn is_recommendation_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    if lower.contains("recommend")
+        || lower.contains("more_like_this")
+        || lower.contains("more-like-this")
+        || lower.contains("morelikethis")
+    {
+        return true;
+    }
+    // "related" and "suggested" as a word of the name, so that
+    // `feed_related_pins` and `pins_suggested` are caught as well.
+    lower
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|word| {
+            matches!(
+                word,
+                "related" | "suggest" | "suggests" | "suggested" | "suggestion" | "suggestions"
+            )
+        })
 }
 
 fn pin_from_pws_dict(d: &serde_json::Map<String, Value>) -> Option<PinMetadata> {
@@ -77,11 +108,12 @@ fn pin_from_pws_dict(d: &serde_json::Map<String, Value>) -> Option<PinMetadata> 
     if let Some(orig) = flat_orig {
         iurl = orig.get("url").and_then(|u| u.as_str());
     } else if let Some(dict) = imgs_dict {
-        let best = dict
-            .get("orig")
-            .or_else(|| dict.get("736x"))
-            .or_else(|| dict.get("474x"))
-            .and_then(|v| v.as_object());
+        // The real Pinterest serves `originals` (and `1200x`, `750x`),
+        // while the fixtures and the older payloads use `orig`. The bigger
+        // the source, the better the candidate.
+        let best = ["originals", "orig", "1200x", "750x", "736x", "474x"]
+            .iter()
+            .find_map(|size| dict.get(*size).and_then(|v| v.as_object()));
         iurl = best.and_then(|b| b.get("url")).and_then(|u| u.as_str());
     }
 
@@ -94,20 +126,43 @@ fn pin_from_pws_dict(d: &serde_json::Map<String, Value>) -> Option<PinMetadata> 
         .unwrap_or("")
         .to_string();
 
+    // The board the pin was saved to. The payload of a board carries the
+    // pins of the board and, next to them, the pins of the other boards
+    // that the page asked for.
+    let board_url = d
+        .get("board")
+        .and_then(|board| {
+            board
+                .as_object()
+                .and_then(|b| b.get("url"))
+                .or_else(|| board.get("url"))
+        })
+        .or_else(|| d.get("board_url"))
+        .or_else(|| d.get("boardUrl"))
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .filter(|value| !value.is_empty());
+
     Some(PinMetadata {
         id: pid.to_string(),
-        url: format!("https://www.pinterest.com/pin/{}/", pid),
+        url: format!("https://www.pinterest.com/pin/{pid}/"),
         image_url,
         title,
+        board_url,
     })
 }
 
 pub fn extract_boards_from_html(html: &str, username: &str) -> Vec<BoardMetadata> {
-    PWS_DATA_RE
-        .captures(html)
-        .and_then(|caps| serde_json::from_str::<Value>(&caps[1]).ok())
-        .map(|data| extract_boards_from_pws(&data, username))
-        .unwrap_or_default()
+    let mut boards: BTreeMap<String, BoardMetadata> = BTreeMap::new();
+    for caps in PWS_DATA_RE.captures_iter(html) {
+        let Ok(data) = serde_json::from_str::<Value>(&caps[1]) else {
+            continue;
+        };
+        for board in extract_boards_from_pws(&data, username) {
+            boards.entry(board.url.clone()).or_insert(board);
+        }
+    }
+    boards.into_values().collect()
 }
 
 pub fn extract_boards_from_pws(val: &Value, username: &str) -> Vec<BoardMetadata> {
@@ -228,6 +283,35 @@ mod tests {
         assert_eq!(boards[0].pin_count_int, Some(123));
     }
     #[test]
+    fn the_boards_of_the_profile_come_from_the_initial_props() {
+        // O Pinterest real guarda os quadros do perfil em
+        // `__PWS_INITIAL_PROPS__`, e nao em `__PWS_DATA__`. Ler so um dos
+        // dois deixa o perfil sem quadros.
+        let html = r#"<script id="__PWS_INITIAL_PROPS__" type="application/json">
+            {"props":{"initialReduxState":{"users":{"alice":{"created_boards":[
+                {"url":"/alice/art/","name":"Art","pin_count":12},
+                {"url":"/alice/photo/","name":"Photo","pin_count":34}
+            ]}}}}}
+        </script>"#;
+        let boards = extract_boards_from_html(html, "alice");
+        assert_eq!(boards.len(), 2, "{boards:?}");
+        assert_eq!(boards[0].title, "Art");
+        assert_eq!(boards[1].pin_count_int, Some(34));
+    }
+
+    #[test]
+    fn the_boards_of_both_scripts_are_together() {
+        let html = r#"<script id="__PWS_INITIAL_PROPS__" type="application/json">
+            {"url":"/alice/art/","name":"Art"}
+        </script>
+        <script id="__PWS_DATA__" type="application/json">
+            {"url":"/alice/photo/","name":"Photo"}
+        </script>"#;
+        let boards = extract_boards_from_html(html, "alice");
+        assert_eq!(boards.len(), 2, "{boards:?}");
+    }
+
+    #[test]
     fn metatags_preserve_signed_queries_decode_entities_and_prefer_video() {
         let html = r#"<meta content='https://cdn.example/image.jpg?x=1&amp;y=2' property='og:image'>
             <meta property="og:video:secure_url" content="https://cdn.example/video.mp4?sig=keep">"#;
@@ -239,6 +323,110 @@ mod tests {
                 "https://cdn.example/image.jpg?x=1&y=2"
             ]
         );
+    }
+
+    #[test]
+    fn every_name_of_a_recommendation_is_rejected() {
+        // The Pinterest changes the name of the suggestions over time. A
+        // payload that hides a recommendation under another name would put a
+        // pin of another board inside this one.
+        for key in [
+            "recommendations",
+            "more_recommendations",
+            "related_pins",
+            "related_pins_resource",
+            "feed_related_pins",
+            "more_like_this",
+            "moreLikeThis",
+            "suggested_pins",
+        ] {
+            assert!(is_recommendation_key(key), "{key} was not rejected");
+        }
+        for key in ["pins", "resource_response", "data", "images", "grid_title"] {
+            assert!(!is_recommendation_key(key), "{key} was rejected");
+        }
+    }
+
+    #[test]
+    fn a_recommendation_hidden_under_another_name_stays_out() {
+        let data = serde_json::json!({"data":[{"id":"101","images":{"orig":{"url":"/101.jpg"}}}],
+            "more_recommendations":[{"id":"999","images":{"orig":{"url":"/999.jpg"}}}]});
+        let mut ids: Vec<_> = extract_pin_metadata_from_value(&data)
+            .into_values()
+            .map(|pin| pin.id)
+            .collect();
+        ids.sort();
+        assert_eq!(ids, ["101"]);
+    }
+
+    #[test]
+    fn a_media_with_the_name_originals_is_recognized() {
+        // The real Pinterest serves `originals`, not `orig`. A pin whose
+        // only media is `originals` used to be dropped entirely.
+        let data = serde_json::json!({"data":[
+            {"id":"777","images":{"originals":{"url":"https://i.pinimg.com/originals/777.jpg"}}}
+        ]});
+        let pins = extract_pin_metadata_from_value(&data);
+        let found: Vec<_> = pins.values().collect();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "777");
+        assert_eq!(found[0].image_url, "https://i.pinimg.com/originals/777.jpg");
+    }
+
+    #[test]
+    fn the_largest_media_size_has_precedence() {
+        let data = serde_json::json!({"data":[
+            {"id":"778","images":{
+                "originals":{"url":"/originals.jpg"},
+                "750x":{"url":"/750.jpg"},
+                "736x":{"url":"/736.jpg"},
+                "474x":{"url":"/474.jpg"}
+            }}
+        ]});
+        let pins = extract_pin_metadata_from_value(&data);
+        let found: Vec<_> = pins.values().collect();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].image_url, "/originals.jpg");
+    }
+
+    #[test]
+    fn the_real_image_sizes_are_understood() {
+        // The shape observed in the sanitized capture of the real Pinterest.
+        let data = serde_json::json!({"data":[{
+            "id":"779",
+            "images":{
+                "1200x":{"url":"/1200.jpg","width":1200,"height":1200},
+                "474x":{"url":"/474.jpg"},
+                "736x":{"url":"/736.jpg"},
+                "750x":{"url":"/750.jpg"},
+                "originals":{"url":"/originals.jpg"}
+            }
+        }]});
+        let pins = extract_pin_metadata_from_value(&data);
+        let found: Vec<_> = pins.values().collect();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].image_url, "/originals.jpg");
+    }
+
+    #[test]
+    fn a_pin_that_names_its_board_keeps_that_name() {
+        // The page of a board asks for the feeds of other boards. The pin
+        // that says which board it belongs to is what makes it possible to
+        // leave the foreign pins out.
+        let data = serde_json::json!({"data":[
+            {"id":"801","images":{"orig":{"url":"/801.jpg"}},"board":{"url":"/alice/art/","name":"Art"}},
+            {"id":"802","images":{"orig":{"url":"/802.jpg"}},"board":{"url":"/alice/other/"}}
+        ]});
+        let pins = extract_pin_metadata_from_value(&data);
+        let found: Vec<_> = pins.values().collect();
+        assert_eq!(found.len(), 2);
+        let boards: Vec<_> = found
+            .iter()
+            .filter_map(|pin| pin.board_url.clone())
+            .collect();
+        assert_eq!(boards.len(), 2);
+        assert!(boards.contains(&"/alice/art/".to_owned()));
+        assert!(boards.contains(&"/alice/other/".to_owned()));
     }
 
     #[test]

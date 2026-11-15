@@ -131,6 +131,46 @@ class TestPinMetadataFromPayload:
         assert meta is not None
         assert meta["description"] == ""
 
+    def test_reconhece_a_midia_chamada_originals(self):
+        # O Pinterest real entrega as imagens com a chave "originals". Um pin
+        # cuja midia so exista nessa resolucao era descartado sem aviso.
+        meta = _pin_metadata_from_payload(
+            {"id": "777", "images": {"originals": {"url": "https://i.pinimg.com/originals/777.jpg"}}}
+        )
+        assert meta is not None
+        assert meta["image_url"] == "https://i.pinimg.com/originals/777.jpg"
+
+    def test_a_midia_maior_tem_a_precedencia(self):
+        # A ordem observada na captura real: originals, 1200x, 750x, 736x,
+        # 474x. A maior variante vence.
+        meta = _pin_metadata_from_payload(
+            {
+                "id": "778",
+                "images": {
+                    "originals": {"url": "originals.jpg"},
+                    "1200x": {"url": "1200.jpg"},
+                    "750x": {"url": "750.jpg"},
+                    "736x": {"url": "736.jpg"},
+                    "474x": {"url": "474.jpg"},
+                },
+            }
+        )
+        assert meta is not None
+        assert meta["image_url"] == "originals.jpg"
+
+    def test_usa_1200x_quando_nao_ha_originals(self):
+        meta = _pin_metadata_from_payload(
+            {"id": "1", "images": {"1200x": {"url": "1200.jpg"}, "736x": {"url": "736.jpg"}}}
+        )
+        assert meta is not None
+        assert meta["image_url"] == "1200.jpg"
+
+    def test_um_pin_somente_com_originals_ainda_e_reconhecido(self):
+        # Sem esta checagem o pin era descartado antes mesmo de a imagem ser
+        # procurada.
+        assert _looks_like_pin({"id": "777", "images": {"originals": {"url": "x.jpg"}}})
+        assert not _looks_like_pin({"id": "777", "images": {}})
+
 
 # ---------- 2. busca recursiva no GraphQL ----------
 

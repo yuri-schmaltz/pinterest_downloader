@@ -23,7 +23,7 @@ async fn captures_dynamic_json_reuses_session_and_reaps_browser() {
     let expected: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/fixtures/parity/expected.json")).unwrap();
     for _ in 0..2 {
-        let mut browser = BrowserSession::launch(
+        let browser = BrowserSession::launch(
             BrowserOptions {
                 no_sandbox: true,
                 ..Default::default()
@@ -85,7 +85,7 @@ async fn captures_dynamic_json_reuses_session_and_reaps_browser() {
                 .unwrap(),
             1
         );
-        assert!(!page.cookies().await.unwrap().is_empty());
+        assert_ne!(page.cookies().await.unwrap().len(), 0);
         page.close().await.unwrap();
         let second = browser.new_page().await.unwrap();
         second
@@ -115,7 +115,7 @@ async fn captures_dynamic_json_reuses_session_and_reaps_browser() {
 #[ignore = "requires Chromium; run explicitly or via browser CI job"]
 async fn cancellation_interrupts_javascript_and_still_closes_browser() {
     let cancel = CancellationToken::new();
-    let mut browser = BrowserSession::launch(
+    let browser = BrowserSession::launch(
         BrowserOptions {
             no_sandbox: true,
             ..Default::default()
@@ -153,7 +153,7 @@ async fn closing_a_browser_that_already_exited_succeeds() {
     // exited process is the outcome close() exists to guarantee. This failed
     // intermittently on a loaded runner, where the graceful window expired,
     // the process had already left, and the forced kill reported the error.
-    let mut browser = BrowserSession::launch(
+    let browser = BrowserSession::launch(
         BrowserOptions {
             no_sandbox: true,
             ..Default::default()
@@ -171,16 +171,14 @@ async fn closing_a_browser_that_already_exited_succeeds() {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
+            .is_ok_and(|status| status.success())
     } else {
         std::process::Command::new("kill")
             .args(["-9", &pid.to_string()])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
+            .is_ok_and(|status| status.success())
     };
     if !killed {
         // The platform refused to kill it; there is nothing to assert here.

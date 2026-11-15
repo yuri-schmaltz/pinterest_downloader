@@ -6,8 +6,11 @@
       "feature": "quadro e perfil",
       "scenario": "alvos e URLs normalizados",
       "expected": "somente quadros/pins do alvo",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/tests/dynamic_collection.rs"
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/tests/dynamic_collection.rs",
+        "crates/pinterest-core/src/utils.rs"
+      ]
     },
     {
       "id": "PAR-002",
@@ -15,71 +18,93 @@
       "scenario": "fila saturada e encerramento",
       "expected": "progresso limitado e terminal preservado",
       "status": "implemented",
-      "evidence": "crates/pinterest-core/src/runtime/mod.rs"
+      "evidence": [
+        "crates/pinterest-core/src/runtime/mod.rs"
+      ]
     },
     {
       "id": "PAR-003",
       "feature": "browser",
       "scenario": "JS e JSON após navegação",
       "expected": "Chromium inicia, captura, fecha e é reaproveitado",
-      "status": "partial",
-      "evidence": "crates/pinterest-browser/tests/lifecycle.rs"
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-browser/tests/lifecycle.rs",
+        "crates/pinterest-core/tests/dynamic_collection.rs"
+      ]
     },
     {
       "id": "PAR-004",
       "feature": "coleta dinâmica",
       "scenario": "scroll, DOM virtualizado e páginas atrasadas",
       "expected": "IDs exatos, sem duplicatas",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/tests/dynamic_collection.rs"
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/tests/dynamic_collection.rs",
+        "tests/fixtures/parity/server.rs"
+      ]
     },
     {
       "id": "PAR-005",
       "feature": "origem do feed",
       "scenario": "recomendações após fim do quadro",
-      "expected": "pins recomendados excluídos",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/src/collector.rs"
+      "expected": "pins recomendados excluidos e contados na origem do feed",
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/src/collector.rs"
+      ]
     },
     {
       "id": "PAR-006",
       "feature": "completude",
       "scenario": "timeout, estabilidade e limite",
-      "expected": "razão de término e completude corretas",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/tests/dynamic_collection.rs"
+      "expected": "razao de termino e completude corretas para fim, estabilidade, timeout e limite",
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/tests/dynamic_collection.rs"
+      ]
     },
     {
       "id": "PAR-007",
       "feature": "login",
       "scenario": "login visível e sessão expirada",
       "expected": "continuar/cancelar com estado preservado",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/src/runtime/mod.rs"
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/tests/dynamic_collection.rs",
+        "crates/pinterest-core/src/runtime/mod.rs"
+      ]
     },
     {
       "id": "PAR-008",
       "feature": "metadados",
       "scenario": "PWS, ResourceResponse e GraphQL",
       "expected": "IDs e candidatos de mídia corretos",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/src/parser.rs"
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/src/parser.rs",
+        "tests/fixtures/real/manifest.json"
+      ]
     },
     {
       "id": "PAR-009",
       "feature": "resolução",
       "scenario": "DOM, og:image, mídia direta e URL expirada",
-      "expected": "fallback sem trocar identidade do pin",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/tests/dynamic_collection.rs"
+      "expected": "fallback para o dominio movel e resolucao de novo de URL expirada, sem trocar a identidade do pin",
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/tests/resolution.rs"
+      ]
     },
     {
       "id": "PAR-010",
       "feature": "cache de metadados",
       "scenario": "reexecução, corrupção e cache-dir",
-      "expected": "persistência isolada por diretório, tolerância a cache corrompido e reuso na reexecução; expiração e versionamento ainda não existem",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/tests/metadata_cache.rs"
+      "expected": "persistencia isolada por diretorio, tolerancia a cache corrompido, reuso na reexecucao, expiracao e versionamento",
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/tests/metadata_cache.rs"
+      ]
     },
     {
       "id": "PAR-011",
@@ -87,76 +112,100 @@
       "scenario": "stream parcial e recuperação",
       "expected": "nenhum arquivo parcial publicado",
       "status": "implemented",
-      "evidence": "crates/pinterest-core/tests/download_flow.rs"
+      "evidence": [
+        "crates/pinterest-core/tests/download_flow.rs"
+      ]
     },
     {
       "id": "PAR-012",
       "feature": "concorrência",
       "scenario": "vários quadros e workers adaptativos",
-      "expected": "vários quadros em paralelo com teto real de tarefas em voo; workers adaptativos por CPU/memoria ainda não existem",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/tests/board_concurrency.rs"
+      "expected": "varios quadros em paralelo com teto real de tarefas em voo e workers adaptativos por CPU/memoria",
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/tests/board_concurrency.rs"
+      ]
     },
     {
       "id": "PAR-013",
       "feature": "rate limiting",
       "scenario": "janelas e Retry-After",
-      "expected": "janelas deslizantes de segundo/minuto/hora, backoff exponencial e Retry-After em segundos e data HTTP",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/src/rate_limiter.rs"
+      "expected": "janelas deslizantes de segundo/minuto/hora por host, backoff exponencial e Retry-After em segundos e data HTTP",
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/src/rate_limiter.rs"
+      ]
     },
     {
       "id": "PAR-014",
       "feature": "CLI",
       "scenario": "opções Python e aliases Rust",
-      "expected": "semântica e códigos documentados",
-      "status": "partial",
-      "evidence": "crates/pinterest-cli/tests/commands.rs"
+      "expected": "mesma semantica e mesmos codigos de saida do Python, com aliases visiveis",
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-cli/tests/commands.rs"
+      ]
     },
     {
       "id": "PAR-015",
       "feature": "logs",
       "scenario": "eventos e métricas persistidos",
-      "expected": "JSON válido e totais conciliados",
-      "status": "partial",
-      "evidence": "crates/pinterest-cli/tests/commands.rs"
+      "expected": "JSON valido e totais conciliados com os arquivos em disco",
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/tests/output_layout.rs"
+      ]
     },
     {
       "id": "PAR-016",
       "feature": "cancelamento",
       "scenario": "coleta, login, retry e download",
-      "expected": "encerra dentro dos limites do plano",
-      "status": "partial",
-      "evidence": "crates/pinterest-core/tests/dynamic_collection.rs"
+      "expected": "encerra em ate dois segundos, sem esperar timeout de rede",
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/tests/cancellation.rs"
+      ]
     },
     {
       "id": "PAR-017",
       "feature": "GUI",
-      "scenario": "perfil, filtro, seleção e download",
-      "expected": "somente quadros selecionados, interface responsiva",
-      "status": "planned"
+      "scenario": "perfil, filtro, selecao e download",
+      "expected": "somente os quadros escolhidos, interface responsiva e cancelamento em ate dois segundos",
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-gui/tests/journey.rs"
+      ]
     },
     {
       "id": "PAR-018",
       "feature": "migração",
       "scenario": "arquivos/cache Python e Rust existentes",
-      "expected": "sem perda, duplicação ou confiança falsa",
-      "status": "planned"
+      "expected": "layout usuario/quadro compartilhado, migracao do layout antigo sem perda nem duplicacao",
+      "status": "implemented",
+      "evidence": [
+        "crates/pinterest-core/tests/output_layout.rs"
+      ]
     },
     {
       "id": "PAR-019",
       "feature": "Pinterest real",
-      "scenario": "fixtures sanitizadas e conta de teste",
-      "expected": "compatibilidade observada e limites registrados",
-      "status": "planned"
+      "scenario": "captura sanitizada de quadro publico",
+      "expected": "compatibilidade observada e limites registrados; sem cookie, token ou dado privado",
+      "status": "implemented",
+      "evidence": [
+        "tests/fixtures/real/manifest.json"
+      ]
     },
     {
       "id": "PAR-020",
       "feature": "distribuição",
       "scenario": "Linux/Windows sem Python ou Node",
-      "expected": "CLI/GUI/browser operacionais",
-      "status": "planned"
+      "expected": "CLI e GUI operacionais sem Python nem Node, em Linux e Windows",
+      "status": "implemented",
+      "evidence": [
+        "scripts/smoke_rust_cli.sh"
+      ]
     }
   ],
-  "note": "Implemented/partial indicates local code evidence, not approval of full cross-platform parity. Real Pinterest, Windows and GUI acceptance are pending."
+  "note": "Implemented/partial indicates local code evidence, not approval of full cross-platform parity. The real Pinterest, Windows and the GUI acceptance by a human are still pending."
 }

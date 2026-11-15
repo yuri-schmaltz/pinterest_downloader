@@ -1,5 +1,6 @@
 //! Pinterest Core Library in Rust.
 
+pub mod adaptive;
 pub mod cache;
 pub mod downloader;
 pub mod models;

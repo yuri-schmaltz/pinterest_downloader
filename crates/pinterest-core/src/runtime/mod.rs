@@ -20,6 +20,12 @@ pub enum CompletionReason {
     Timeout,
     Snapshot,
     Cancelled,
+    /// The page hides the pins behind a login.
+    ///
+    /// The board is not empty: the visitor is not logged in. The reason
+    /// says that the collection stopped because of the login and not
+    /// because the feed ended.
+    Gated,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

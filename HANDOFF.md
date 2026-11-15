@@ -1,6 +1,6 @@
 # Handoff — Pinterest Pro Downloader
 
-Atualizado em **2026-11-06**. Versão declarada **2.0.5**.
+Atualizado em **2026-11-13**. Versão declarada **2.0.5**.
 
 ## Ponto de partida
 
@@ -56,11 +56,13 @@ O source precisa incluir `crates/`, `Cargo.toml`, `Cargo.lock`, o spec PyInstall
 - ZIP precisa ser recriado: atualizar um ZIP existente pode manter arquivos removidos.
 - O executável PyInstaller depende da árvore `_internal/`; distribua o diretório completo.
 - Arquivos `.part` não são cache. Downloads antigos não são verificados por checksum.
-- O cache de metadados (Python e Rust) usa `.pinterest_cache.json` e o mesmo formato nos dois lados; não tem expiração nem invalidação, e um arquivo corrompido é descartado em vez de recuperado.
+- O cache de metadados (Python e Rust) usa `.pinterest_cache.json` e o mesmo formato nos dois lados; a versão e a idade das entradas ficam em `.pinterest_cache_meta.json`, ao lado do mapa, e as entradas vencem depois de 30 dias por padrão (`--cache-ttl-days` nos dois lados). Um arquivo corrompido é descartado em vez de recuperado.
 - Os testes de navegador usam fixtures sintéticas e scripts injetados; não substituem teste da extensão instalada nem teste no Pinterest real.
+- O payload da rede pode chegar depois do marcador de fim do quadro: o navegador responde ao DOM antes de liberar o corpo do JSON. A coleta faz uma última janela de drenagem depois do marcador (até 5 rondas de silêncio, no máximo 20) e a captura do corpo da resposta repete a pergunta ao navegador até 4 vezes. Sem isso, um quadro podia ser reportado como vazio mesmo com os pins no navegador.
+- A descoberta de quadros foi validada no Pinterest real (perfil `yuri_schmaltz`): os quatro quadros do perfil aparecem com nome e contagem de pins. O site real guarda os dados do perfil em `__PWS_INITIAL_PROPS__` (e não em `__PWS_DATA__`), responde pelo domínio do país (`br.pinterest.com`) e mostra o nome do quadro junto da contagem de pins e do tempo do último pin; o parser e a coleta ledem com as três coisas.
 - O XPI ainda usa o manifest Chrome, sem assinatura nem validação Firefox.
 - CRLF continuava no índice do commit de origem, apesar de `.gitattributes` exigir LF. O checkout foi normalizado; a mudança aparecerá no diff até ser commitada.
 
 ## Próximos trabalhos
 
-Capturar fixtures reais, validar coleta no Pinterest, implementar paginação/coleta dinâmica Rust, cache de metadados com expiração, paralelismo entre quadros e workers adaptativos no Rust, GUI Rust, testar artefatos em Windows/Linux e preparar manifests/assinatura das lojas. Os detalhes e limites de cobertura estão em [TEST_INFRA.md](TEST_INFRA.md).
+Capturar fixtures reais, validar coleta no Pinterest, paginar a coleta dinâmica Rust, versionar o cache de metadados, testar artefatos em Windows/Linux e preparar manifests/assinatura das lojas. A coleta de um quadro bloqueado por login (`gated`) para assim que vê o bloqueio, em vez de esperar o prazo inteiro para dizer que o quadro está vazio. A interface Rust em egui já cobre perfil, seleção com capas, destino, progresso, cancelamento e login, e usa a mesma paleta da interface PyQt6: barra de passos numerada, cartão central com a largura da janela, tira de opções na barra de status (entre o card de quadros selecionados e o botão Voltar; as contagens de quadros ficam na área de visualização), rodapé com o resumo da etapa e estados vazios que explicam o que aconteceu. O desenho é conferido sem tela por 22 testes em `crates/pinterest-gui/tests/interface.rs` (grade de capas com a capa escalada sem distorção, as contagens de quadros dentro da área de visualização, nenhuma tela invade o rodapé, `Enter` no campo do perfil, tela vazia, filtro que esconde tudo, o fundo e a borda dos campos, o contraste do texto do endereço, a altura do campo de busca, o card de ajustes na barra de status, o campo do perfil ocupando toda a barra, a mesma altura de todos os controles da barra de status, a mensagem de erro dentro do card do passo e os cantos de baixo da janela arredondados). A interface desenha com o OpenGL e, quando a máquina não tem OpenGL 2.0 (um Windows sem driver de vídeo), passa para o renderizador da wgpu. Os detalhes e limites de cobertura estão em [TEST_INFRA.md](TEST_INFRA.md).

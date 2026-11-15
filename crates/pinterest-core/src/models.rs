@@ -37,6 +37,23 @@ pub enum PinterestError {
     Extraction(String),
 }
 
+impl PinterestError {
+    /// Whether the failure means the URL of the media is no longer valid.
+    ///
+    /// A signed URL that expired answers with 403, 404 or 410. Trying it
+    /// again only wastes time: the page of the pin has to say where the
+    /// media lives now.
+    pub fn is_expired_media(&self) -> bool {
+        match self {
+            Self::Network(error) => matches!(
+                error.status().map(|status| status.as_u16()),
+                Some(403) | Some(404) | Some(410)
+            ),
+            _ => false,
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, PinterestError>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -54,6 +71,13 @@ pub struct PinMetadata {
     pub url: String,
     pub image_url: String,
     pub title: String,
+    /// The board the pin was saved to, when the payload says so.
+    ///
+    /// A board page also asks for the feeds of other boards. The pin that
+    /// comes from another board is not part of the target, and the payload
+    /// is what says so.
+    #[serde(default)]
+    pub board_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +95,10 @@ pub struct DownloadOptions {
     pub cache_dir: Option<PathBuf>,
     /// Whether the pin metadata cache is read and written.
     pub metadata_cache: bool,
+    /// Whether the number of tasks in flight follows the machine load.
+    pub adaptive: bool,
+    /// How long the pin metadata cache stays usable. Zero never expires it.
+    pub cache_ttl: std::time::Duration,
 }
 
 impl Default for DownloadOptions {
@@ -84,6 +112,8 @@ impl Default for DownloadOptions {
             boards_workers: 1,
             cache_dir: None,
             metadata_cache: true,
+            adaptive: false,
+            cache_ttl: crate::cache::DEFAULT_TTL,
         }
     }
 }

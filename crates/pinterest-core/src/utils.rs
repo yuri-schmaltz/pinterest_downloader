@@ -1,7 +1,9 @@
 //! URL helpers, normalization, filename sanitization and pin count parsing.
 
 use regex::Regex;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use unicode_normalization::UnicodeNormalization;
 
 pub static USER_BOARDS_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -52,7 +54,7 @@ pub fn parse_pin_count(raw: &str) -> Option<u64> {
     };
 
     let multiplier = match multiplier_str {
-        Some("mil") | Some("k") => 1_000.0,
+        Some("mil" | "k") => 1_000.0,
         Some("m") => 1_000_000.0,
         _ => 1.0,
     };
@@ -62,6 +64,88 @@ pub fn parse_pin_count(raw: &str) -> Option<u64> {
 
 pub fn safe_name(name: &str) -> String {
     sanitize_filename::sanitize(name)
+}
+
+/// Percent-decodes a URL component the way the Python tool does.
+///
+/// The Python implementation runs `urllib.parse.unquote` on the path
+/// component before turning it into a directory name, so the Rust side has to
+/// decode it too or the two tools would write to different directories.
+pub fn percent_decode(value: &str) -> String {
+    percent_encoding::percent_decode_str(value)
+        .decode_utf8_lossy()
+        .into_owned()
+}
+
+/// Builds a directory component the same way the Python `slugify` does.
+///
+/// Unicode is preserved, whitespace is collapsed and path separators become
+/// the fullwidth slash, so a board named "Casa / Jardim" lands in the same
+/// directory no matter which tool downloaded it.
+pub fn slugify(name: &str) -> String {
+    let decoded = percent_decode(name);
+    let normalized: String = decoded.nfc().collect();
+    let mut out = String::with_capacity(normalized.len());
+    let mut pending_space = false;
+    for character in normalized.chars() {
+        let character = match character {
+            '\u{00a0}' => ' ',
+            '\n' | '\r' | '\t' => ' ',
+            '\u{0000}' => continue,
+            other => other,
+        };
+        if character.is_whitespace() {
+            // Collapse any run of whitespace into a single space, and drop the
+            // leading one, the same way the Python regular expression does.
+            pending_space = !out.is_empty();
+            continue;
+        }
+        if pending_space {
+            out.push(' ');
+            pending_space = false;
+        }
+        out.push(character);
+    }
+    let out = out.replace('/', "\u{ff0f}");
+    if out.is_empty() {
+        "sem_nome".to_string()
+    } else {
+        out
+    }
+}
+
+/// The user and the board of a board URL, already decoded.
+pub fn split_user_board(url: &url::Url) -> (String, String) {
+    let parts: Vec<_> = url
+        .path_segments()
+        .into_iter()
+        .flatten()
+        .filter(|part| !part.is_empty())
+        .collect();
+    let user = parts
+        .first()
+        .map(|part| percent_decode(part))
+        .unwrap_or_default();
+    let board = parts
+        .get(1)
+        .map(|part| percent_decode(part))
+        .unwrap_or_default();
+    (user, board)
+}
+
+/// Where the board files live, in the layout shared with the Python tool:
+/// `<out_root>/<user>/<board>`.
+pub fn board_output_dir(out_root: &Path, board_url: &url::Url) -> PathBuf {
+    let (user, board) = split_user_board(board_url);
+    out_root.join(slugify(&user)).join(slugify(&board))
+}
+
+/// Where earlier Rust builds wrote the same board: a single directory named
+/// `<user>_<board>`. The files are still valid and must not be downloaded
+/// again, so the engine looks here before writing anything new.
+pub fn legacy_board_output_dir(out_root: &Path, board_url: &url::Url) -> PathBuf {
+    let (user, board) = split_user_board(board_url);
+    out_root.join(safe_name(&format!("{user}_{board}")))
 }
 
 pub fn detect_media_extension(content_type: &str) -> &'static str {
@@ -108,5 +192,63 @@ mod tests {
         assert_eq!(detect_media_extension("image/png"), ".png");
         assert_eq!(detect_media_extension("video/mp4"), ".mp4");
         assert_eq!(detect_media_extension("image/jpeg"), ".jpg");
+    }
+
+    #[test]
+    fn slugify_matches_the_python_behaviour() {
+        // Unicode is preserved, whitespace collapses and slashes become the
+        // fullwidth slash instead of creating a directory.
+        assert_eq!(slugify("  Casa \n / Jardim "), "Casa ／ Jardim");
+        assert_eq!(slugify("Decoração"), "Decoração");
+        assert_eq!(slugify(""), "sem_nome");
+        assert_eq!(slugify("///"), "／／／");
+        assert_eq!(slugify("a\u{00a0}b"), "a b");
+        // The Python tool percent-decodes before it slugifies.
+        assert_eq!(slugify("casa%20e"), "casa e");
+    }
+
+    #[test]
+    fn the_board_layout_is_shared_with_the_python_tool() {
+        let url = url::Url::parse("https://www.pinterest.com/alice/decoracao/").unwrap();
+        let root = Path::new("/tmp/downloads");
+        assert_eq!(
+            board_output_dir(root, &url),
+            Path::new("/tmp/downloads/alice/decoracao")
+        );
+        // The legacy Rust layout was a single directory with an underscore.
+        assert_eq!(
+            legacy_board_output_dir(root, &url),
+            Path::new("/tmp/downloads/alice_decoracao")
+        );
+    }
+
+    #[test]
+    fn percent_encoded_names_land_in_the_same_directory_as_python() {
+        let url = url::Url::parse("https://www.pinterest.com/alice/casa%20e%20jardim/").unwrap();
+        assert_eq!(
+            board_output_dir(Path::new("/tmp"), &url),
+            Path::new("/tmp/alice/casa e jardim")
+        );
+    }
+
+    #[test]
+    fn the_same_board_written_in_different_ways_lands_in_the_same_directory() {
+        // A URL do alvo chega de varias formas: com barra final, com codigo
+        // de convite, com ancora. Todas tem de apontar para o mesmo quadro
+        // e para o mesmo diretorio.
+        let root = Path::new("/tmp/downloads");
+        for raw in [
+            "https://www.pinterest.com/alice/decoracao/",
+            "https://www.pinterest.com/alice/decoracao",
+            "https://www.pinterest.com/alice/decoracao/?invite_code=abc",
+            "https://www.pinterest.com/alice/decoracao/#anchor",
+        ] {
+            let url = url::Url::parse(&normalize_url(raw)).unwrap();
+            assert_eq!(
+                board_output_dir(root, &url),
+                Path::new("/tmp/downloads/alice/decoracao"),
+                "the target {raw} landed somewhere else"
+            );
+        }
     }
 }
